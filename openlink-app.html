@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenLink - Complete Platform</title>
+    <script src="api-connector.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: 0 auto; 
+            background: white; 
+            border-radius: 16px; 
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 { color: #667eea; margin-bottom: 20px; }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 16px;
+            color: #666;
+            transition: all 0.3s;
+        }
+        .tab.active {
+            color: #667eea;
+            border-bottom: 3px solid #667eea;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .btn {
+            background: #667eea;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin: 5px;
+        }
+        .btn:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+        .form-group {
+            margin: 15px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+        input, select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+        }
+        .status-box {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        .record-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌐 OpenLink Platform</h1>
+        <p id="userStatus">Not logged in</p>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('auth')">Authentication</button>
+            <button class="tab" onclick="switchTab('dyndns')">DynDNS</button>
+            <button class="tab" onclick="switchTab('files')">File Sharing</button>
+            <button class="tab" onclick="switchTab('remote')">Remote Desktop</button>
+            <button class="tab" onclick="switchTab('admin')">Admin</button>
+        </div>
+
+        <!-- Authentication Tab -->
+        <div id="auth" class="tab-content active">
+            <h2>Login / Register</h2>
+            <div class="form-group">
+                <label>Email or Username</label>
+                <input type="text" id="auth-email" placeholder="email@example.com">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="auth-password">
+            </div>
+            <button class="btn" onclick="login()">Login</button>
+            <button class="btn" onclick="showRegister()">Register</button>
+            <button class="btn" onclick="logout()">Logout</button>
+        </div>
+
+        <!-- DynDNS Tab -->
+        <div id="dyndns" class="tab-content">
+            <h2>Dynamic DNS Management</h2>
+            <div class="status-box">
+                <strong>Your External IP:</strong> <span id="external-ip">Loading...</span>
+            </div>
+            <div class="form-group">
+                <label>Subdomain</label>
+                <input type="text" id="dyndns-subdomain" placeholder="home">
+            </div>
+            <div class="form-group">
+                <label>Domain</label>
+                <select id="dyndns-domain">
+                    <option value="tappedin.fm">tappedin.fm</option>
+                    <option value="raywonderis.me">raywonderis.me</option>
+                    <option value="walterharper.com">walterharper.com</option>
+                    <option value="devinecreations.net">devinecreations.net</option>
+                    <option value="devine-creations.com">devine-creations.com</option>
+                </select>
+            </div>
+            <button class="btn" onclick="createDynDNS()">Create Record</button>
+            <button class="btn" onclick="loadDynDNSRecords()">Refresh List</button>
+            <div id="dyndns-records"></div>
+        </div>
+
+        <!-- File Sharing Tab -->
+        <div id="files" class="tab-content">
+            <h2>File Sharing</h2>
+            <p>Upload and share files securely</p>
+            <input type="file" id="file-upload">
+            <button class="btn" onclick="uploadFile()">Upload File</button>
+            <div id="file-list"></div>
+        </div>
+
+        <!-- Remote Desktop Tab -->
+        <div id="remote" class="tab-content">
+            <h2>Remote Desktop</h2>
+            <p>Connect to remote systems</p>
+            <div class="form-group">
+                <label>Target User ID</label>
+                <input type="text" id="remote-target" placeholder="user_abc123">
+            </div>
+            <button class="btn" onclick="connectRemote()">Connect</button>
+            <div id="remote-status"></div>
+        </div>
+
+        <!-- Admin Tab -->
+        <div id="admin" class="tab-content">
+            <h2>Administration</h2>
+            <h3>Service Management</h3>
+            <button class="btn" onclick="restartService('openlink')">Restart OpenLink</button>
+            <button class="btn" onclick="restartService('hubnode')">Restart HubNode</button>
+            <button class="btn" onclick="restartService('both')">Restart Both</button>
+            <button class="btn" onclick="getServiceStatus()">Check Status</button>
+            
+            <h3 style="margin-top: 30px;">Statistics</h3>
+            <button class="btn" onclick="getSystemStats()">System Stats</button>
+            <button class="btn" onclick="getAccountStats()">Account Stats</button>
+            <button class="btn" onclick="backupDatabases()">Backup Databases</button>
+            <div id="admin-output"></div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize on load
+        window.onload = async () => {
+            updateUserStatus();
+            if (OpenLink.isAuthenticated()) {
+                const ipData = await OpenLink.getMyIP();
+                document.getElementById('external-ip').textContent = ipData.ip;
+            }
+        };
+
+        function updateUserStatus() {
+            const user = OpenLink.getCurrentUser();
+            document.getElementById('userStatus').textContent = user 
+                ? `Logged in as: ${user.username} (${user.email})`
+                : 'Not logged in';
+        }
+
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById(tab).classList.add('active');
+        }
+
+        async function login() {
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-password').value;
+            
+            const result = await OpenLink.login(email, password);
+            alert(result.success ? 'Login successful!' : result.error);
+            updateUserStatus();
+        }
+
+        async function logout() {
+            OpenLink.logout();
+            updateUserStatus();
+            alert('Logged out successfully');
+        }
+
+        async function createDynDNS() {
+            const subdomain = document.getElementById('dyndns-subdomain').value;
+            const domain = document.getElementById('dyndns-domain').value;
+            
+            const result = await OpenLink.createDynDNS(subdomain, domain);
+            alert(result.message || result.error);
+            loadDynDNSRecords();
+        }
+
+        async function loadDynDNSRecords() {
+            const result = await OpenLink.listDynDNS();
+            const html = result.records.map(r => 
+                `<div class="record-card">
+                    <strong>${r.fullDomain}</strong> → ${r.ip}
+                    <button class="btn" onclick="deleteDynDNS('${r.subdomain}', '${r.domain}')">Delete</button>
+                </div>`
+            ).join('');
+            document.getElementById('dyndns-records').innerHTML = html;
+        }
+
+        async function deleteDynDNS(subdomain, domain) {
+            if (!confirm(`Delete ${subdomain}.${domain}?`)) return;
+            const result = await OpenLink.deleteDynDNS(subdomain, domain);
+            alert(result.message);
+            loadDynDNSRecords();
+        }
+
+        async function uploadFile() {
+            const fileInput = document.getElementById('file-upload');
+            const file = fileInput.files[0];
+            if (!file) return alert('Please select a file');
+
+            const result = await OpenLink.uploadFile(file);
+            alert(result.message || result.error);
+        }
+
+        async function connectRemote() {
+            const target = document.getElementById('remote-target').value;
+            const ws = OpenLink.connectRemoteDesktop(target);
+            ws.onopen = () => {
+                document.getElementById('remote-status').textContent = 'Connected!';
+            };
+        }
+
+        async function restartService(service) {
+            const result = await OpenLink.restartService(service);
+            alert(result.message || result.error);
+        }
+
+        async function getServiceStatus() {
+            const result = await OpenLink.getServiceStatus();
+            const html = Object.entries(result.status).map(([s, status]) => 
+                `<div>${s}: <strong>${status}</strong></div>`
+            ).join('');
+            document.getElementById('admin-output').innerHTML = html;
+        }
+
+        async function getSystemStats() {
+            const result = await OpenLink.getSystemStats();
+            document.getElementById('admin-output').innerHTML = `<pre>${JSON.stringify(result, null, 2)}</pre>`;
+        }
+
+        async function getAccountStats() {
+            const result = await OpenLink.getAccountStats();
+            document.getElementById('admin-output').innerHTML = `<pre>${JSON.stringify(result, null, 2)}</pre>`;
+        }
+
+        async function backupDatabases() {
+            const result = await OpenLink.backupDatabases();
+            alert(result.message || result.error);
+        }
+    </script>
+</body>
+</html>

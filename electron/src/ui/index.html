@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https:; media-src 'self' blob:;">
+    <title>OpenLink - Remote Desktop</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="accessible-dropdown.css">
+</head>
+<body>
+    <!-- Skip link for accessibility -->
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <!-- Live region for screen readers -->
+    <div id="sr-announcer" aria-live="polite" aria-atomic="true" class="sr-only"></div>
+
+    <!-- Header with integrated toolbar -->
+    <header class="app-header" role="banner">
+        <div class="header-left">
+            <h1 class="app-title">OpenLink</h1>
+            <span class="app-version" id="app-version"></span>
+        </div>
+        <!-- Main navigation tabs in header toolbar -->
+        <nav class="toolbar-tabs" role="tablist" aria-label="Main navigation">
+            <button id="tab-connect" class="toolbar-tab active" role="tab" aria-selected="true" aria-controls="panel-connect">Connect</button>
+            <button id="tab-host" class="toolbar-tab" role="tab" aria-selected="false" aria-controls="panel-host">Host</button>
+            <button id="tab-settings" class="toolbar-tab" role="tab" aria-selected="false" aria-controls="panel-settings">Settings</button>
+            <button id="tab-servers" class="toolbar-tab" role="tab" aria-selected="false" aria-controls="panel-servers">Servers</button>
+            <button id="tab-help" class="toolbar-tab" role="tab" aria-selected="false" aria-controls="panel-help">Help</button>
+        </nav>
+        <div class="header-right">
+            <button id="minimize-btn" class="header-btn" aria-label="Minimize to tray">
+                <span class="icon">&#8211;</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main id="main-content" class="main-content">
+
+        <!-- Connect Panel -->
+        <section id="panel-connect" class="panel active" role="tabpanel" aria-labelledby="tab-connect">
+            <h2>Connect to Remote Computer</h2>
+
+            <div class="connect-form">
+                <div class="form-group">
+                    <label for="session-id-input">Session ID or Link</label>
+                    <input type="text" id="session-id-input" placeholder="Enter session ID or OpenLink URL" autocomplete="off">
+                </div>
+
+                <div class="form-group">
+                    <label for="server-select">Server</label>
+                    <select id="server-select" aria-describedby="server-select-help" aria-label="Select relay server">
+                        <option value="wss://openlink.devinecreations.net/ws" selected>Devine Creations (Primary)</option>
+                        <option value="wss://openlink.raywonderis.me/ws">RayWonder</option>
+                        <option value="random">Random Server (Auto-select)</option>
+                        <option value="local">Local (Direct Connection)</option>
+                        <!-- Additional servers populated dynamically -->
+                    </select>
+                    <p class="help-text" id="server-select-help">Select a relay server or use direct local connection</p>
+                </div>
+
+                <div class="button-group">
+                    <button id="connect-btn" class="btn primary">Connect</button>
+                    <button id="paste-link-btn" class="btn secondary">Paste from Clipboard</button>
+                </div>
+            </div>
+
+            <!-- Your Network Info -->
+            <div class="network-info-section">
+                <h3>Your Network Info</h3>
+                <div class="network-display">
+                    <div class="info-row">
+                        <span class="info-label">Local IP:</span>
+                        <code id="local-ip">Detecting...</code>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Public IP:</span>
+                        <code id="public-ip">Detecting...</code>
+                        <button id="copy-public-ip" class="btn secondary small">Copy</button>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Server Detected:</span>
+                        <code id="server-detected-ip">Checking...</code>
+                    </div>
+                </div>
+                <p class="help-text">Use direct IP for local network connections, or shareable links for remote access</p>
+            </div>
+
+            <!-- Your OpenLink Key ID -->
+            <div class="key-id-section">
+                <h3>Your OpenLink Key</h3>
+                <div class="key-display">
+                    <code id="your-key-id">Loading...</code>
+                    <button id="copy-key-id" class="btn secondary small">Copy</button>
+                </div>
+                <p class="help-text">Share this key with others to let them connect to you via openlink.* URLs</p>
+            </div>
+
+            <div class="quick-connect">
+                <h3>Recent Connections</h3>
+                <ul id="recent-connections" class="connection-list" aria-label="Recent connections">
+                    <!-- Populated dynamically -->
+                </ul>
+            </div>
+        </section>
+
+        <!-- Host Panel -->
+        <section id="panel-host" class="panel" role="tabpanel" aria-labelledby="tab-host" hidden>
+            <h2>Host a Session</h2>
+
+            <!-- System & Session Info Display -->
+            <div class="system-info-section" id="system-info-display">
+                <h3>System Information</h3>
+                <div class="system-info-grid">
+                    <div class="info-row">
+                        <span class="info-label">Platform:</span>
+                        <code id="sys-platform">Detecting...</code>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">OS Version:</span>
+                        <code id="sys-release">Detecting...</code>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Architecture:</span>
+                        <code id="sys-arch">Detecting...</code>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Hostname:</span>
+                        <code id="sys-hostname">Detecting...</code>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Local IP:</span>
+                        <code id="host-local-ip">Detecting...</code>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Public IP:</span>
+                        <code id="host-public-ip">Detecting...</code>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Tailscale IP:</span>
+                        <code id="host-tailscale-ip">Checking...</code>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Screen:</span>
+                        <code id="sys-screen">Detecting...</code>
+                    </div>
+                </div>
+
+                <!-- Current OpenLink URL Info -->
+                <div class="current-link-info" id="current-link-info" hidden>
+                    <h4>Active OpenLink</h4>
+                    <div class="info-row">
+                        <span class="info-label">URL:</span>
+                        <code id="current-openlink-url">None</code>
+                        <button id="copy-current-link" class="btn secondary small">Copy</button>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Type:</span>
+                        <span id="current-link-type" class="badge">--</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Expires:</span>
+                        <code id="current-link-expiry">--</code>
+                    </div>
+                </div>
+
+                <!-- Account Status -->
+                <div class="account-status-section">
+                    <h4>Account Status</h4>
+                    <div class="info-row">
+                        <span class="info-label">Plan:</span>
+                        <span id="account-plan" class="badge badge-free">Free</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">eCripto:</span>
+                        <span id="ecripto-status">Not Connected</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="host-status" id="host-status">
+                <p>Your session ID: <strong id="host-session-id">Not started</strong></p>
+                <div class="button-group">
+                    <button id="copy-session-id" class="btn secondary" disabled>Copy Session ID</button>
+                    <select id="direct-ip-select" class="btn secondary" disabled>
+                        <option value="">Copy Direct IP...</option>
+                        <option value="local">Local Network</option>
+                        <option value="tailscale">Tailscale</option>
+                        <option value="public">Public IP</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="host-controls">
+                <button id="start-hosting-btn" class="btn primary">Start Hosting</button>
+                <button id="stop-hosting-btn" class="btn danger" disabled>Stop Hosting</button>
+                <button id="remove-link-btn" class="btn secondary" disabled title="Remove this device link from the server">Remove Link</button>
+            </div>
+
+            <!-- Shareable Link Generator -->
+            <div class="shareable-link-section" id="shareable-link-section" hidden>
+                <h3>Create Shareable Link</h3>
+                <div class="form-group">
+                    <label for="link-type">Link Type</label>
+                    <select id="link-type">
+                        <option value="temporary">Temporary (expires when session ends)</option>
+                        <option value="expiring">Expiring (set duration)</option>
+                        <option value="changeable">Changeable (regenerate anytime)</option>
+                        <option value="permanent">Permanent (requires eCripto)</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="expiry-settings" hidden>
+                    <label for="link-expiry">Expires After</label>
+                    <select id="link-expiry">
+                        <option value="1h">1 Hour</option>
+                        <option value="24h">24 Hours</option>
+                        <option value="7d">7 Days</option>
+                        <option value="30d">30 Days</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="permanent-link-info" hidden>
+                    <p class="ecripto-info">
+                        <strong>Permanent links require eCripto</strong><br>
+                        Cost: <span id="permanent-link-cost">0.50</span> ECR<br>
+                        <span id="ecripto-wallet-status">Checking eCripto wallet...</span>
+                    </p>
+                    <button id="generate-ecripto-wallet" class="btn secondary" hidden>Generate eCripto Wallet</button>
+                </div>
+
+                <div class="form-group">
+                    <label for="link-domain">Domain (Optional)</label>
+                    <div class="domain-select-row">
+                        <select id="link-domain">
+                            <option value="openlink.tappedin.fm" selected>openlink.tappedin.fm (Default)</option>
+                            <option value="openlink.raywonderis.me">openlink.raywonderis.me</option>
+                            <option value="openlink.devinecreations.net">openlink.devinecreations.net</option>
+                            <option value="openlink.devine-creations.com">openlink.devine-creations.com</option>
+                            <option value="openlink.walterharper.com">openlink.walterharper.com</option>
+                            <option value="openlink.tetoeehoward.com">openlink.tetoeehoward.com</option>
+                        </select>
+                        <button id="remove-custom-domain-btn" class="btn small danger" title="Remove selected custom domain" hidden>Remove</button>
+                    </div>
+                </div>
+                <div class="form-group custom-domain-add">
+                    <label for="custom-domain-input">Add Custom Domain</label>
+                    <div class="domain-add-row">
+                        <input type="text" id="custom-domain-input" placeholder="your-domain.com">
+                        <button id="add-custom-domain-btn" class="btn small primary">Add</button>
+                    </div>
+                    <p class="help-text">Add your own domain for shareable links (must have OpenLink DNS configured)</p>
+                </div>
+
+                <!-- Active Server URL Display -->
+                <div class="form-group" id="active-url-display">
+                    <label for="active-connection-url">Connection URL (copy & share)</label>
+                    <div class="url-display-row">
+                        <input type="text" id="active-connection-url" readonly placeholder="Start hosting to generate URL">
+                        <button id="copy-connection-url" class="btn secondary">Copy</button>
+                    </div>
+                    <div class="url-status-row">
+                        <span id="link-status-indicator" class="link-status"></span>
+                    </div>
+                    <p class="help-text">Share this HTTPS URL - works in any browser</p>
+                </div>
+
+                <button id="create-link-btn" class="btn primary" disabled>Create OpenLink</button>
+
+                <div class="generated-link-display" id="generated-link-container" hidden>
+                    <label>Your Shareable Link:</label>
+                    <div class="link-display">
+                        <input type="text" id="generated-link" readonly>
+                        <button id="copy-link-btn" class="btn secondary">Copy</button>
+                    </div>
+                    <p class="link-info" id="link-info"></p>
+                </div>
+            </div>
+
+            <div class="quick-connect">
+                <h3>Recent Connections</h3>
+                <ul id="host-recent-connections" class="connection-list" aria-label="Recent connections to this computer">
+                    <!-- Populated dynamically -->
+                </ul>
+            </div>
+        </section>
+
+        <!-- Settings Panel -->
+        <section id="panel-settings" class="panel" role="tabpanel" aria-labelledby="tab-settings" hidden>
+            <h2>Settings</h2>
+            <p class="settings-note">All settings auto-save when changed.</p>
+
+            <h3>Wallet & Payments</h3>
+
+            <div class="form-group">
+                <label for="wallet-network" id="wallet-network-label">Blockchain Network</label>
+                <span class="setting-value" id="wallet-network-value" aria-live="polite">eCripto Network</span>
+                <select id="wallet-network" aria-labelledby="wallet-network-label" aria-describedby="wallet-network-desc">
+                    <option value="ecripto">eCripto Network</option>
+                    <option value="ethereum">Ethereum Mainnet</option>
+                    <option value="polygon">Polygon</option>
+                    <option value="bsc">Binance Smart Chain</option>
+                    <option value="local">Local Network</option>
+                </select>
+                <p class="help-text" id="wallet-network-desc">Blockchain network for sending and receiving cryptocurrency payments.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="wallet-address" id="wallet-address-label">Primary Wallet Address</label>
+                <span class="setting-value" id="wallet-address-value" aria-live="polite">Not set</span>
+                <input type="text" id="wallet-address" placeholder="Enter your wallet address" aria-labelledby="wallet-address-label" aria-describedby="wallet-address-desc">
+                <p class="help-text" id="wallet-address-desc">Your cryptocurrency wallet address for receiving payments when helping others.</p>
+            </div>
+
+            <div class="wallet-actions button-group">
+                <button id="detect-wallets-btn" class="btn secondary">Detect Wallets</button>
+                <button id="scan-network-btn" class="btn secondary">Scan Network</button>
+                <button id="connect-browser-wallet-btn" class="btn secondary">Browser Wallet</button>
+            </div>
+
+            <div class="browser-wallet-info">
+                <details>
+                    <summary class="help-text"><strong>Supported Wallet Browsers &amp; Apps</strong></summary>
+                    <div class="browser-list-content">
+                        <p class="help-text"><strong>Ethereum/ERC-20 (ETH, USDT, etc.):</strong></p>
+                        <ul class="browser-list">
+                            <li>Chrome/Brave: MetaMask, Coinbase Wallet, Trust Wallet</li>
+                            <li>Firefox: MetaMask</li>
+                            <li>Edge: MetaMask, Coinbase Wallet</li>
+                            <li>Safari: Limited - use desktop wallet apps</li>
+                        </ul>
+                        <p class="help-text"><strong>Bitcoin (BTC):</strong></p>
+                        <ul class="browser-list">
+                            <li>Desktop: Electrum, Sparrow, Bitcoin Core</li>
+                            <li>Hardware: Ledger, Trezor, ColdCard</li>
+                            <li>Browser: Xverse (Chrome), Leather Wallet</li>
+                        </ul>
+                        <p class="help-text"><strong>eCripto Network:</strong></p>
+                        <ul class="browser-list">
+                            <li>Native support via eCripto desktop app</li>
+                            <li>Browser extension (Chrome, Firefox, Edge)</li>
+                            <li>Mobile: eCripto Wallet app (iOS/Android)</li>
+                        </ul>
+                        <p class="help-text" id="wallet-browser-status"></p>
+                    </div>
+                </details>
+            </div>
+
+            <div class="form-group" id="detected-wallets-section" hidden>
+                <label>Detected Wallets</label>
+                <div id="detected-wallets-list" class="wallets-list"></div>
+            </div>
+
+            <div class="form-group">
+                <label>Saved Wallets</label>
+                <div id="saved-wallets-list" class="wallets-list">
+                    <p class="help-text">No saved wallets yet</p>
+                </div>
+                <div class="add-wallet-form">
+                    <input type="text" id="new-wallet-address" placeholder="Wallet address">
+                    <input type="text" id="new-wallet-label" placeholder="Label (optional)">
+                    <button id="add-wallet-btn" class="btn secondary small">Add Wallet</button>
+                </div>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="ecripto-enabled-label">
+                <input type="checkbox" id="ecripto-enabled" aria-describedby="ecripto-enabled-desc">
+                <label for="ecripto-enabled" id="ecripto-enabled-label">Enable eCripto integration</label>
+                <span class="setting-value" id="ecripto-enabled-value" aria-live="polite">Disabled</span>
+                <p class="help-text" id="ecripto-enabled-desc">Enables eCripto cryptocurrency network for payments and transactions.</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="auto-connect-wallet-label">
+                <input type="checkbox" id="auto-connect-wallet" aria-describedby="auto-connect-wallet-desc">
+                <label for="auto-connect-wallet" id="auto-connect-wallet-label">Auto-connect to eCripto network on startup</label>
+                <span class="setting-value" id="auto-connect-wallet-value" aria-live="polite">Disabled</span>
+                <p class="help-text" id="auto-connect-wallet-desc">Automatically connects to the eCripto network when OpenLink starts.</p>
+            </div>
+
+            <div id="ecripto-connection-status" class="connection-status">
+                <span class="status-indicator"></span>
+                <span id="ecripto-network-status">Not connected</span>
+            </div>
+
+            <div class="wallet-sync-section">
+                <div class="button-group">
+                    <button id="sync-wallets-btn" class="btn secondary" onclick="syncWalletsToServer()">Sync to Server</button>
+                    <button id="restore-wallets-btn" class="btn secondary" onclick="restoreWalletsFromServer()">Restore from Server</button>
+                </div>
+                <div id="wallet-sync-status" class="sync-status">
+                    <span>Not synced</span>
+                </div>
+            </div>
+
+            <h3>Identity & Trust Score</h3>
+            <div class="trust-score-display" id="trust-score-section">
+                <div class="trust-score-badge">
+                    <span class="trust-tier" id="trust-tier">New</span>
+                    <span class="trust-score" id="trust-score-value">0</span>
+                </div>
+                <p class="help-text">Higher trust scores unlock more features and priority connections.</p>
+            </div>
+
+            <!-- Phone Verification (Primary Method) -->
+            <div class="form-group" id="phone-verification-group">
+                <label for="verify-phone" id="verify-phone-label">Phone Verification</label>
+                <span class="setting-value" id="verify-phone-status" aria-live="polite">Not verified</span>
+                <div id="phone-input-section">
+                    <input type="tel" id="verify-phone" placeholder="Phone number (e.g., 555-123-4567)" aria-labelledby="verify-phone-label" aria-describedby="verify-phone-desc">
+                    <select id="phone-carrier" aria-label="Mobile carrier">
+                        <option value="">Select carrier...</option>
+                        <option value="att">AT&T</option>
+                        <option value="verizon">Verizon</option>
+                        <option value="tmobile">T-Mobile</option>
+                        <option value="sprint">Sprint</option>
+                        <option value="uscellular">US Cellular</option>
+                        <option value="cricket">Cricket</option>
+                        <option value="boost">Boost</option>
+                        <option value="metro">Metro</option>
+                        <option value="googlevoice">Google Voice</option>
+                    </select>
+                    <button id="send-phone-code-btn" class="btn secondary small" onclick="sendPhoneVerificationCode()">Send Code</button>
+                </div>
+                <div id="phone-code-section" hidden>
+                    <input type="text" id="phone-code-input" placeholder="Enter 6-digit code" maxlength="6" aria-label="Verification code">
+                    <button id="verify-phone-code-btn" class="btn primary small" onclick="verifyPhoneCode()">Verify</button>
+                    <button class="btn secondary small" onclick="cancelPhoneVerification()">Cancel</button>
+                </div>
+                <p class="help-text" id="verify-phone-desc">Verify your phone number to link your identity and create shareable links. Required before generating links.</p>
+            </div>
+
+            <!-- Alternative: Email Verification -->
+            <div class="form-group" id="email-verification-group">
+                <label for="verify-email" id="verify-email-label">Email Verification (Alternative)</label>
+                <span class="setting-value" id="verify-email-status" aria-live="polite">Not verified</span>
+                <div id="email-input-section">
+                    <input type="email" id="verify-email" placeholder="your@email.com" aria-labelledby="verify-email-label" aria-describedby="verify-email-desc">
+                    <button id="send-email-code-btn" class="btn secondary small" onclick="sendEmailVerificationCode()">Send Code</button>
+                </div>
+                <div id="email-code-section" hidden>
+                    <input type="text" id="email-code-input" placeholder="Enter 6-digit code" maxlength="6" aria-label="Verification code">
+                    <button id="verify-email-code-btn" class="btn primary small" onclick="verifyEmailCode()">Verify</button>
+                    <button class="btn secondary small" onclick="cancelEmailVerification()">Cancel</button>
+                </div>
+                <p class="help-text" id="verify-email-desc">Alternative verification via email if you prefer not to use phone.</p>
+            </div>
+
+            <!-- Optional: Mastodon Profile -->
+            <div class="form-group">
+                <label for="mastodon-handle" id="mastodon-handle-label">Mastodon Profile (Optional)</label>
+                <span class="setting-value" id="mastodon-handle-value" aria-live="polite">Not linked</span>
+                <input type="text" id="mastodon-handle" placeholder="@username@instance.social" aria-labelledby="mastodon-handle-label" aria-describedby="mastodon-handle-desc">
+                <p class="help-text" id="mastodon-handle-desc">Link your Mastodon profile for identity verification (+10 trust points).</p>
+                <button id="verify-mastodon-btn" class="btn secondary small" onclick="verifyMastodonProfile()">Verify Profile</button>
+            </div>
+
+            <div class="form-group">
+                <label id="whmcs-client-label">Client Portal</label>
+                <span class="setting-value" id="whmcs-client-value" aria-live="polite">Not linked</span>
+                <p class="help-text" id="whmcs-client-desc">Link your WHMCS client portal for domain management (+15 trust points).</p>
+                <button id="link-whmcs-btn" class="btn secondary small" onclick="linkWhmcsClient()">Link Client Portal</button>
+            </div>
+
+            <h3>Hosting Options</h3>
+            <div class="form-group checkbox" role="group" aria-labelledby="persist-session-id-label">
+                <input type="checkbox" id="persist-session-id" checked aria-describedby="persist-session-id-desc">
+                <label for="persist-session-id" id="persist-session-id-label">Keep same Session ID</label>
+                <span class="setting-value" id="persist-session-id-value" aria-live="polite">Enabled</span>
+                <p class="help-text" id="persist-session-id-desc">Uses the same session ID each time you host, unless you manually change it.</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="auto-host-startup-label">
+                <input type="checkbox" id="auto-host-startup" aria-describedby="auto-host-startup-desc">
+                <label for="auto-host-startup" id="auto-host-startup-label">Auto-start hosting on app launch</label>
+                <span class="setting-value" id="auto-host-startup-value" aria-live="polite">Disabled</span>
+                <p class="help-text" id="auto-host-startup-desc">Automatically begins hosting when OpenLink starts, allowing immediate remote access.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="custom-session-id" id="custom-session-id-label">Custom Session ID</label>
+                <span class="setting-value" id="custom-session-id-value" aria-live="polite">Auto-generated</span>
+                <input type="text" id="custom-session-id" placeholder="Leave blank for auto-generated ID" aria-labelledby="custom-session-id-label" aria-describedby="custom-session-id-desc">
+                <p class="help-text" id="custom-session-id-desc">Set a custom session ID for easier sharing. Leave blank to auto-generate.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="device-nickname" id="device-nickname-label">Device Nickname</label>
+                <span class="setting-value" id="device-nickname-value" aria-live="polite">Not set</span>
+                <input type="text" id="device-nickname" placeholder="e.g., My MacBook, Home PC" aria-labelledby="device-nickname-label" aria-describedby="device-nickname-desc">
+                <p class="help-text" id="device-nickname-desc">A friendly name for this device. Shows in session lists instead of the computer's hostname.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="session-password" id="session-password-label">Session Password</label>
+                <span class="setting-value" id="session-password-value" aria-live="polite">Auto-generated</span>
+                <div class="input-with-button">
+                    <input type="text" id="session-password" placeholder="Leave blank for auto-generated" aria-labelledby="session-password-label" aria-describedby="session-password-desc">
+                    <button type="button" id="regenerate-password-btn" class="btn-small" aria-label="Generate new password">Generate</button>
+                </div>
+                <p class="help-text" id="session-password-desc">Password required for connections. Changes sync to connected clients automatically.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="session-id-words" id="session-id-words-label">Custom ID Words (for anagram generation)</label>
+                <span class="setting-value" id="session-id-words-value" aria-live="polite">Not set</span>
+                <input type="text" id="session-id-words" placeholder="e.g., openlink, ray, wonder" aria-labelledby="session-id-words-label" aria-describedby="session-id-words-desc">
+                <p class="help-text" id="session-id-words-desc">Enter words/names separated by commas. Random anagrams will be generated from these for session IDs.</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="share-audio-label">
+                <input type="checkbox" id="share-audio" checked aria-describedby="share-audio-desc">
+                <label for="share-audio" id="share-audio-label">Share system audio</label>
+                <span class="setting-value" id="share-audio-value" aria-live="polite">Enabled</span>
+                <p class="help-text" id="share-audio-desc">Transmits your computer's audio to remote viewers so they can hear what you hear.</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="allow-input-label">
+                <input type="checkbox" id="allow-input" checked aria-describedby="allow-input-desc">
+                <label for="allow-input" id="allow-input-label">Allow remote input (keyboard/mouse)</label>
+                <span class="setting-value" id="allow-input-value" aria-live="polite">Enabled</span>
+                <p class="help-text" id="allow-input-desc">Lets remote users control your keyboard and mouse. Disable for view-only mode.</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="allow-clipboard-label">
+                <input type="checkbox" id="allow-clipboard" checked aria-describedby="allow-clipboard-desc">
+                <label for="allow-clipboard" id="allow-clipboard-label">Allow remote users to access clipboard</label>
+                <span class="setting-value" id="allow-clipboard-value" aria-live="polite">Enabled</span>
+                <p class="help-text" id="allow-clipboard-desc">When hosting, let connected users send and receive clipboard content from your computer.</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="allow-files-label">
+                <input type="checkbox" id="allow-files" checked aria-describedby="allow-files-desc">
+                <label for="allow-files" id="allow-files-label">Allow file transfers</label>
+                <span class="setting-value" id="allow-files-value" aria-live="polite">Enabled</span>
+                <p class="help-text" id="allow-files-desc">Enables sending and receiving files between connected computers.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="connection-permission" id="connection-permission-label">Connection Permission</label>
+                <span class="setting-value" id="connection-permission-value" aria-live="polite">Ask for each</span>
+                <select id="connection-permission" aria-labelledby="connection-permission-label" aria-describedby="connection-perm-desc">
+                    <option value="ask">Ask for each connection</option>
+                    <option value="always">Always allow</option>
+                    <option value="never">Never allow</option>
+                </select>
+                <p class="help-text" id="connection-perm-desc">Controls how incoming connection requests are handled. Ask prompts you each time, Always auto-accepts, Never blocks all.</p>
+            </div>
+
+            <h3>Payment Options</h3>
+            <div class="form-group checkbox" role="group" aria-labelledby="require-payment-label">
+                <input type="checkbox" id="require-payment" aria-describedby="require-payment-desc">
+                <label for="require-payment" id="require-payment-label">Offer payment for help</label>
+                <span class="setting-value" id="require-payment-value" aria-live="polite">Disabled</span>
+                <p class="help-text" id="require-payment-desc">Offer cryptocurrency payment to users who help you via remote connection.</p>
+            </div>
+
+            <div class="form-group" id="payment-settings" hidden>
+                <label for="payment-amount">Payment Amount</label>
+                <span class="setting-value" id="payment-amount-value" aria-live="polite">0.01</span>
+                <input type="number" id="payment-amount" min="0.001" step="0.001" value="0.01" aria-describedby="payment-amount-desc">
+                <p class="help-text" id="payment-amount-desc">Amount in selected cryptocurrency to pay helpers. Adjust based on task complexity.</p>
+            </div>
+
+            <h3>Audio</h3>
+            <div class="form-group">
+                <label for="remote-volume" id="remote-volume-label">Remote Volume</label>
+                <span class="setting-value" id="remote-volume-value" aria-live="polite">100%</span>
+                <input type="range" id="remote-volume" min="0" max="100" value="100" aria-labelledby="remote-volume-label" aria-describedby="remote-volume-desc">
+                <p class="help-text" id="remote-volume-desc">Controls the volume of audio from the remote computer.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="local-volume" id="local-volume-label">Local Volume</label>
+                <span class="setting-value" id="local-volume-value" aria-live="polite">100%</span>
+                <input type="range" id="local-volume" min="0" max="100" value="100" aria-labelledby="local-volume-label" aria-describedby="local-volume-desc">
+                <p class="help-text" id="local-volume-desc">Controls the volume of your local system sounds during connection.</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="auto-enable-mic-label">
+                <input type="checkbox" id="auto-enable-mic" aria-describedby="auto-enable-mic-desc">
+                <label for="auto-enable-mic" id="auto-enable-mic-label">Auto-enable microphone</label>
+                <span class="setting-value" id="auto-enable-mic-value" aria-live="polite">Disabled</span>
+                <p class="help-text" id="auto-enable-mic-desc">Automatically enables your microphone when connecting to allow voice communication.</p>
+            </div>
+
+            <h3>App Behavior</h3>
+            <fieldset class="form-group radio-group" role="radiogroup" aria-labelledby="startup-behavior-label">
+                <legend id="startup-behavior-label">Window behavior on startup</legend>
+                <div class="radio-option">
+                    <input type="radio" id="startup-visible" name="startup-behavior" value="visible" checked>
+                    <label for="startup-visible">Show dashboard window</label>
+                </div>
+                <div class="radio-option">
+                    <input type="radio" id="startup-minimized" name="startup-behavior" value="minimized">
+                    <label for="startup-minimized">Minimize to system tray</label>
+                </div>
+                <p class="help-text">Choose whether OpenLink shows the main window or starts minimized to tray.</p>
+            </fieldset>
+
+            <fieldset class="form-group radio-group" role="radiogroup" aria-labelledby="close-behavior-label">
+                <legend id="close-behavior-label">Close button behavior</legend>
+                <div class="radio-option">
+                    <input type="radio" id="close-to-tray" name="close-behavior" value="tray" checked>
+                    <label for="close-to-tray">Minimize to system tray</label>
+                </div>
+                <div class="radio-option">
+                    <input type="radio" id="close-quit" name="close-behavior" value="quit">
+                    <label for="close-quit">Quit application</label>
+                </div>
+                <p class="help-text">Choose what happens when you close the main window.</p>
+            </fieldset>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="auto-copy-url-label">
+                <input type="checkbox" id="auto-copy-url" aria-describedby="auto-copy-url-desc">
+                <label for="auto-copy-url" id="auto-copy-url-label">Auto-copy URL when hosting starts</label>
+                <span class="setting-value" id="auto-copy-url-value" aria-live="polite">Disabled</span>
+                <p class="help-text" id="auto-copy-url-desc">Automatically copies the shareable link to clipboard when hosting begins. Useful when running in system tray.</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="allow-dropin-label">
+                <input type="checkbox" id="allow-dropin" checked aria-describedby="allow-dropin-desc">
+                <label for="allow-dropin" id="allow-dropin-label">Allow drop-in connections</label>
+                <span class="setting-value" id="allow-dropin-value" aria-live="polite">Enabled</span>
+                <p class="help-text" id="allow-dropin-desc">Allow previously connected trusted devices to reconnect without re-entering password.</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="always-enable-media-label">
+                <input type="checkbox" id="always-enable-media" checked aria-describedby="always-enable-media-desc">
+                <label for="always-enable-media" id="always-enable-media-label">Always enable media</label>
+                <span class="setting-value" id="always-enable-media-value" aria-live="polite">Enabled</span>
+                <p class="help-text" id="always-enable-media-desc">Keeps audio and video streams active throughout the session.</p>
+            </div>
+
+            <h3>Screen Reader</h3>
+            <p id="sr-detection-status" class="help-text">Detecting screen reader...</p>
+            <div class="form-group checkbox" role="group" aria-labelledby="use-local-tts-label">
+                <input type="checkbox" id="use-local-tts" aria-describedby="use-local-tts-desc">
+                <label for="use-local-tts" id="use-local-tts-label">Enable local text-to-speech when connected</label>
+                <span class="setting-value" id="use-local-tts-value" aria-live="polite">Disabled</span>
+                <p class="help-text" id="use-local-tts-desc">Uses your local TTS engine to speak content from the remote screen reader.</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="enable-remote-sr-label">
+                <input type="checkbox" id="enable-remote-sr" aria-describedby="enable-remote-sr-desc">
+                <label for="enable-remote-sr" id="enable-remote-sr-label">Enable screen reader relay</label>
+                <span class="setting-value" id="enable-remote-sr-value" aria-live="polite">Disabled</span>
+                <p class="help-text" id="enable-remote-sr-desc">Relays screen reader output from the remote computer to be spoken locally.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="sr-rate" id="sr-rate-label">Speech Rate</label>
+                <span class="setting-value" id="sr-rate-value" aria-live="polite">200 words/min</span>
+                <input type="range" id="sr-rate" min="50" max="400" value="200" aria-labelledby="sr-rate-label" aria-describedby="sr-rate-desc">
+                <p class="help-text" id="sr-rate-desc">Adjusts how fast the screen reader speaks. Higher values = faster speech.</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="enable-braille-label">
+                <input type="checkbox" id="enable-braille" aria-describedby="enable-braille-desc">
+                <label for="enable-braille" id="enable-braille-label">Enable braille display support (BRLTTY)</label>
+                <span class="setting-value" id="enable-braille-value" aria-live="polite">Disabled</span>
+                <p class="help-text" id="enable-braille-desc">Sends remote screen reader output to your connected braille display via BRLTTY.</p>
+            </div>
+
+            <h3>Clipboard (When Connected)</h3>
+            <div class="form-group checkbox" role="group" aria-labelledby="enable-clipboard-label">
+                <input type="checkbox" id="enable-clipboard" checked aria-describedby="enable-clipboard-desc">
+                <label for="enable-clipboard" id="enable-clipboard-label">Enable clipboard sync when connecting to others</label>
+                <span class="setting-value" id="enable-clipboard-value" aria-live="polite">Enabled</span>
+                <p class="help-text" id="enable-clipboard-desc">When you connect to someone else's computer, sync clipboard content between devices.</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="double-copy-transfer-label">
+                <input type="checkbox" id="double-copy-transfer" checked aria-describedby="double-copy-transfer-desc">
+                <label for="double-copy-transfer" id="double-copy-transfer-label">Double-copy to transfer</label>
+                <span class="setting-value" id="double-copy-transfer-value" aria-live="polite">Enabled</span>
+                <p class="help-text" id="double-copy-transfer-desc">Press Ctrl/Cmd+C twice quickly to transfer clipboard to the remote computer.</p>
+            </div>
+
+            <h3>Files</h3>
+            <div class="form-group">
+                <label for="shared-folder-path" id="shared-folder-path-label">Shared files folder</label>
+                <span class="setting-value" id="shared-folder-path-value" aria-live="polite">Not set</span>
+                <div class="path-input">
+                    <input type="text" id="shared-folder-path" readonly aria-labelledby="shared-folder-path-label" aria-describedby="shared-folder-desc">
+                    <button id="open-shared-folder" class="btn secondary">Open</button>
+                </div>
+                <p class="help-text" id="shared-folder-desc">Folder where transferred files are saved. Click Open to browse.</p>
+            </div>
+
+            <h3>Application</h3>
+            <div class="form-group checkbox" role="group" aria-labelledby="run-at-login-label">
+                <input type="checkbox" id="run-at-login" checked aria-describedby="run-at-login-desc">
+                <label for="run-at-login" id="run-at-login-label">Run at login</label>
+                <span class="setting-value" id="run-at-login-value" aria-live="polite">Enabled</span>
+                <p class="help-text" id="run-at-login-desc">Automatically starts OpenLink when you log into your computer.</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="start-minimized-label">
+                <input type="checkbox" id="start-minimized" aria-describedby="start-minimized-desc">
+                <label for="start-minimized" id="start-minimized-label">Start minimized</label>
+                <span class="setting-value" id="start-minimized-value" aria-live="polite">Disabled</span>
+                <p class="help-text" id="start-minimized-desc">Launches OpenLink minimized to the system tray instead of showing the window.</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="keep-window-visible-label">
+                <input type="checkbox" id="keep-window-visible" aria-describedby="keep-window-visible-desc">
+                <label for="keep-window-visible" id="keep-window-visible-label">Keep window visible while hosting</label>
+                <span class="setting-value" id="keep-window-visible-value" aria-live="polite">Disabled</span>
+                <p class="help-text" id="keep-window-visible-desc">Prevents the window from minimizing when you start hosting a session.</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="use-native-dialogs-label">
+                <input type="checkbox" id="use-native-dialogs" checked aria-describedby="use-native-dialogs-desc">
+                <label for="use-native-dialogs" id="use-native-dialogs-label">Use native system dialogs</label>
+                <span class="setting-value" id="use-native-dialogs-value" aria-live="polite">Enabled</span>
+                <p class="help-text" id="use-native-dialogs-desc">Uses system-native file dialogs for better screen reader compatibility.</p>
+            </div>
+
+            <h3>Network Auto-Refresh</h3>
+            <div class="form-group checkbox" role="group" aria-labelledby="auto-refresh-enabled-label">
+                <input type="checkbox" id="auto-refresh-enabled" checked aria-describedby="auto-refresh-enabled-desc">
+                <label for="auto-refresh-enabled" id="auto-refresh-enabled-label">Auto-refresh IP addresses and servers</label>
+                <span class="setting-value" id="auto-refresh-enabled-value" aria-live="polite">Enabled</span>
+                <p class="help-text" id="auto-refresh-enabled-desc">Periodically updates IP addresses and checks server status for dynamic networks.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="auto-refresh-interval" id="auto-refresh-interval-label">Refresh Interval</label>
+                <span class="setting-value" id="auto-refresh-interval-value" aria-live="polite">Every 5 minutes</span>
+                <select id="auto-refresh-interval" aria-labelledby="auto-refresh-interval-label" aria-describedby="auto-refresh-interval-desc">
+                    <option value="1">Every 1 minute</option>
+                    <option value="2">Every 2 minutes</option>
+                    <option value="5" selected>Every 5 minutes</option>
+                    <option value="10">Every 10 minutes</option>
+                    <option value="15">Every 15 minutes</option>
+                    <option value="30">Every 30 minutes</option>
+                </select>
+                <p class="help-text" id="auto-refresh-interval-desc">How often to refresh IP addresses and test server connections.</p>
+            </div>
+
+            <div class="button-group">
+                <button id="refresh-now-btn" class="btn secondary">Refresh Now</button>
+            </div>
+
+            <h3>Updates</h3>
+            <p>Version: <span id="current-version"></span></p>
+            <button id="check-updates" class="btn secondary">Check for Updates</button>
+        </section>
+
+        <!-- Servers Panel -->
+        <section id="panel-servers" class="panel" role="tabpanel" aria-labelledby="tab-servers" hidden>
+            <h2>Server Settings</h2>
+            <p class="settings-note">Configure relay servers and connection preferences.</p>
+
+            <h3>Connection Preferences</h3>
+            <div class="form-group checkbox">
+                <input type="checkbox" id="prefer-random-server" checked>
+                <label for="prefer-random-server">Use random server selection for new connections</label>
+            </div>
+            <p class="help-text">When enabled, connections will automatically choose from available online servers for better reliability.</p>
+
+            <div class="form-group">
+                <label for="default-server">Default Server</label>
+                <select id="default-server">
+                    <option value="random">Random (Auto-select)</option>
+                    <option value="local">Local (Direct Connection)</option>
+                </select>
+                <p class="help-text">Server used when random selection is disabled</p>
+            </div>
+
+            <h3>Connection Status</h3>
+            <div class="connection-status-grid">
+                <div class="status-item">
+                    <span class="status-value" id="session-uptime">--:--:--</span>
+                    <span class="status-label">Session Uptime</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-value" id="active-connections-count">0</span>
+                    <span class="status-label">Active Connections</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-value" id="total-sessions">0</span>
+                    <span class="status-label">Total Sessions</span>
+                </div>
+            </div>
+            <div class="connection-details">
+                <div class="form-group">
+                    <label>Active Server:</label>
+                    <code id="active-server-display">Not connected</code>
+                </div>
+                <div class="form-group">
+                    <label>Last Connected IP:</label>
+                    <code id="last-connected-ip">None</code>
+                </div>
+                <div class="form-group">
+                    <label>Last Activity:</label>
+                    <code id="last-activity-time">-</code>
+                </div>
+            </div>
+
+            <h3>Connection History</h3>
+            <div id="connection-history-list" class="connection-history" role="list" aria-label="Connection history">
+                <p class="empty-state">No connection history</p>
+            </div>
+
+            <h3>Available Servers</h3>
+            <div id="server-list" class="server-list" role="list" aria-label="Available relay servers">
+                <p class="loading-text">Loading servers...</p>
+            </div>
+            <div class="button-group server-actions">
+                <button id="refresh-servers-btn" class="btn secondary">Refresh Server List</button>
+                <button id="test-all-servers-btn" class="btn secondary">Test All Servers</button>
+            </div>
+
+            <h3>Add Custom Server</h3>
+            <div class="form-group">
+                <label for="custom-server-url">Server URL</label>
+                <input type="text" id="custom-server-url" placeholder="wss://server.example.com:8765">
+            </div>
+            <div class="form-group">
+                <label for="custom-server-name">Server Name (optional)</label>
+                <input type="text" id="custom-server-name" placeholder="My Custom Server">
+            </div>
+            <div class="button-group">
+                <button id="add-custom-server-btn" class="btn primary">Add Server</button>
+            </div>
+        </section>
+
+        <!-- Help Panel -->
+        <section id="panel-help" class="panel" role="tabpanel" aria-labelledby="tab-help" hidden>
+            <h2>Help &amp; Documentation</h2>
+
+            <nav class="help-nav" aria-label="Help sections">
+                <h3>Quick Navigation</h3>
+                <ul>
+                    <li><a href="#help-getting-started">Getting Started</a></li>
+                    <li><a href="#help-shortcuts">Keyboard Shortcuts</a></li>
+                    <li><a href="#help-hosting">Hosting a Session</a></li>
+                    <li><a href="#help-connecting">Connecting to Remote</a></li>
+                    <li><a href="#help-accessibility">Accessibility</a></li>
+                    <li><a href="#help-ecripto">eCripto & Wallets</a></li>
+                    <li><a href="#help-troubleshooting">Troubleshooting</a></li>
+                    <li><a href="#help-support">Support</a></li>
+                </ul>
+            </nav>
+
+            <div class="help-sections">
+                <section class="help-section" id="help-getting-started">
+                    <h3>Getting Started</h3>
+                    <p>OpenLink is an accessible remote desktop application designed for everyone, including screen reader users. It allows you to share your screen with others or connect to remote computers.</p>
+
+                    <h4>Quick Start</h4>
+                    <ol>
+                        <li><strong>To share your screen:</strong> Go to the Host tab and click "Start Hosting". Share your Session ID with the person who needs to connect.</li>
+                        <li><strong>To connect to someone:</strong> Go to the Connect tab, enter the Session ID, and click "Connect".</li>
+                    </ol>
+                </section>
+
+                <section class="help-section" id="help-shortcuts">
+                    <h3>Keyboard Shortcuts</h3>
+                    <table class="shortcuts-table">
+                        <thead>
+                            <tr><th>Shortcut</th><th>Action</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><kbd>Alt+Shift+\</kbd></td><td>Open Control Menu (during session) / Bring window to front</td></tr>
+                            <tr><td><kbd>Escape</kbd></td><td>Close Control Menu</td></tr>
+                            <tr><td><kbd>Arrow Keys</kbd></td><td>Navigate menu items</td></tr>
+                            <tr><td><kbd>Enter</kbd></td><td>Select menu item</td></tr>
+                            <tr><td><kbd>Tab</kbd></td><td>Navigate between tabs and controls</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section class="help-section" id="help-hosting">
+                    <h3>Hosting a Session</h3>
+                    <p>When you host a session, you share your screen with others.</p>
+                    <ol>
+                        <li>Click the <strong>Host</strong> tab</li>
+                        <li>Configure your hosting options in Settings:
+                            <ul>
+                                <li><strong>Share Audio:</strong> Let remote users hear your computer's audio</li>
+                                <li><strong>Allow Remote Input:</strong> Let the helper control your keyboard and mouse</li>
+                                <li><strong>Allow Clipboard:</strong> Share clipboard between computers</li>
+                                <li><strong>Allow Files:</strong> Enable file transfers</li>
+                            </ul>
+                        </li>
+                        <li>Click <strong>Start Hosting</strong></li>
+                        <li>Share your Session ID with the person who will help you</li>
+                    </ol>
+
+                    <h4>Connection Permission</h4>
+                    <p>Choose how to handle incoming connections:</p>
+                    <ul>
+                        <li><strong>Ask for each connection:</strong> You'll be prompted each time (recommended)</li>
+                        <li><strong>Always allow:</strong> Anyone with your Session ID can connect</li>
+                        <li><strong>Never allow:</strong> Block all connection attempts</li>
+                    </ul>
+                </section>
+
+                <section class="help-section" id="help-connecting">
+                    <h3>Connecting to a Remote Computer</h3>
+                    <ol>
+                        <li>Click the <strong>Connect</strong> tab</li>
+                        <li>Enter the Session ID shared by the host</li>
+                        <li>Click <strong>Connect</strong></li>
+                        <li>Once connected, you'll see the remote screen</li>
+                    </ol>
+
+                    <h4>During a Session</h4>
+                    <p>Press <kbd>Alt+Shift+\</kbd> to open the Control Menu with these options:</p>
+                    <ul>
+                        <li><strong>Disconnect:</strong> End the session</li>
+                        <li><strong>Send File:</strong> Transfer a file to the remote computer</li>
+                        <li><strong>Machine Details:</strong> View remote computer information</li>
+                        <li><strong>Audio Settings:</strong> Adjust volume levels</li>
+                        <li><strong>Screen Reader Options:</strong> Configure accessibility</li>
+                        <li><strong>Swap Control:</strong> Switch who controls the session</li>
+                        <li><strong>Restart Remote:</strong> Restart the remote computer</li>
+                    </ul>
+
+                    <h4>Clipboard Sharing</h4>
+                    <p>OpenLink supports two clipboard transfer modes:</p>
+                    <ul>
+                        <li><strong>Double-copy transfer:</strong> Copy text twice quickly (within 1 second) to send it to the remote computer</li>
+                        <li><strong>Automatic sync:</strong> When enabled, clipboard changes are synced automatically</li>
+                    </ul>
+                </section>
+
+                <section class="help-section" id="help-accessibility">
+                    <h3>Accessibility Features</h3>
+                    <p>OpenLink is designed with accessibility in mind:</p>
+                    <ul>
+                        <li><strong>Screen reader compatible:</strong> All controls are properly labeled for NVDA, JAWS, VoiceOver, and Orca</li>
+                        <li><strong>Keyboard navigation:</strong> Full keyboard access to all features</li>
+                        <li><strong>Audio cues:</strong> Sound notifications for connection events</li>
+                        <li><strong>Remote screen reader:</strong> Can relay remote screen reader output</li>
+                        <li><strong>Local TTS:</strong> Option to use local text-to-speech for announcements</li>
+                    </ul>
+
+                    <h4>Screen Reader Settings</h4>
+                    <p>In Settings, you can configure:</p>
+                    <ul>
+                        <li><strong>Use local TTS:</strong> Speak announcements through your local screen reader</li>
+                        <li><strong>Enable remote screen reader:</strong> Hear the remote computer's screen reader</li>
+                        <li><strong>Speech rate:</strong> Adjust how fast speech is delivered</li>
+                    </ul>
+                </section>
+
+                <section class="help-section" id="help-troubleshooting">
+                    <h3>Troubleshooting</h3>
+
+                    <h4>Connection Issues</h4>
+                    <ul>
+                        <li><strong>Cannot connect:</strong> Verify the Session ID is correct and both parties have internet access</li>
+                        <li><strong>Connection drops:</strong> Check network stability; the app will attempt to reconnect automatically</li>
+                        <li><strong>No video:</strong> Ensure screen sharing permission is granted in your system settings</li>
+                    </ul>
+
+                    <h4>Audio Issues</h4>
+                    <ul>
+                        <li><strong>No audio:</strong> Check that "Share Audio" is enabled in hosting options</li>
+                        <li><strong>Low volume:</strong> Adjust the Remote Volume slider in Settings</li>
+                    </ul>
+
+                    <h4>Permission Issues (macOS)</h4>
+                    <p>You may need to grant screen recording permission:</p>
+                    <ol>
+                        <li>Open System Preferences &gt; Privacy &amp; Security &gt; Privacy</li>
+                        <li>Select Screen Recording</li>
+                        <li>Enable OpenLink</li>
+                    </ol>
+                </section>
+
+                <section class="help-section" id="help-ecripto">
+                    <h3>eCripto &amp; Wallet Integration</h3>
+                    <p>OpenLink includes basic cryptocurrency wallet features for payment processing. <strong>Important:</strong> Only essential wallet features are available in OpenLink and other connected apps. For full wallet functionality, please use the dedicated <strong>eCripto Wallet App</strong>.</p>
+
+                    <h4>Features Available in OpenLink</h4>
+                    <ul>
+                        <li><strong>Wallet Address Management:</strong> Store and manage your wallet addresses</li>
+                        <li><strong>Payment Receiving:</strong> Receive payments for remote help sessions</li>
+                        <li><strong>Wallet Detection:</strong> Detect browser wallets (MetaMask, etc.)</li>
+                        <li><strong>Server Sync:</strong> Backup wallet addresses to server nodes</li>
+                        <li><strong>Basic Transactions:</strong> Send/receive for session payments</li>
+                    </ul>
+
+                    <h4>For Full Wallet Functionality</h4>
+                    <p>The <strong>eCripto Wallet App</strong> provides complete wallet features:</p>
+                    <ul>
+                        <li>Full transaction history and analytics</li>
+                        <li>Multi-chain support (eCripto, Ethereum, Bitcoin, Polygon, BSC)</li>
+                        <li>Advanced security features and hardware wallet support</li>
+                        <li>Token swaps and DeFi integration</li>
+                        <li>NFT management</li>
+                        <li>Full node connectivity</li>
+                        <li>Advanced staking and rewards</li>
+                    </ul>
+
+                    <h4>Supported Networks</h4>
+                    <ul>
+                        <li><strong>eCripto Network:</strong> Native support with eCripto app/extension</li>
+                        <li><strong>Ethereum/ERC-20:</strong> Via MetaMask, Coinbase Wallet, Trust Wallet</li>
+                        <li><strong>Bitcoin:</strong> Via Electrum, Sparrow, or hardware wallets</li>
+                        <li><strong>Polygon/BSC:</strong> Via compatible browser wallets</li>
+                    </ul>
+
+                    <h4>Wallet Sync</h4>
+                    <p>Your wallet addresses (not private keys) can be synced to OpenLink servers for backup and recovery. This sync happens automatically every 10 minutes when wallets are configured.</p>
+                </section>
+
+                <section class="help-section" id="help-support">
+                    <h3>Support</h3>
+                    <p>For additional help or to report issues:</p>
+                    <ul>
+                        <li>Website: <a href="https://raywonderis.me/apps/openlink" target="_blank">raywonderis.me/apps/openlink</a></li>
+                        <li>Email: <a href="mailto:webmaster@devine-creations.com">webmaster@devine-creations.com</a></li>
+                    </ul>
+                    <p>Version: <span id="help-version"></span></p>
+                </section>
+            </div>
+        </section>
+    </main>
+
+    <!-- Remote Desktop View (hidden by default) -->
+    <div id="remote-view" class="remote-view" hidden>
+        <div class="remote-header">
+            <span id="remote-status">Connected</span>
+            <div class="remote-controls">
+                <button id="toggle-fullscreen" class="remote-btn" aria-label="Toggle fullscreen">
+                    <span class="icon">&#9974;</span>
+                </button>
+                <button id="open-control-menu" class="remote-btn" aria-label="Open control menu (Alt+Shift+\)">
+                    <span class="icon">&#9776;</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="video-container">
+            <video id="remote-video" autoplay playsinline></video>
+        </div>
+
+        <!-- Audio elements -->
+        <audio id="remote-audio" autoplay></audio>
+        <audio id="local-audio" autoplay muted></audio>
+    </div>
+
+    <!-- Control Menu (overlay) - hidden from screen readers until opened -->
+    <div id="control-menu" class="control-menu" hidden aria-hidden="true" inert role="dialog" aria-modal="true" aria-label="Control menu">
+        <div class="control-menu-content">
+            <h2>Control Menu</h2>
+            <p class="menu-hint">Press Escape to close, Arrow keys to navigate, Enter to select</p>
+
+            <ul class="menu-items" role="menu">
+                <li role="menuitem" tabindex="-1" data-action="disconnect">Disconnect</li>
+                <li role="menuitem" tabindex="-1" data-action="minimize-session">Minimize Session</li>
+                <li role="menuitem" tabindex="-1" data-action="send-file">Send File</li>
+                <li role="menuitem" tabindex="-1" data-action="machine-details">Machine Details</li>
+                <li role="menuitem" tabindex="-1" data-action="audio-settings">Audio Settings</li>
+                <li role="menuitem" tabindex="-1" data-action="screen-reader">Screen Reader Options</li>
+                <li role="menuitem" tabindex="-1" data-action="swap-control">Swap Control</li>
+                <li role="menuitem" tabindex="-1" data-action="flip-session">Flip Session (Reverse Roles)</li>
+                <li role="menuitem" tabindex="-1" data-action="find-linked-devices">Find Wallet-Linked Devices</li>
+                <li role="menuitem" tabindex="-1" data-action="permissions">Connection Permissions</li>
+                <li role="menuitem" tabindex="-1" data-action="restart-submenu" aria-haspopup="true">Restart Options...</li>
+            </ul>
+
+            <!-- Restart Submenu -->
+            <ul id="restart-submenu" class="submenu" role="menu" hidden>
+                <li role="menuitem" tabindex="-1" data-action="restart-remote-app">Restart Remote OpenLink</li>
+                <li role="menuitem" tabindex="-1" data-action="restart-local-app">Restart Local OpenLink</li>
+                <li role="menuitem" tabindex="-1" data-action="restart-remote-service">Restart Remote Background Service</li>
+                <li role="menuitem" tabindex="-1" data-action="restart-both-apps">Restart Both & Reconnect</li>
+                <li role="menuitem" tabindex="-1" data-action="reboot-remote">Reboot Remote System & Reconnect</li>
+                <li role="menuitem" tabindex="-1" data-action="back-to-main">Back to Main Menu</li>
+            </ul>
+        </div>
+    </div>
+
+
+    <!-- File Transfer Dialog - hidden from screen readers until opened -->
+    <div id="file-dialog" class="modal" hidden aria-hidden="true" inert role="dialog" aria-modal="true" aria-label="Send file">
+        <div class="modal-content">
+            <h2>Send File</h2>
+            <div class="form-group">
+                <label for="file-input">Select file to send</label>
+                <input type="file" id="file-input">
+            </div>
+            <div class="file-progress" id="file-progress" hidden>
+                <progress id="transfer-progress" value="0" max="100"></progress>
+                <span id="transfer-status">Sending...</span>
+            </div>
+            <div class="button-group">
+                <button id="send-file-btn" class="btn primary" disabled>Send</button>
+                <button id="cancel-file-btn" class="btn secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Connection Request Dialog - hidden from screen readers until opened -->
+    <div id="connection-request" class="modal" hidden aria-hidden="true" inert role="alertdialog" aria-modal="true" aria-label="Connection request">
+        <div class="modal-content">
+            <h2>Connection Request</h2>
+            <p id="request-message">Someone wants to connect to your computer.</p>
+            <div class="button-group">
+                <button id="allow-connection" class="btn primary">Allow</button>
+                <button id="deny-connection" class="btn danger">Deny</button>
+                <button id="always-allow" class="btn secondary">Always Allow</button>
+                <button id="always-deny" class="btn secondary">Always Deny</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Payment Request Dialog - hidden from screen readers until opened -->
+    <div id="payment-request" class="modal" hidden aria-hidden="true" inert role="dialog" aria-modal="true" aria-label="Payment required">
+        <div class="modal-content">
+            <h2>Payment Required</h2>
+            <p>This host requires payment to connect.</p>
+            <p class="payment-amount">Amount: <strong id="required-amount"></strong> eCripto</p>
+            <div class="button-group">
+                <button id="pay-and-connect" class="btn primary">Pay & Connect</button>
+                <button id="cancel-payment" class="btn secondary">Cancel</button>
+            </div>
+            <p class="help-text" id="ecripto-status"></p>
+        </div>
+    </div>
+
+    <!-- First-Time Onboarding Dialog -->
+    <div id="onboarding-modal" class="modal" hidden aria-hidden="true" inert role="dialog" aria-modal="true" aria-label="Welcome to OpenLink">
+        <div class="modal-content onboarding-content">
+            <h2>Welcome to OpenLink</h2>
+            <p>Let's configure your sharing preferences. These settings control what remote users can access when they connect to your computer.</p>
+
+            <div class="onboarding-settings">
+                <div class="setting-row">
+                    <input type="checkbox" id="onboard-share-audio" checked>
+                    <label for="onboard-share-audio">Share Audio</label>
+                    <span class="help-text">Allow remote users to hear audio from your computer</span>
+                </div>
+                <div class="setting-row">
+                    <input type="checkbox" id="onboard-allow-input" checked>
+                    <label for="onboard-allow-input">Allow Remote Input</label>
+                    <span class="help-text">Allow remote users to control your keyboard and mouse</span>
+                </div>
+                <div class="setting-row">
+                    <input type="checkbox" id="onboard-allow-clipboard" checked>
+                    <label for="onboard-allow-clipboard">Allow Clipboard Sharing</label>
+                    <span class="help-text">Allow remote users to copy/paste between computers</span>
+                </div>
+                <div class="setting-row">
+                    <input type="checkbox" id="onboard-allow-files" checked>
+                    <label for="onboard-allow-files">Allow File Transfers</label>
+                    <span class="help-text">Allow remote users to send and receive files</span>
+                </div>
+                <div class="setting-row">
+                    <label for="onboard-connection-permission">Connection Permission:</label>
+                    <select id="onboard-connection-permission">
+                        <option value="ask">Ask Each Time</option>
+                        <option value="allow">Always Allow</option>
+                        <option value="deny">Always Deny</option>
+                    </select>
+                </div>
+            </div>
+
+            <p class="help-text">You can change these settings anytime from the Host or Settings tab.</p>
+
+            <div class="button-group">
+                <button id="complete-onboarding" class="btn primary">Get Started</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="accessible-dropdown.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

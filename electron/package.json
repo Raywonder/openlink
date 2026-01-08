@@ -1,0 +1,134 @@
+{
+  "name": "openlink",
+  "productName": "OpenLink",
+  "version": "1.7.15",
+  "description": "Accessible remote desktop and link sharing application",
+  "homepage": "https://raywonderis.me/apps/openlink",
+  "author": {
+    "name": "Devine Creations",
+    "email": "webmaster@devine-creations.com"
+  },
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "concurrently \"node src/signaling-server.js\" \"electron .\"",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder --win --mac --linux",
+    "generate-manifest": "node scripts/generate-manifest.js",
+    "build:with-manifest": "npm run build:all && npm run generate-manifest"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@nut-tree-fork/nut-js": "^4.2.6",
+    "electron-is-accelerator": "^0.2.0",
+    "electron-log": "^5.0.1",
+    "electron-store": "^8.1.0",
+    "electron-updater": "^6.1.7",
+    "nodemailer": "^6.10.1",
+    "ws": "^8.14.2"
+  },
+  "optionalDependencies": {
+    "@nut-tree/nut-js": "^3.1.2",
+    "ffi-napi": "^4.0.3",
+    "mac-screen-capture-permissions": "^2.1.0",
+    "macos-accessibility-permissions": "^1.0.1",
+    "node-mac-permissions": "^2.5.0",
+    "ref-napi": "^3.0.3"
+  },
+  "devDependencies": {
+    "@electron/notarize": "^3.1.1",
+    "concurrently": "^8.2.2",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "electron-builder-notarize": "^1.5.2",
+    "electron-installer-dmg": "^5.0.1",
+    "electron-winstaller": "^5.4.0"
+  },
+  "build": {
+    "appId": "com.openlink.app",
+    "productName": "OpenLink",
+    "protocols": {
+      "name": "OpenLink Protocol",
+      "schemes": [
+        "openlink"
+      ]
+    },
+    "directories": {
+      "output": "../dist/openlink"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../assets/sounds",
+        "to": "assets/sounds"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "assets/icon.ico",
+      "requestedExecutionLevel": "requireAdministrator",
+      "signingHashAlgorithms": [
+        "sha256"
+      ],
+      "signDlls": true,
+      "files": [
+        "!node_modules/mac-screen-capture-permissions",
+        "!node_modules/macos-accessibility-permissions",
+        "!node_modules/node-mac-permissions"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "runAfterFinish": true
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.utilities",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
+      "notarize": false
+    },
+    "afterSign": "scripts/notarize.js",
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "assets/icon.png",
+      "category": "Utility",
+      "maintainer": "Devine Creations <webmaster@devine-creations.com>",
+      "asarUnpack": [
+        "node_modules/@nut-tree-fork/**"
+      ],
+      "files": [
+        "!node_modules/mac-screen-capture-permissions",
+        "!node_modules/macos-accessibility-permissions",
+        "!node_modules/node-mac-permissions"
+      ]
+    },
+    "npmRebuild": false,
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://raywonderis.me/uploads/website_specific/apps/openlink/"
+      }
+    ]
+  }
+}

@@ -1,0 +1,49 @@
+NVDA Controller Client DLL Setup
+=================================
+
+To enable direct NVDA screen reader control from OpenLink Remote Desktop,
+you need to obtain the NVDA Controller Client DLL files.
+
+Download Location
+-----------------
+The DLL files are available from the official NVDA repository:
+https://github.com/nvaccess/nvda/tree/master/extras/controllerClient
+
+Or download from NV Access directly:
+https://www.nvaccess.org/files/nvda/releases/
+
+After downloading an NVDA release, the DLLs are in:
+- Program Files\NVDA\lib\nvdaControllerClient32.dll (32-bit)
+- Program Files\NVDA\lib64\nvdaControllerClient64.dll (64-bit)
+
+Installation
+------------
+1. Copy nvdaControllerClient32.dll to: native/win32/
+2. Copy nvdaControllerClient64.dll to: native/win64/
+
+Dependencies
+------------
+On Windows, you'll also need to install these npm packages:
+  npm install ffi-napi ref-napi
+
+These packages require node-gyp and a C++ compiler:
+  - Visual Studio Build Tools (Windows)
+  - Or: npm install --global windows-build-tools
+
+Alternative Method
+------------------
+If you can't use the native DLL, OpenLink will fall back to:
+1. ARIA live regions for screen reader announcements
+2. Local browser speech synthesis (speechSynthesis API)
+
+DLL Functions Used
+------------------
+- nvdaController_testIfRunning() - Check if NVDA is running
+- nvdaController_speakText(text) - Speak text through NVDA
+- nvdaController_cancelSpeech() - Stop current speech
+- nvdaController_brailleMessage(text) - Display on braille device
+
+License
+-------
+NVDA and the Controller Client are licensed under GPL v2.
+https://www.gnu.org/licenses/old-licenses/gpl-2.0.html

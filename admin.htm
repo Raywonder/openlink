@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenLink Admin Dashboard</title>
+    <link rel="stylesheet" href="{$BASE_URL}/apps/OpenLink/css/openlink.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="openlink-container">
+        <header class="openlink-header">
+            <div class="container">
+                <div class="header-content">
+                    <div class="logo">
+                        <i class="fas fa-shield-alt"></i>
+                        <h1>OpenLink Admin</h1>
+                    </div>
+                    <nav class="main-nav" role="navigation" aria-label="Admin navigation">
+                        <a href="{$BASE_URL}:pg:openlink" class="nav-link" title="Return to main OpenLink application">Main App</a>
+                        <a href="{$BASE_URL}:pg:openlink/relay" class="nav-link" title="Manage URL relay and monitoring">Relay Panel</a>
+                        <a href="#dashboard" class="nav-link active" title="System overview and statistics">Dashboard</a>
+                        <a href="#users" class="nav-link" title="Manage user accounts and permissions">Users</a>
+                        <a href="#system" class="nav-link" title="Configure system settings">System</a>
+                    </nav>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <div class="container">
+                <!-- Dashboard Overview -->
+                <section id="dashboard" class="section active">
+                    <h2>System Overview</h2>
+                    
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-users"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="total-users">0</h3>
+                                <p>Total Users</p>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-link"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="total-links">0</h3>
+                                <p>Total Links</p>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-mouse-pointer"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="total-clicks">0</h3>
+                                <p>Total Clicks</p>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-server"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="system-status">Online</h3>
+                                <p>System Status</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="admin-actions">
+                        <div class="control-grid">
+                            <div class="control-section">
+                                <h3>System Control</h3>
+                                <button class="btn btn-warning" onclick="restartSystem()" title="Restart the OpenLink system service" aria-describedby="restart-warning">
+                                    <i class="fas fa-redo" aria-hidden="true"></i> <span>Restart System</span>
+                                </button>
+                                <button class="btn btn-secondary" onclick="clearAllCaches()" title="Clear all system caches and temporary data">
+                                    <i class="fas fa-broom" aria-hidden="true"></i> <span>Clear All Caches</span>
+                                </button>
+                            </div>
+                            
+                            <div class="control-section">
+                                <h3>Backup & Export</h3>
+                                <button class="btn btn-primary" onclick="createBackup()" title="Download a complete system backup">
+                                    <i class="fas fa-download" aria-hidden="true"></i> <span>Create Backup</span>
+                                </button>
+                                <button class="btn btn-outline" onclick="exportData()" title="Export all data in CSV format">
+                                    <i class="fas fa-file-export" aria-hidden="true"></i> <span>Export All Data</span>
+                                </button>
+                            </div>
+                            
+                            <div class="control-section">
+                                <h3>Monitoring</h3>
+                                <button class="btn btn-outline" onclick="viewSystemLogs()">
+                                    <i class="fas fa-file-alt"></i> View System Logs
+                                </button>
+                                <button class="btn btn-outline" onclick="viewErrorLogs()">
+                                    <i class="fas fa-exclamation-triangle"></i> View Error Logs
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- User Management -->
+                <section id="users" class="section">
+                    <h2>User Management</h2>
+                    
+                    <div class="user-actions">
+                        <button class="btn btn-primary" onclick="showAddUserModal()" title="Create a new user account">
+                            <i class="fas fa-user-plus" aria-hidden="true"></i> <span>Add New User</span>
+                        </button>
+                        <input type="text" id="user-search" placeholder="Search users..." class="search-input" aria-label="Search users by name or email" title="Filter users in the table below">
+                    </div>
+
+                    <div class="users-table" role="table" aria-label="User management table">
+                        <div class="table-header" role="row">
+                            <div class="col" role="columnheader">Username</div>
+                            <div class="col" role="columnheader">Email</div>
+                            <div class="col" role="columnheader">Domain</div>
+                            <div class="col" role="columnheader">Role</div>
+                            <div class="col" role="columnheader">Links</div>
+                            <div class="col" role="columnheader">Status</div>
+                            <div class="col" role="columnheader">Actions</div>
+                        </div>
+                        <div id="users-list" class="table-body">
+                            <!-- Users will be populated here -->
+                        </div>
+                    </div>
+                </section>
+
+                <!-- System Settings -->
+                <section id="system" class="section">
+                    <h2>System Configuration</h2>
+                    
+                    <div class="settings-grid">
+                        <div class="settings-section">
+                            <h3>General Settings</h3>
+                            <div class="form-group">
+                                <label for="system-name">System Name</label>
+                                <input type="text" id="system-name" value="OpenLink">
+                            </div>
+                            <div class="form-group">
+                                <label for="default-domain">Default Domain</label>
+                                <select id="default-domain">
+                                    <option value="raywonderis.me">raywonderis.me</option>
+                                    <option value="devinecreations.net">devinecreations.net</option>
+                                    <option value="tappedin.fm">tappedin.fm</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h3>Security Settings</h3>
+                            <div class="form-group">
+                                <label for="max-links-per-user">Max Links per User</label>
+                                <input type="number" id="max-links-per-user" value="1000">
+                            </div>
+                            <div class="form-group">
+                                <label for="rate-limit-global">Global Rate Limit (req/min)</label>
+                                <input type="number" id="rate-limit-global" value="1000">
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h3>Analytics Settings</h3>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="enable-analytics" checked> Enable Analytics
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="enable-geo-tracking" checked> Geographic Tracking
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-actions">
+                        <button class="btn btn-primary" onclick="saveSystemSettings()" title="Save all system configuration changes">
+                            <i class="fas fa-save" aria-hidden="true"></i> <span>Save Settings</span>
+                        </button>
+                        <button class="btn btn-secondary" onclick="resetToDefaults()" title="Reset all settings to default values">
+                            <i class="fas fa-undo" aria-hidden="true"></i> <span>Reset to Defaults</span>
+                        </button>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        class AdminDashboard {
+            constructor() {
+                this.init();
+            }
+
+            init() {
+                this.setupNavigation();
+                this.loadDashboardData();
+                this.loadUsers();
+            }
+
+            setupNavigation() {
+                document.querySelectorAll('.nav-link').forEach(link => {
+                    link.addEventListener('click', (e) => {
+                        if (e.target.getAttribute('href').startsWith('#')) {
+                            e.preventDefault();
+                            const section = e.target.getAttribute('href').substring(1);
+                            this.switchSection(section);
+                        }
+                    });
+                });
+            }
+
+            switchSection(section) {
+                document.querySelectorAll('.nav-link').forEach(link => {
+                    link.classList.remove('active');
+                });
+                document.querySelector(`[href="#${section}"]`).classList.add('active');
+
+                document.querySelectorAll('.section').forEach(sec => {
+                    sec.classList.remove('active');
+                });
+                document.getElementById(section).classList.add('active');
+            }
+
+            async loadDashboardData() {
+                try {
+                    const response = await fetch('/apps/OpenLink/api/admin/stats');
+                    const stats = await response.json();
+
+                    if (!stats.error) {
+                        document.getElementById('total-users').textContent = stats.totalUsers || 0;
+                        document.getElementById('total-links').textContent = stats.totalLinks || 0;
+                        document.getElementById('total-clicks').textContent = stats.totalClicks || 0;
+                        document.getElementById('system-status').textContent = stats.systemStatus || 'Online';
+                    }
+                } catch (error) {
+                    console.error('Failed to load dashboard data:', error);
+                }
+            }
+
+            async loadUsers() {
+                try {
+                    const response = await fetch('/apps/OpenLink/api/admin/users');
+                    const users = await response.json();
+
+                    if (!users.error && Array.isArray(users)) {
+                        this.renderUsers(users);
+                    }
+                } catch (error) {
+                    console.error('Failed to load users:', error);
+                }
+            }
+
+            renderUsers(users) {
+                const usersList = document.getElementById('users-list');
+                usersList.innerHTML = users.map(user => `
+                    <div class="table-row">
+                        <div class="col">${user.username}</div>
+                        <div class="col">${user.email}</div>
+                        <div class="col">${user.domain}</div>
+                        <div class="col">${user.role}</div>
+                        <div class="col">${user.linkCount || 0}</div>
+                        <div class="col">
+                            <span class="status ${user.isActive ? 'status-active' : 'status-inactive'}">
+                                ${user.isActive ? 'Active' : 'Inactive'}
+                            </span>
+                        </div>
+                        <div class="col">
+                            <button class="btn btn-sm btn-outline" onclick="editUser('${user.id}')">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline" onclick="toggleUser('${user.id}')">
+                                <i class="fas fa-power-off"></i>
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        // Global admin functions
+        async function restartSystem() {
+            if (!confirm('Are you sure you want to restart the system?')) return;
+            
+            try {
+                const response = await fetch('/apps/OpenLink/api/admin/restart', {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                alert(result.success ? 'System restarted successfully' : 'Failed to restart system');
+            } catch (error) {
+                alert('Error restarting system');
+            }
+        }
+
+        async function clearAllCaches() {
+            try {
+                const response = await fetch('/apps/OpenLink/api/admin/cache/clear-all', {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                alert(result.success ? 'All caches cleared successfully' : 'Failed to clear caches');
+            } catch (error) {
+                alert('Error clearing caches');
+            }
+        }
+
+        function createBackup() {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const downloadUrl = `/apps/OpenLink/api/admin/backup?timestamp=${timestamp}`;
+            window.open(downloadUrl, '_blank');
+        }
+
+        function exportData() {
+            const downloadUrl = '/apps/OpenLink/api/admin/export';
+            window.open(downloadUrl, '_blank');
+        }
+
+        function viewSystemLogs() {
+            window.open('/apps/OpenLink/logs/system', '_blank');
+        }
+
+        function viewErrorLogs() {
+            window.open('/apps/OpenLink/logs/error', '_blank');
+        }
+
+        function showAddUserModal() {
+            // TODO: Implement add user modal
+            alert('Add user functionality coming soon');
+        }
+
+        async function editUser(userId) {
+            // TODO: Implement edit user functionality
+            alert(`Edit user: ${userId}`);
+        }
+
+        async function toggleUser(userId) {
+            if (!confirm('Are you sure you want to toggle this user status?')) return;
+            
+            try {
+                const response = await fetch(`/apps/OpenLink/api/admin/users/${userId}/toggle`, {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    location.reload(); // Refresh to show updated status
+                } else {
+                    alert('Failed to toggle user status');
+                }
+            } catch (error) {
+                alert('Error toggling user status');
+            }
+        }
+
+        async function saveSystemSettings() {
+            const settings = {
+                systemName: document.getElementById('system-name').value,
+                defaultDomain: document.getElementById('default-domain').value,
+                maxLinksPerUser: parseInt(document.getElementById('max-links-per-user').value),
+                rateLimitGlobal: parseInt(document.getElementById('rate-limit-global').value),
+                enableAnalytics: document.getElementById('enable-analytics').checked,
+                enableGeoTracking: document.getElementById('enable-geo-tracking').checked
+            };
+
+            try {
+                const response = await fetch('/apps/OpenLink/api/admin/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings)
+                });
+                const result = await response.json();
+                alert(result.success ? 'Settings saved successfully' : 'Failed to save settings');
+            } catch (error) {
+                alert('Error saving settings');
+            }
+        }
+
+        function resetToDefaults() {
+            if (!confirm('Are you sure you want to reset all settings to defaults?')) return;
+            
+            document.getElementById('system-name').value = 'OpenLink';
+            document.getElementById('default-domain').value = 'raywonderis.me';
+            document.getElementById('max-links-per-user').value = '1000';
+            document.getElementById('rate-limit-global').value = '1000';
+            document.getElementById('enable-analytics').checked = true;
+            document.getElementById('enable-geo-tracking').checked = true;
+        }
+
+        // Initialize admin dashboard
+        document.addEventListener('DOMContentLoaded', () => {
+            new AdminDashboard();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OpenLink Help</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+        }
+        h1, h2, h3 { color: #0066cc; }
+        .shortcut {
+            background: #f0f0f0;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .section { margin-bottom: 30px; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f5f5f5; }
+    </style>
+</head>
+<body>
+    <h1>OpenLink User Guide</h1>
+
+    <section class="section" id="getting-started">
+        <h2>Getting Started</h2>
+        <p>OpenLink is an accessible remote desktop application designed for everyone, including screen reader users. It allows you to share your screen with others or connect to remote computers.</p>
+
+        <h3>Quick Start</h3>
+        <ol>
+            <li><strong>To share your screen:</strong> Go to the Host tab and click "Start Hosting". Share your Session ID with the person who needs to connect.</li>
+            <li><strong>To connect to someone:</strong> Go to the Connect tab, enter the Session ID, and click "Connect".</li>
+        </ol>
+    </section>
+
+    <section class="section" id="keyboard-shortcuts">
+        <h2>Keyboard Shortcuts</h2>
+        <table>
+            <tr><th>Shortcut</th><th>Action</th></tr>
+            <tr><td><span class="shortcut">Alt+Shift+\</span></td><td>Open Control Menu (during session) / Bring window to front (when not in session)</td></tr>
+            <tr><td><span class="shortcut">Escape</span></td><td>Close Control Menu</td></tr>
+            <tr><td><span class="shortcut">Arrow Keys</span></td><td>Navigate menu items</td></tr>
+            <tr><td><span class="shortcut">Enter</span></td><td>Select menu item</td></tr>
+            <tr><td><span class="shortcut">Tab</span></td><td>Navigate between tabs and controls</td></tr>
+        </table>
+    </section>
+
+    <section class="section" id="hosting">
+        <h2>Hosting a Session</h2>
+        <p>When you host a session, you share your screen with others.</p>
+        <ol>
+            <li>Click the <strong>Host</strong> tab</li>
+            <li>Configure your hosting options:
+                <ul>
+                    <li><strong>Share Audio:</strong> Let remote users hear your computer's audio</li>
+                    <li><strong>Allow Remote Input:</strong> Let the helper control your keyboard and mouse</li>
+                    <li><strong>Allow Clipboard:</strong> Share clipboard between computers</li>
+                    <li><strong>Allow Files:</strong> Enable file transfers</li>
+                </ul>
+            </li>
+            <li>Click <strong>Start Hosting</strong></li>
+            <li>Share your Session ID with the person who will help you</li>
+        </ol>
+
+        <h3>Connection Permission</h3>
+        <p>Choose how to handle incoming connections:</p>
+        <ul>
+            <li><strong>Ask for each connection:</strong> You'll be prompted each time (recommended)</li>
+            <li><strong>Always allow:</strong> Anyone with your Session ID can connect</li>
+            <li><strong>Never allow:</strong> Block all connection attempts</li>
+        </ul>
+    </section>
+
+    <section class="section" id="connecting">
+        <h2>Connecting to a Remote Computer</h2>
+        <ol>
+            <li>Click the <strong>Connect</strong> tab</li>
+            <li>Enter the Session ID shared by the host</li>
+            <li>Click <strong>Connect</strong></li>
+            <li>Once connected, you'll see the remote screen</li>
+        </ol>
+
+        <h3>During a Session</h3>
+        <p>Press <span class="shortcut">Alt+Shift+\</span> to open the Control Menu with these options:</p>
+        <ul>
+            <li><strong>Disconnect:</strong> End the session</li>
+            <li><strong>Send File:</strong> Transfer a file to the remote computer</li>
+            <li><strong>Machine Details:</strong> View remote computer information</li>
+            <li><strong>Audio Settings:</strong> Adjust volume levels</li>
+            <li><strong>Screen Reader Options:</strong> Configure accessibility</li>
+            <li><strong>Swap Control:</strong> Switch who controls the session</li>
+            <li><strong>Restart Remote:</strong> Restart the remote computer</li>
+        </ul>
+    </section>
+
+    <section class="section" id="clipboard">
+        <h2>Clipboard Sharing</h2>
+        <p>OpenLink supports two clipboard transfer modes:</p>
+        <ul>
+            <li><strong>Double-copy transfer:</strong> Copy text twice quickly (within 1 second) to send it to the remote computer</li>
+            <li><strong>Automatic sync:</strong> When enabled, clipboard changes are synced automatically</li>
+        </ul>
+    </section>
+
+    <section class="section" id="accessibility">
+        <h2>Accessibility Features</h2>
+        <p>OpenLink is designed with accessibility in mind:</p>
+        <ul>
+            <li><strong>Screen reader compatible:</strong> All controls are properly labeled for NVDA, JAWS, VoiceOver, and Orca</li>
+            <li><strong>Keyboard navigation:</strong> Full keyboard access to all features</li>
+            <li><strong>Audio cues:</strong> Sound notifications for connection events</li>
+            <li><strong>Remote screen reader:</strong> Can relay remote screen reader output</li>
+            <li><strong>Local TTS:</strong> Option to use local text-to-speech for announcements</li>
+        </ul>
+
+        <h3>Screen Reader Settings</h3>
+        <p>In Settings, you can configure:</p>
+        <ul>
+            <li><strong>Use local TTS:</strong> Speak announcements through your local screen reader</li>
+            <li><strong>Enable remote screen reader:</strong> Hear the remote computer's screen reader</li>
+            <li><strong>Speech rate:</strong> Adjust how fast speech is delivered</li>
+        </ul>
+    </section>
+
+    <section class="section" id="payment">
+        <h2>Payment Integration</h2>
+        <p>OpenLink supports optional payments for help sessions through eCripto:</p>
+        <ul>
+            <li>Hosts can offer payment to helpers</li>
+            <li>Configure your wallet address in Settings to receive payments</li>
+            <li>Enable eCripto integration for enhanced payment features</li>
+        </ul>
+    </section>
+
+    <section class="section" id="troubleshooting">
+        <h2>Troubleshooting</h2>
+
+        <h3>Connection Issues</h3>
+        <ul>
+            <li><strong>Cannot connect:</strong> Verify the Session ID is correct and both parties have internet access</li>
+            <li><strong>Connection drops:</strong> Check network stability; the app will attempt to reconnect automatically</li>
+            <li><strong>No video:</strong> Ensure screen sharing permission is granted in your system settings</li>
+        </ul>
+
+        <h3>Audio Issues</h3>
+        <ul>
+            <li><strong>No audio:</strong> Check that "Share Audio" is enabled in hosting options</li>
+            <li><strong>Low volume:</strong> Adjust the Remote Volume slider in Settings</li>
+        </ul>
+
+        <h3>Permission Issues</h3>
+        <p>On macOS, you may need to grant screen recording permission:</p>
+        <ol>
+            <li>Open System Preferences > Privacy & Security > Privacy</li>
+            <li>Select Screen Recording</li>
+            <li>Enable OpenLink</li>
+        </ol>
+    </section>
+
+    <section class="section" id="contact">
+        <h2>Support</h2>
+        <p>For additional help or to report issues:</p>
+        <ul>
+            <li>Website: <a href="https://raywonderis.me/apps/openlink">raywonderis.me/apps/openlink</a></li>
+            <li>Email: <a href="mailto:webmaster@devine-creations.com">webmaster@devine-creations.com</a></li>
+        </ul>
+    </section>
+</body>
+</html>

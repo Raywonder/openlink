@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenLink Remote Desktop</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Accessibility Announcements (Screen Reader Only) -->
+    <div id="sr-announcements" role="status" aria-live="polite" class="sr-only"></div>
+    <div id="sr-alerts" role="alert" aria-live="assertive" class="sr-only"></div>
+
+    <!-- Main Application -->
+    <div id="app" role="application" aria-label="OpenLink Remote Desktop">
+
+        <!-- Connection Screen -->
+        <section id="connect-screen" class="screen active" aria-labelledby="connect-heading">
+            <div class="container">
+                <header class="header">
+                    <h1 id="connect-heading">
+                        <span class="logo">OpenLink</span>
+                        <span class="subtitle">Remote Desktop</span>
+                    </h1>
+                    <p class="tagline">Accessible remote desktop for everyone</p>
+                </header>
+
+                <div class="connection-panel" role="region" aria-labelledby="connection-options">
+                    <h2 id="connection-options" class="sr-only">Connection Options</h2>
+
+                    <!-- Host Mode -->
+                    <div class="panel-section">
+                        <h3>Share Your Screen</h3>
+                        <p>Let others view and control your computer</p>
+                        <button id="btn-host" class="btn btn-primary btn-large" aria-describedby="host-desc">
+                            Start Hosting
+                        </button>
+                        <p id="host-desc" class="description">
+                            Generate a session code to share with others
+                        </p>
+                    </div>
+
+                    <div class="divider" role="separator">
+                        <span>or</span>
+                    </div>
+
+                    <!-- Client Mode -->
+                    <div class="panel-section">
+                        <h3>Connect to Remote</h3>
+                        <p>View and control another computer</p>
+                        <div class="input-group">
+                            <label for="session-code" class="sr-only">Session Code</label>
+                            <input
+                                type="text"
+                                id="session-code"
+                                placeholder="Enter session code"
+                                autocomplete="off"
+                                autocapitalize="off"
+                                spellcheck="false"
+                                aria-describedby="code-format"
+                            >
+                            <button id="btn-connect" class="btn btn-secondary">
+                                Connect
+                            </button>
+                        </div>
+                        <p id="code-format" class="description">
+                            Enter the code provided by the host
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Settings Panel -->
+                <details class="settings-panel">
+                    <summary>
+                        <span class="icon" aria-hidden="true">&#9881;</span>
+                        Settings
+                    </summary>
+                    <div class="settings-content">
+                        <!-- Audio Settings -->
+                        <fieldset>
+                            <legend>Audio</legend>
+                            <div class="setting-row">
+                                <input type="checkbox" id="enable-mic" checked>
+                                <label for="enable-mic">Enable microphone</label>
+                            </div>
+                            <div class="setting-row">
+                                <input type="checkbox" id="enable-system-audio" checked>
+                                <label for="enable-system-audio">Capture system audio</label>
+                            </div>
+                        </fieldset>
+
+                        <!-- Accessibility Settings -->
+                        <fieldset>
+                            <legend>Accessibility</legend>
+                            <div class="setting-row">
+                                <label for="keyboard-mode">Keyboard Mode</label>
+                                <select id="keyboard-mode">
+                                    <option value="hybrid" selected>Hybrid (recommended)</option>
+                                    <option value="local">Local only</option>
+                                    <option value="remote">Remote only</option>
+                                </select>
+                            </div>
+                            <div class="setting-row">
+                                <input type="checkbox" id="announce-focus" checked>
+                                <label for="announce-focus">Announce remote focus changes</label>
+                            </div>
+                            <div class="setting-row">
+                                <input type="checkbox" id="capture-remote-sr" checked>
+                                <label for="capture-remote-sr">Relay remote screen reader output</label>
+                            </div>
+                        </fieldset>
+
+                        <!-- Display Settings -->
+                        <fieldset>
+                            <legend>Display</legend>
+                            <div class="setting-row">
+                                <label for="quality">Quality</label>
+                                <select id="quality">
+                                    <option value="low">Low (faster)</option>
+                                    <option value="medium" selected>Medium</option>
+                                    <option value="high">High</option>
+                                </select>
+                            </div>
+                            <div class="setting-row">
+                                <input type="checkbox" id="fit-to-window" checked>
+                                <label for="fit-to-window">Fit to window</label>
+                            </div>
+                        </fieldset>
+
+                        <!-- Advanced Settings -->
+                        <fieldset>
+                            <legend>Advanced</legend>
+                            <div class="setting-row">
+                                <label for="signaling-server">Signaling Server</label>
+                                <input type="url" id="signaling-server"
+                                    value="wss://api.devine-creations.com/ws/remote"
+                                    placeholder="wss://...">
+                            </div>
+                        </fieldset>
+                    </div>
+                </details>
+            </div>
+        </section>
+
+        <!-- Hosting Screen (waiting for clients) -->
+        <section id="host-screen" class="screen" aria-labelledby="host-heading" hidden>
+            <div class="container">
+                <header class="header">
+                    <h1 id="host-heading">Hosting Session</h1>
+                </header>
+
+                <div class="session-info" role="region" aria-labelledby="session-code-label">
+                    <h2 id="session-code-label">Your Session Code</h2>
+                    <div class="code-display">
+                        <span id="display-session-code" class="session-code" aria-describedby="code-instructions"></span>
+                        <button id="btn-copy-code" class="btn btn-icon" aria-label="Copy session code">
+                            <span aria-hidden="true">&#128203;</span>
+                        </button>
+                    </div>
+                    <p id="code-instructions">Share this code with the person connecting to your computer</p>
+                </div>
+
+                <div class="status-info" role="status" aria-live="polite">
+                    <p id="host-status">Waiting for connections...</p>
+                    <div id="connected-clients" class="client-list" role="list" aria-label="Connected clients">
+                    </div>
+                </div>
+
+                <div class="host-controls">
+                    <button id="btn-stop-hosting" class="btn btn-danger">
+                        Stop Hosting
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Remote Desktop View -->
+        <section id="remote-screen" class="screen" aria-labelledby="remote-heading" hidden>
+            <div class="remote-container">
+                <!-- Toolbar -->
+                <header class="toolbar" role="toolbar" aria-label="Remote desktop controls">
+                    <h1 id="remote-heading" class="sr-only">Remote Desktop View</h1>
+
+                    <div class="toolbar-left">
+                        <span id="connection-status" class="status-indicator" role="status">
+                            <span class="dot"></span>
+                            <span class="text">Connected</span>
+                        </span>
+                    </div>
+
+                    <div class="toolbar-center">
+                        <button id="btn-fullscreen" class="btn-toolbar" aria-label="Toggle fullscreen">
+                            <span aria-hidden="true">&#9974;</span>
+                        </button>
+                        <button id="btn-fit" class="btn-toolbar" aria-label="Fit to window" aria-pressed="true">
+                            <span aria-hidden="true">&#8690;</span>
+                        </button>
+                        <button id="btn-keyboard-mode" class="btn-toolbar" aria-label="Toggle keyboard mode">
+                            <span aria-hidden="true">&#9000;</span>
+                        </button>
+                    </div>
+
+                    <div class="toolbar-right">
+                        <button id="btn-toggle-mic" class="btn-toolbar" aria-label="Toggle microphone" aria-pressed="true">
+                            <span aria-hidden="true">&#127908;</span>
+                        </button>
+                        <button id="btn-toggle-audio" class="btn-toolbar" aria-label="Toggle audio" aria-pressed="true">
+                            <span aria-hidden="true">&#128266;</span>
+                        </button>
+                        <button id="btn-disconnect" class="btn-toolbar btn-danger" aria-label="Disconnect">
+                            <span aria-hidden="true">&#10006;</span>
+                        </button>
+                    </div>
+                </header>
+
+                <!-- Video Display -->
+                <div id="video-container" class="video-container" role="img" aria-label="Remote desktop display">
+                    <video id="remote-video" autoplay playsinline></video>
+                    <div id="video-overlay" class="video-overlay" hidden>
+                        <p id="overlay-message">Connecting...</p>
+                    </div>
+                </div>
+
+                <!-- Audio elements -->
+                <audio id="remote-audio" autoplay></audio>
+            </div>
+        </section>
+
+        <!-- Error/Status Modal -->
+        <div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" hidden>
+            <div class="modal-content">
+                <h2 id="modal-title">Message</h2>
+                <p id="modal-message"></p>
+                <div class="modal-actions">
+                    <button id="modal-close" class="btn btn-primary">OK</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Scripts -->
+    <script src="../webrtc-client.js"></script>
+    <script src="../accessibility-bridge.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

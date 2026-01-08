@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>openlink - Bug Tracker & File Manager</title>
+    <link rel="stylesheet" href="tracker-styles.css">
+</head>
+<body>
+    <div class="app-header">
+        <div class="app-info">
+            <h1>🐛 openlink Bug Tracker</h1>
+            <div class="app-details">
+                <span class="app-type">desktop-app</span>
+                <span class="app-path">/Users/administrator/dev/apps/openlink</span>
+                <a href="https://github.com/raywonder/openlink" target="_blank">📱 GitHub</a>
+            </div>
+        </div>
+        <div class="app-actions">
+            <button class="btn btn-primary" onclick="appTracker.showNewIssue()">🐛 New Issue</button>
+            <button class="btn btn-secondary" onclick="appTracker.showFileManager()">📁 Files</button>
+            <button class="btn btn-secondary" onclick="appTracker.syncRemote()">🔄 Sync</button>
+            <button class="btn btn-warning" onclick="appTracker.showOwnershipManager()">👥 Claim App</button>
+        </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="tab-nav">
+        <button class="tab-btn active" onclick="appTracker.showTab('issues')">🐛 Issues</button>
+        <button class="tab-btn" onclick="appTracker.showTab('files')">📁 File Manager</button>
+        <button class="tab-btn" onclick="appTracker.showTab('team')">👥 Team</button>
+        <button class="tab-btn" onclick="appTracker.showTab('deploy')">🚀 Deploy</button>
+        <button class="tab-btn" onclick="appTracker.showTab('logs')">📋 Logs</button>
+    </div>
+
+    <!-- Issues Tab -->
+    <div id="issues-tab" class="tab-content active">
+        <div class="issues-header">
+            <div class="filter-controls">
+                <select id="status-filter">
+                    <option value="all">All Status</option>
+                    <option value="open">Open</option>
+                    <option value="in-progress">In Progress</option>
+                    <option value="resolved">Resolved</option>
+                    <option value="closed">Closed</option>
+                </select>
+                <select id="priority-filter">
+                    <option value="all">All Priority</option>
+                    <option value="critical">Critical</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                </select>
+                <input type="text" id="search-issues" placeholder="Search issues...">
+            </div>
+        </div>
+
+        <div id="issues-list" class="issues-container">
+            <!-- Issues will be populated by JavaScript -->
+        </div>
+    </div>
+
+    <!-- File Manager Tab -->
+    <div id="files-tab" class="tab-content">
+        <div class="file-manager-header">
+            <div class="path-controls">
+                <div class="path-group">
+                    <label>Local Path:</label>
+                    <input type="text" id="local-path" value="/Users/administrator/dev/apps/openlink" readonly>
+                    <button class="btn-small" onclick="fileManager.browseLocal()">📁</button>
+                </div>
+                <div class="path-group">
+                    <label>Remote Path:</label>
+                    <input type="text" id="remote-path" value="/home/devinecr/apps/openlink">
+                    <button class="btn-small" onclick="fileManager.testRemoteConnection()">🔗</button>
+                </div>
+            </div>
+
+            <div class="sync-controls">
+                <button class="btn btn-primary" onclick="fileManager.syncToRemote()">⬆️ Upload</button>
+                <button class="btn btn-secondary" onclick="fileManager.syncFromRemote()">⬇️ Download</button>
+                <button class="btn btn-secondary" onclick="fileManager.compareFiles()">🔍 Compare</button>
+            </div>
+        </div>
+
+        <div class="file-manager-content">
+            <div class="file-panel">
+                <div class="panel-header">📁 Local Files</div>
+                <div id="local-files" class="file-tree"></div>
+            </div>
+
+            <div class="file-panel">
+                <div class="panel-header">🌐 Remote Files</div>
+                <div id="remote-files" class="file-tree"></div>
+            </div>
+        </div>
+
+        <!-- Path Previews -->
+        <div class="path-previews">
+            <div class="preview-section">
+                <h4>📍 Path Mapping</h4>
+                <div class="path-mapping">
+                    <div class="path-item">
+                        <span class="path-label">Local App:</span>
+                        <span class="path-value" id="preview-local-app">/Users/administrator/dev/apps/openlink</span>
+                    </div>
+                    <div class="path-item">
+                        <span class="path-label">Remote App:</span>
+                        <span class="path-value" id="preview-remote-app">/home/devinecr/apps/openlink</span>
+                    </div>
+                    <div class="path-item">
+                        <span class="path-label">Web Root:</span>
+                        <span class="path-value" id="preview-web-path">/home/devinecr/public_html/openlink</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Team Tab -->
+    <div id="team-tab" class="tab-content">
+        <div class="team-section">
+            <div class="ownership-status">
+                <div class="ownership-card" id="ownership-status">
+                    <div class="ownership-header">
+                        <h3>👤 App Ownership</h3>
+                        <div class="ownership-actions">
+                            <button class="btn btn-warning" onclick="teamManager.claimOwnership()">🏷️ Claim App</button>
+                            <button class="btn btn-secondary" onclick="teamManager.transferOwnership()">🔄 Transfer</button>
+                        </div>
+                    </div>
+                    <div class="ownership-details">
+                        <div class="owner-info" id="owner-info">
+                            <div class="no-owner">
+                                <div class="no-owner-icon">🔓</div>
+                                <div class="no-owner-text">This app is unclaimed</div>
+                                <p>Claim ownership to manage team access, deploy permissions, and issue resolution.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="team-management">
+                <div class="team-header">
+                    <h3>👥 Team Members</h3>
+                    <button class="btn btn-primary" onclick="teamManager.inviteTeamMember()" id="invite-btn" disabled>✉️ Invite Member</button>
+                </div>
+
+                <div class="team-members" id="team-members">
+                    <div class="no-team">
+                        <div class="no-team-icon">👤</div>
+                        <div class="no-team-text">No team members yet</div>
+                        <p>Once you claim ownership, you can invite team members to collaborate.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="permissions-section">
+                <h3>🛡️ Permissions & Access</h3>
+                <div class="permissions-grid">
+                    <div class="permission-card">
+                        <div class="permission-icon">🐛</div>
+                        <div class="permission-details">
+                            <div class="permission-name">Issue Management</div>
+                            <div class="permission-desc">Create, edit, and resolve issues</div>
+                        </div>
+                        <div class="permission-controls">
+                            <select id="issues-permission" disabled>
+                                <option value="none">No Access</option>
+                                <option value="read">View Only</option>
+                                <option value="write">Create & Edit</option>
+                                <option value="admin">Full Control</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="permission-card">
+                        <div class="permission-icon">📁</div>
+                        <div class="permission-details">
+                            <div class="permission-name">File Management</div>
+                            <div class="permission-desc">Access and sync files</div>
+                        </div>
+                        <div class="permission-controls">
+                            <select id="files-permission" disabled>
+                                <option value="none">No Access</option>
+                                <option value="read">View Only</option>
+                                <option value="sync">Sync Files</option>
+                                <option value="admin">Full Control</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="permission-card">
+                        <div class="permission-icon">🚀</div>
+                        <div class="permission-details">
+                            <div class="permission-name">Deployment</div>
+                            <div class="permission-desc">Deploy to production</div>
+                        </div>
+                        <div class="permission-controls">
+                            <select id="deploy-permission" disabled>
+                                <option value="none">No Access</option>
+                                <option value="read">View Status</option>
+                                <option value="deploy">Deploy</option>
+                                <option value="admin">Full Control</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="management-tools">
+                <h3>🔧 Management Tools</h3>
+                <div class="management-actions">
+                    <button class="btn btn-primary" onclick="teamManager.generateAppReport()">📊 Generate Report</button>
+                    <button class="btn btn-secondary" onclick="teamManager.exportSettings()">⚙️ Export Settings</button>
+                    <button class="btn btn-secondary" onclick="teamManager.auditLog()">📋 Audit Log</button>
+                </div>
+
+                <div class="app-statistics">
+                    <div class="stat-card">
+                        <div class="stat-number" id="total-issues">-</div>
+                        <div class="stat-label">Total Issues</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="open-issues">-</div>
+                        <div class="stat-label">Open Issues</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="last-deploy">-</div>
+                        <div class="stat-label">Days Since Deploy</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="team-size">0</div>
+                        <div class="stat-label">Team Members</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Deploy Tab -->
+    <div id="deploy-tab" class="tab-content">
+        <div class="deploy-section">
+            <h3>🚀 Deployment Configuration</h3>
+
+            <div class="deploy-config">
+                <div class="config-group">
+                    <label>SSH Host:</label>
+                    <input type="text" id="deploy-host" value="raywonderis.me">
+                </div>
+                <div class="config-group">
+                    <label>SSH Port:</label>
+                    <input type="number" id="deploy-port" value="450">
+                </div>
+                <div class="config-group">
+                    <label>Username:</label>
+                    <input type="text" id="deploy-user" value="devinecr">
+                </div>
+                <div class="config-group">
+                    <label>Remote Path:</label>
+                    <input type="text" id="deploy-remote-path" value="/home/devinecr/apps/openlink">
+                </div>
+            </div>
+
+            <div class="deploy-actions">
+                <button class="btn btn-primary" onclick="deploy.testConnection()">🔗 Test Connection</button>
+                <button class="btn btn-success" onclick="deploy.deployApp()">🚀 Deploy</button>
+                <button class="btn btn-warning" onclick="deploy.rollback()">⏪ Rollback</button>
+            </div>
+
+            <div class="deploy-status">
+                <div id="deploy-log" class="deploy-log"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logs Tab -->
+    <div id="logs-tab" class="tab-content">
+        <div class="logs-section">
+            <div class="logs-controls">
+                <button class="btn btn-secondary" onclick="logger.refreshLogs()">🔄 Refresh</button>
+                <button class="btn btn-secondary" onclick="logger.clearLogs()">🗑️ Clear</button>
+                <button class="btn btn-secondary" onclick="logger.exportLogs()">💾 Export</button>
+            </div>
+            <div id="logs-container" class="logs-container"></div>
+        </div>
+    </div>
+
+    <!-- New Issue Modal -->
+    <div id="new-issue-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🐛 New Issue</h3>
+                <button class="modal-close" onclick="appTracker.hideModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="new-issue-form">
+                    <div class="form-group">
+                        <label>Title:</label>
+                        <input type="text" id="issue-title" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Description:</label>
+                        <textarea id="issue-description" rows="5" required></textarea>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Priority:</label>
+                            <select id="issue-priority">
+                                <option value="low">Low</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="high">High</option>
+                                <option value="critical">Critical</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Type:</label>
+                            <select id="issue-type">
+                                <option value="bug">Bug</option>
+                                <option value="feature">Feature</option>
+                                <option value="enhancement">Enhancement</option>
+                                <option value="documentation">Documentation</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary" onclick="appTracker.hideModal()">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Create Issue</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="app-tracker.js"></script>
+    <script src="file-manager.js"></script>
+    <script>
+        // Initialize app tracker with configuration
+        const appConfig = {
+            name: 'openlink',
+            type: 'desktop-app',
+            localPath: '/Users/administrator/dev/apps/openlink',
+            remoteConfig: {"user":"devinecr","host":"raywonderis.me","port":450,"remotePath":"/home/devinecr/apps/openlink","publicPath":"/home/devinecr/public_html/openlink","webPath":"/home/devinecr/public_html","github":"raywonder/openlink","centralTracker":"/home/devinecr/devinecreations.net/apptracker/openlink"}
+        };
+
+        const appTracker = new AppTracker(appConfig);
+        const fileManager = new FileManager(appConfig);
+        const deploy = new DeployManager(appConfig);
+        const logger = new LogManager(appConfig);
+        const teamManager = new TeamManager(appConfig);
+
+        // Initialize the application
+        window.addEventListener('DOMContentLoaded', () => {
+            appTracker.initialize();
+            fileManager.initialize();
+            teamManager.initialize();
+        });
+    </script>
+</body>
+</html>

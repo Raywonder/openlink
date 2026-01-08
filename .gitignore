@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+releases/
+*.dmg
+*.exe
+*.AppImage
+*.deb
+*.rpm
+*.tar.gz
+*.zip
+*.blockmap
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Claude
+.claude/
+
+# Playwright
+.playwright-mcp/

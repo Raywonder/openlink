@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenLink Relay Panel - URL Management</title>
+    <link rel="stylesheet" href="{$BASE_URL}/apps/OpenLink/css/openlink.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .relay-panel {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+        
+        .relay-header {
+            background: var(--surface);
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: var(--shadow);
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+        
+        .relay-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .relay-stat {
+            background: var(--surface);
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            text-align: center;
+            box-shadow: var(--shadow);
+        }
+        
+        .relay-stat h3 {
+            font-size: 2rem;
+            color: var(--primary-color);
+            margin-bottom: 0.5rem;
+        }
+        
+        .relay-controls {
+            background: var(--surface);
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: var(--shadow);
+            margin-bottom: 2rem;
+        }
+        
+        .control-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+        }
+        
+        .control-section {
+            padding: 1.5rem;
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+        }
+        
+        .log-viewer {
+            background: var(--surface);
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: var(--shadow);
+            margin-bottom: 2rem;
+        }
+        
+        .log-entries {
+            max-height: 400px;
+            overflow-y: auto;
+            background: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            font-family: monospace;
+            font-size: 0.875rem;
+        }
+        
+        .log-entry {
+            margin-bottom: 0.5rem;
+            padding: 0.25rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+        
+        .log-timestamp {
+            color: var(--text-secondary);
+            font-weight: bold;
+        }
+        
+        .log-method {
+            color: var(--primary-color);
+            font-weight: bold;
+        }
+        
+        .log-status-200 { color: var(--success-color); }
+        .log-status-404 { color: var(--warning-color); }
+        .log-status-error { color: var(--danger-color); }
+        
+        .domain-manager {
+            background: var(--surface);
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: var(--shadow);
+        }
+        
+        .domain-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 1rem;
+        }
+        
+        .domain-card {
+            background: var(--background);
+            padding: 1.5rem;
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+        }
+        
+        .domain-status {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: bold;
+        }
+        
+        .status-active {
+            background: rgba(16, 163, 74, 0.1);
+            color: var(--success-color);
+        }
+        
+        .status-maintenance {
+            background: rgba(202, 138, 4, 0.1);
+            color: var(--warning-color);
+        }
+    </style>
+</head>
+<body>
+    <div class="relay-panel">
+        <!-- Header -->
+        <div class="relay-header">
+            <h1><i class="fas fa-route"></i> OpenLink Relay Panel</h1>
+            <p>Manage URL redirections and monitor relay performance across all domains</p>
+        </div>
+
+        <!-- Real-time Stats -->
+        <div class="relay-stats">
+            <div class="relay-stat">
+                <h3 id="total-redirects">0</h3>
+                <p>Total Redirects Today</p>
+            </div>
+            <div class="relay-stat">
+                <h3 id="active-links">0</h3>
+                <p>Active Links</p>
+            </div>
+            <div class="relay-stat">
+                <h3 id="avg-response-time">0ms</h3>
+                <p>Avg Response Time</p>
+            </div>
+            <div class="relay-stat">
+                <h3 id="success-rate">0%</h3>
+                <p>Success Rate</p>
+            </div>
+        </div>
+
+        <!-- Relay Controls -->
+        <div class="relay-controls">
+            <h2><i class="fas fa-cogs"></i> Relay Controls</h2>
+            <div class="control-grid">
+                <div class="control-section">
+                    <h3><i class="fas fa-power-off"></i> System Control</h3>
+                    <div class="form-group">
+                        <button id="restart-relay" class="btn btn-warning" title="Restart the URL relay service" aria-describedby="restart-relay-warning">
+                            <i class="fas fa-redo" aria-hidden="true"></i> <span>Restart Relay Service</span>
+                        </button>
+                    </div>
+                    <div class="form-group">
+                        <button id="clear-cache" class="btn btn-secondary" title="Clear URL redirect cache to force refresh">
+                            <i class="fas fa-broom" aria-hidden="true"></i> <span>Clear Redirect Cache</span>
+                        </button>
+                    </div>
+                    <div class="form-group">
+                        <label for="maintenance-mode" title="Enable maintenance mode to temporarily disable URL redirects">
+                            <input type="checkbox" id="maintenance-mode" aria-describedby="maintenance-help"> <span>Maintenance Mode</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="control-section">
+                    <h3><i class="fas fa-shield-alt"></i> Security Settings</h3>
+                    <div class="form-group">
+                        <label for="rate-limit">Rate Limit (requests/minute)</label>
+                        <input type="number" id="rate-limit" value="100" min="1" max="1000" title="Maximum requests per minute per IP address" aria-describedby="rate-limit-help">
+                    </div>
+                    <div class="form-group">
+                        <label for="blocked-ips">Blocked IP Addresses</label>
+                        <textarea id="blocked-ips" rows="3" placeholder="Enter one IP per line" title="IP addresses to block from accessing the service" aria-describedby="blocked-ips-help"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <button id="save-security" class="btn btn-primary" title="Apply security configuration changes">Save Security Settings</button>
+                    </div>
+                </div>
+
+                <div class="control-section">
+                    <h3><i class="fas fa-chart-line"></i> Analytics Control</h3>
+                    <div class="form-group">
+                        <label for="analytics-enabled">
+                            <input type="checkbox" id="analytics-enabled" checked> Enable Analytics
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label for="geo-tracking">
+                            <input type="checkbox" id="geo-tracking" checked> Geographic Tracking
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <button id="export-analytics" class="btn btn-outline" title="Download analytics data as CSV file">
+                            <i class="fas fa-download" aria-hidden="true"></i> <span>Export Analytics Data</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Domain Management -->
+        <div class="domain-manager">
+            <h2><i class="fas fa-globe"></i> Domain Management</h2>
+            <div class="domain-list">
+                <div class="domain-card">
+                    <h3>raywonderis.me</h3>
+                    <p><span class="domain-status status-active">Active</span></p>
+                    <p><strong>Links:</strong> <span id="domain-1-links">0</span></p>
+                    <p><strong>Redirects Today:</strong> <span id="domain-1-redirects">0</span></p>
+                    <div class="form-group" style="margin-top: 1rem;">
+                        <button class="btn btn-outline btn-sm" onclick="testDomain('raywonderis.me')" title="Test connectivity and functionality for raywonderis.me">
+                            <i class="fas fa-vial" aria-hidden="true"></i> <span>Test Domain</span>
+                        </button>
+                        <button class="btn btn-outline btn-sm" onclick="viewDomainLogs('raywonderis.me')" title="View request logs for raywonderis.me">
+                            <i class="fas fa-file-alt" aria-hidden="true"></i> <span>View Logs</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="domain-card">
+                    <h3>devinecreations.net</h3>
+                    <p><span class="domain-status status-active">Active</span></p>
+                    <p><strong>Links:</strong> <span id="domain-2-links">0</span></p>
+                    <p><strong>Redirects Today:</strong> <span id="domain-2-redirects">0</span></p>
+                    <div class="form-group" style="margin-top: 1rem;">
+                        <button class="btn btn-outline btn-sm" onclick="testDomain('devinecreations.net')">
+                            <i class="fas fa-vial"></i> Test Domain
+                        </button>
+                        <button class="btn btn-outline btn-sm" onclick="viewDomainLogs('devinecreations.net')">
+                            <i class="fas fa-file-alt"></i> View Logs
+                        </button>
+                    </div>
+                </div>
+
+                <div class="domain-card">
+                    <h3>tappedin.fm</h3>
+                    <p><span class="domain-status status-active">Active</span></p>
+                    <p><strong>Links:</strong> <span id="domain-3-links">0</span></p>
+                    <p><strong>Redirects Today:</strong> <span id="domain-3-redirects">0</span></p>
+                    <div class="form-group" style="margin-top: 1rem;">
+                        <button class="btn btn-outline btn-sm" onclick="testDomain('tappedin.fm')">
+                            <i class="fas fa-vial"></i> Test Domain
+                        </button>
+                        <button class="btn btn-outline btn-sm" onclick="viewDomainLogs('tappedin.fm')">
+                            <i class="fas fa-file-alt"></i> View Logs
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live Log Viewer -->
+        <div class="log-viewer">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h2><i class="fas fa-terminal"></i> Live Relay Logs</h2>
+                <div>
+                    <button id="toggle-logs" class="btn btn-outline" title="Pause or resume live log display">
+                        <i class="fas fa-pause" aria-hidden="true"></i> <span>Pause Logs</span>
+                    </button>
+                    <button id="clear-logs" class="btn btn-outline" title="Clear all displayed log entries">
+                        <i class="fas fa-trash" aria-hidden="true"></i> <span>Clear Logs</span>
+                    </button>
+                </div>
+            </div>
+            <div id="log-entries" class="log-entries">
+                <!-- Live logs will appear here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class RelayPanel {
+            constructor() {
+                this.logsEnabled = true;
+                this.websocket = null;
+                this.init();
+            }
+
+            init() {
+                this.setupEventListeners();
+                this.loadStats();
+                this.connectWebSocket();
+                this.startStatsRefresh();
+            }
+
+            setupEventListeners() {
+                document.getElementById('restart-relay')?.addEventListener('click', () => {
+                    this.restartRelay();
+                });
+
+                document.getElementById('clear-cache')?.addEventListener('click', () => {
+                    this.clearCache();
+                });
+
+                document.getElementById('save-security')?.addEventListener('click', () => {
+                    this.saveSecuritySettings();
+                });
+
+                document.getElementById('export-analytics')?.addEventListener('click', () => {
+                    this.exportAnalytics();
+                });
+
+                document.getElementById('toggle-logs')?.addEventListener('click', (e) => {
+                    this.toggleLogs(e.target);
+                });
+
+                document.getElementById('clear-logs')?.addEventListener('click', () => {
+                    this.clearLogs();
+                });
+
+                document.getElementById('maintenance-mode')?.addEventListener('change', (e) => {
+                    this.setMaintenanceMode(e.target.checked);
+                });
+            }
+
+            async loadStats() {
+                try {
+                    // Load relay statistics
+                    const response = await fetch('/apps/OpenLink/api/relay/stats');
+                    const stats = await response.json();
+
+                    if (!stats.error) {
+                        document.getElementById('total-redirects').textContent = stats.totalRedirects || 0;
+                        document.getElementById('active-links').textContent = stats.activeLinks || 0;
+                        document.getElementById('avg-response-time').textContent = `${stats.avgResponseTime || 0}ms`;
+                        document.getElementById('success-rate').textContent = `${stats.successRate || 0}%`;
+
+                        // Update domain stats
+                        if (stats.domainStats) {
+                            stats.domainStats.forEach((domain, index) => {
+                                document.getElementById(`domain-${index + 1}-links`).textContent = domain.links || 0;
+                                document.getElementById(`domain-${index + 1}-redirects`).textContent = domain.redirects || 0;
+                            });
+                        }
+                    }
+                } catch (error) {
+                    console.error('Failed to load stats:', error);
+                }
+            }
+
+            connectWebSocket() {
+                // Connect to live logs WebSocket (placeholder)
+                // In a real implementation, this would connect to a WebSocket server
+                this.simulateLiveLogs();
+            }
+
+            simulateLiveLogs() {
+                if (!this.logsEnabled) return;
+
+                const logTypes = [
+                    { method: 'GET', status: 200, ip: '192.168.1.1', shortCode: 'abc123', time: 45 },
+                    { method: 'GET', status: 404, ip: '10.0.0.1', shortCode: 'notfound', time: 12 },
+                    { method: 'GET', status: 200, ip: '172.16.0.1', shortCode: 'xyz789', time: 78 }
+                ];
+
+                const randomLog = logTypes[Math.floor(Math.random() * logTypes.length)];
+                this.addLogEntry(randomLog);
+
+                setTimeout(() => this.simulateLiveLogs(), 2000 + Math.random() * 3000);
+            }
+
+            addLogEntry(log) {
+                const logsContainer = document.getElementById('log-entries');
+                const timestamp = new Date().toLocaleTimeString();
+                
+                const logEntry = document.createElement('div');
+                logEntry.className = 'log-entry';
+                
+                const statusClass = log.status === 200 ? 'log-status-200' : 
+                                   log.status === 404 ? 'log-status-404' : 'log-status-error';
+
+                logEntry.innerHTML = `
+                    <span class="log-timestamp">[${timestamp}]</span>
+                    <span class="log-method">${log.method}</span>
+                    /${log.shortCode} - 
+                    <span class="${statusClass}">${log.status}</span> - 
+                    ${log.ip} - ${log.time}ms
+                `;
+
+                logsContainer.appendChild(logEntry);
+                
+                // Keep only last 100 entries
+                while (logsContainer.children.length > 100) {
+                    logsContainer.removeChild(logsContainer.firstChild);
+                }
+
+                // Scroll to bottom
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+            }
+
+            async restartRelay() {
+                if (!confirm('Are you sure you want to restart the relay service?')) return;
+
+                try {
+                    const response = await fetch('/apps/OpenLink/api/admin/restart', {
+                        method: 'POST'
+                    });
+                    const result = await response.json();
+
+                    if (result.success) {
+                        this.showAlert('Relay service restarted successfully', 'success');
+                    } else {
+                        this.showAlert('Failed to restart relay service', 'error');
+                    }
+                } catch (error) {
+                    this.showAlert('Error restarting relay service', 'error');
+                }
+            }
+
+            async clearCache() {
+                try {
+                    const response = await fetch('/apps/OpenLink/api/admin/cache/clear', {
+                        method: 'POST'
+                    });
+                    const result = await response.json();
+
+                    if (result.success) {
+                        this.showAlert('Cache cleared successfully', 'success');
+                    } else {
+                        this.showAlert('Failed to clear cache', 'error');
+                    }
+                } catch (error) {
+                    this.showAlert('Error clearing cache', 'error');
+                }
+            }
+
+            async saveSecuritySettings() {
+                const rateLimit = document.getElementById('rate-limit').value;
+                const blockedIps = document.getElementById('blocked-ips').value
+                    .split('\n')
+                    .filter(ip => ip.trim())
+                    .map(ip => ip.trim());
+
+                try {
+                    const response = await fetch('/apps/OpenLink/api/admin/security', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rateLimit, blockedIps })
+                    });
+                    const result = await response.json();
+
+                    if (result.success) {
+                        this.showAlert('Security settings saved successfully', 'success');
+                    } else {
+                        this.showAlert('Failed to save security settings', 'error');
+                    }
+                } catch (error) {
+                    this.showAlert('Error saving security settings', 'error');
+                }
+            }
+
+            async setMaintenanceMode(enabled) {
+                try {
+                    const response = await fetch('/apps/OpenLink/api/admin/maintenance', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ enabled })
+                    });
+                    const result = await response.json();
+
+                    if (result.success) {
+                        this.showAlert(`Maintenance mode ${enabled ? 'enabled' : 'disabled'}`, 'success');
+                    }
+                } catch (error) {
+                    this.showAlert('Error updating maintenance mode', 'error');
+                }
+            }
+
+            exportAnalytics() {
+                const csvData = "timestamp,shortCode,originalUrl,clicks,domain\n"; // Placeholder
+                const blob = new Blob([csvData], { type: 'text/csv' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `openlink-analytics-${new Date().toISOString().split('T')[0]}.csv`;
+                a.click();
+                window.URL.revokeObjectURL(url);
+            }
+
+            toggleLogs(button) {
+                this.logsEnabled = !this.logsEnabled;
+                button.innerHTML = this.logsEnabled 
+                    ? '<i class="fas fa-pause"></i> Pause Logs'
+                    : '<i class="fas fa-play"></i> Resume Logs';
+            }
+
+            clearLogs() {
+                document.getElementById('log-entries').innerHTML = '';
+            }
+
+            startStatsRefresh() {
+                // Refresh stats every 30 seconds
+                setInterval(() => {
+                    this.loadStats();
+                }, 30000);
+            }
+
+            showAlert(message, type = 'info') {
+                // Remove existing alerts
+                document.querySelectorAll('.alert').forEach(alert => alert.remove());
+
+                const alert = document.createElement('div');
+                alert.className = `alert alert-${type}`;
+                alert.textContent = message;
+
+                document.querySelector('.relay-panel').insertBefore(alert, document.querySelector('.relay-header'));
+
+                setTimeout(() => alert.remove(), 5000);
+            }
+        }
+
+        // Global functions for domain management
+        async function testDomain(domain) {
+            try {
+                const response = await fetch(`/apps/OpenLink/api/admin/test/${domain}`);
+                const result = await response.json();
+                
+                alert(`Domain test for ${domain}: ${result.success ? 'PASSED' : 'FAILED'}`);
+            } catch (error) {
+                alert(`Domain test failed: ${error.message}`);
+            }
+        }
+
+        function viewDomainLogs(domain) {
+            window.open(`/apps/OpenLink/logs?domain=${domain}`, '_blank');
+        }
+
+        // Initialize the relay panel
+        document.addEventListener('DOMContentLoaded', () => {
+            new RelayPanel();
+        });
+    </script>
+</body>
+</html>

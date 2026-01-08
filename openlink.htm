@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenLink - URL Shortening Service</title>
+    <link rel="stylesheet" href="{$BASE_URL}/apps/OpenLink/css/openlink.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="openlink-container">
+        <!-- Header -->
+        <header class="openlink-header">
+            <div class="container">
+                <div class="header-content">
+                    <div class="logo">
+                        <i class="fas fa-link"></i>
+                        <h1>OpenLink</h1>
+                    </div>
+                    <nav class="main-nav" role="navigation" aria-label="Main navigation">
+                        <a href="#shorten" class="nav-link active" title="URL shortening interface" aria-describedby="shorten-desc">Shorten</a>
+                        <a href="#manage" class="nav-link" title="Manage your shortened links" aria-describedby="manage-desc">Manage</a>
+                        <a href="#analytics" class="nav-link" title="View link analytics and statistics" aria-describedby="analytics-desc">Analytics</a>
+                        <a href="#downloads" class="nav-link" title="Download desktop applications" aria-describedby="downloads-desc">Downloads</a>
+                    </nav>
+                    <div class="auth-buttons">
+                        <button id="login-btn" class="btn btn-outline" title="Login to your OpenLink account" aria-describedby="login-desc">Login</button>
+                        <button id="register-btn" class="btn btn-primary" title="Create a new OpenLink account" aria-describedby="register-desc">Sign Up</button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- URL Shortener Section -->
+            <section id="shorten" class="section active">
+                <div class="container">
+                    <div class="hero">
+                        <h2>Shorten Your URLs</h2>
+                        <p>Create short, memorable links for your long URLs with advanced analytics and management features.</p>
+                        
+                        <div class="url-shortener">
+                            <form id="shorten-form" class="shorten-form">
+                                <div class="form-group">
+                                    <input type="url" id="original-url" placeholder="Enter your long URL here..." required aria-label="Long URL to shorten" aria-describedby="url-help">
+                                    <button type="submit" class="btn btn-primary btn-large" title="Create shortened URL" aria-describedby="shorten-help">
+                                        <i class="fas fa-compress-arrows-alt" aria-hidden="true"></i>
+                                        <span>Shorten URL</span>
+                                    </button>
+                                </div>
+                                
+                                <div class="advanced-options" id="advanced-options">
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label for="custom-code">Custom Short Code (optional)</label>
+                                            <input type="text" id="custom-code" placeholder="mycustomcode">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="domain-select">Domain</label>
+                                            <select id="domain-select">
+                                                <option value="raywonderis.me">raywonderis.me</option>
+                                                <option value="devinecreations.net">devinecreations.net</option>
+                                                <option value="tappedin.fm">tappedin.fm</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label for="link-title">Title (optional)</label>
+                                            <input type="text" id="link-title" placeholder="Link title for tracking">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="expiry-date">Expiry Date (optional)</label>
+                                            <input type="datetime-local" id="expiry-date">
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <button type="button" id="toggle-advanced" class="toggle-advanced">
+                                    <i class="fas fa-cog"></i> Advanced Options
+                                </button>
+                            </form>
+                            
+                            <!-- Result Display -->
+                            <div id="result-section" class="result-section" style="display: none;">
+                                <div class="result-card">
+                                    <h3>Your shortened URL:</h3>
+                                    <div class="url-result">
+                                        <input type="text" id="short-url" readonly aria-label="Your shortened URL" title="Copy this shortened URL">
+                                        <button id="copy-btn" class="btn btn-secondary" title="Copy shortened URL to clipboard" aria-describedby="copy-help">
+                                            <i class="fas fa-copy" aria-hidden="true"></i> <span>Copy</span>
+                                        </button>
+                                    </div>
+                                    <div class="result-actions">
+                                        <button id="qr-btn" class="btn btn-outline" title="Generate QR code for this URL" aria-describedby="qr-help">
+                                            <i class="fas fa-qrcode" aria-hidden="true"></i> <span>QR Code</span>
+                                        </button>
+                                        <button id="preview-btn" class="btn btn-outline" title="Preview the destination URL" aria-describedby="preview-help">
+                                            <i class="fas fa-eye" aria-hidden="true"></i> <span>Preview</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Link Management Section -->
+            <section id="manage" class="section">
+                <div class="container">
+                    <h2>Manage Your Links</h2>
+                    <div class="management-panel">
+                        <div class="filters">
+                            <input type="text" id="search-links" placeholder="Search links..." aria-label="Search your shortened links" title="Filter your links by title or URL">
+                            <select id="domain-filter" aria-label="Filter by domain" title="Filter links by domain">
+                                <option value="">All Domains</option>
+                                <option value="raywonderis.me">raywonderis.me</option>
+                                <option value="devinecreations.net">devinecreations.net</option>
+                                <option value="tappedin.fm">tappedin.fm</option>
+                            </select>
+                        </div>
+                        
+                        <div id="links-table" class="links-table" role="table" aria-label="Your shortened links">
+                            <div class="table-header" role="row">
+                                <div class="col-short" role="columnheader">Short URL</div>
+                                <div class="col-original" role="columnheader">Original URL</div>
+                                <div class="col-clicks" role="columnheader">Clicks</div>
+                                <div class="col-created" role="columnheader">Created</div>
+                                <div class="col-actions" role="columnheader">Actions</div>
+                            </div>
+                            <div id="links-list" class="links-list">
+                                <!-- Links will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Analytics Section -->
+            <section id="analytics" class="section">
+                <div class="container">
+                    <h2>Analytics Dashboard</h2>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-link"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="total-links">0</h3>
+                                <p>Total Links</p>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-mouse-pointer"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="total-clicks">0</h3>
+                                <p>Total Clicks</p>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-chart-line"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="avg-clicks">0</h3>
+                                <p>Avg. Clicks/Link</p>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-calendar-day"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="today-clicks">0</h3>
+                                <p>Today's Clicks</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="charts-section">
+                        <div class="chart-container">
+                            <canvas id="clicks-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Downloads Section -->
+            <section id="downloads" class="section">
+                <div class="container">
+                    <h2>Desktop Applications</h2>
+                    <p>Download OpenLink desktop clients for your operating system.</p>
+                    
+                    <div class="download-cards">
+                        <div class="download-card">
+                            <div class="os-icon">
+                                <i class="fab fa-windows"></i>
+                            </div>
+                            <h3>Windows</h3>
+                            <p>Compatible with Windows 10 and later</p>
+                            <div class="download-buttons">
+                                <a href="/apps/OpenLink/downloads.php?action=latest&platform=windows" class="btn btn-primary" target="_blank" title="Download latest Windows version" aria-describedby="windows-download-desc">
+                                    <i class="fas fa-download" aria-hidden="true"></i> <span>Download for Windows</span>
+                                </a>
+                                <a href="/apps/OpenLink/downloads.php?platform=windows" class="btn btn-outline" target="_blank" title="View all Windows versions" aria-describedby="windows-versions-desc">
+                                    <i class="fas fa-list" aria-hidden="true"></i> <span>All Versions</span>
+                                </a>
+                            </div>
+                        </div>
+                        
+                        <div class="download-card">
+                            <div class="os-icon">
+                                <i class="fab fa-apple"></i>
+                            </div>
+                            <h3>macOS</h3>
+                            <p>Compatible with macOS 10.15 and later</p>
+                            <div class="download-buttons">
+                                <a href="/apps/OpenLink/downloads.php?action=latest&platform=mac" class="btn btn-primary" target="_blank" title="Download latest macOS version" aria-describedby="mac-download-desc">
+                                    <i class="fas fa-download" aria-hidden="true"></i> <span>Download for Mac</span>
+                                </a>
+                                <a href="/apps/OpenLink/downloads.php?platform=mac" class="btn btn-outline" target="_blank" title="View all macOS versions" aria-describedby="mac-versions-desc">
+                                    <i class="fas fa-list" aria-hidden="true"></i> <span>All Versions</span>
+                                </a>
+                            </div>
+                        </div>
+                        
+                        <div class="download-card">
+                            <div class="os-icon">
+                                <i class="fab fa-linux"></i>
+                            </div>
+                            <h3>Linux</h3>
+                            <p>AppImage compatible with most distributions</p>
+                            <div class="download-buttons">
+                                <a href="/apps/OpenLink/downloads.php?action=latest&platform=linux" class="btn btn-primary" target="_blank" title="Download latest Linux version" aria-describedby="linux-download-desc">
+                                    <i class="fas fa-download" aria-hidden="true"></i> <span>Download for Linux</span>
+                                </a>
+                                <a href="/apps/OpenLink/downloads.php?platform=linux" class="btn btn-outline" target="_blank" title="View all Linux versions" aria-describedby="linux-versions-desc">
+                                    <i class="fas fa-list" aria-hidden="true"></i> <span>All Versions</span>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="features-grid">
+                        <div class="feature-item">
+                            <i class="fas fa-desktop"></i>
+                            <h4>Cross-Platform</h4>
+                            <p>Works on Windows, macOS, and Linux</p>
+                        </div>
+                        <div class="feature-item">
+                            <i class="fas fa-sync"></i>
+                            <h4>Auto-Sync</h4>
+                            <p>Synchronizes with your online account</p>
+                        </div>
+                        <div class="feature-item">
+                            <i class="fas fa-bolt"></i>
+                            <h4>Fast Performance</h4>
+                            <p>Native desktop performance</p>
+                        </div>
+                        <div class="feature-item">
+                            <i class="fas fa-shield-alt"></i>
+                            <h4>Secure</h4>
+                            <p>End-to-end encryption for your data</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Hidden accessibility descriptions -->
+        <div class="sr-only" style="position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden;">
+            <span id="shorten-desc">Create shortened URLs from long web addresses</span>
+            <span id="manage-desc">View, edit, and manage your existing shortened links</span>
+            <span id="analytics-desc">Track click statistics and performance metrics for your links</span>
+            <span id="downloads-desc">Download OpenLink desktop applications for Windows, Mac, and Linux</span>
+            <span id="login-desc">Access your existing OpenLink account</span>
+            <span id="register-desc">Create a new free OpenLink account</span>
+            <span id="url-help">Enter the long URL you want to shorten</span>
+            <span id="shorten-help">Generate a short link for the URL above</span>
+            <span id="copy-help">Copy the shortened URL to your clipboard</span>
+            <span id="qr-help">Generate a QR code that links to this URL</span>
+            <span id="preview-help">Open a preview of where this link goes</span>
+            <span id="windows-download-desc">Download the latest Windows installer</span>
+            <span id="windows-versions-desc">View all available Windows versions</span>
+            <span id="mac-download-desc">Download the latest macOS disk image</span>
+            <span id="mac-versions-desc">View all available macOS versions</span>
+            <span id="linux-download-desc">Download the latest Linux AppImage</span>
+            <span id="linux-versions-desc">View all available Linux versions</span>
+        </div>
+
+        <!-- Login Modal -->
+        <div id="login-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Login to OpenLink</h3>
+                    <button class="close-btn" data-modal="login">&times;</button>
+                </div>
+                <form id="login-form" class="auth-form">
+                    <div class="form-group">
+                        <label for="login-username">Username</label>
+                        <input type="text" id="login-username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="login-password">Password</label>
+                        <input type="password" id="login-password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Login</button>
+                </form>
+                <div class="modal-footer">
+                    <p>Don't have an account? <a href="#" id="switch-to-register">Sign up here</a></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Register Modal -->
+        <div id="register-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Create OpenLink Account</h3>
+                    <button class="close-btn" data-modal="register">&times;</button>
+                </div>
+                <form id="register-form" class="auth-form">
+                    <div class="form-group">
+                        <label for="reg-username">Username</label>
+                        <input type="text" id="reg-username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="reg-email">Email</label>
+                        <input type="email" id="reg-email" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="reg-password">Password</label>
+                        <input type="password" id="reg-password" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="reg-domain">Default Domain</label>
+                        <select id="reg-domain">
+                            <option value="raywonderis.me">raywonderis.me</option>
+                            <option value="devinecreations.net">devinecreations.net</option>
+                            <option value="tappedin.fm">tappedin.fm</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Create Account</button>
+                </form>
+                <div class="modal-footer">
+                    <p>Already have an account? <a href="#" id="switch-to-login">Login here</a></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{$BASE_URL}/apps/OpenLink/js/openlink.js"></script>
+</body>
+</html>
