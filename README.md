@@ -171,7 +171,20 @@ The original setting is restored when:
 
 ## License
 
-MIT License - Built for the Composr CMS ecosystem
+Copyright (C) 2024-2026 Devine Creations
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+See the [LICENSE](LICENSE) file for details.
+
+## Links
+
+- **GitHub Repository**: [https://github.com/Raywonder/openlink](https://github.com/Raywonder/openlink)
+- **Download Page**: [https://devinecreations.net/openlink](https://devinecreations.net/openlink)
+- **VoiceLink (Related Project)**: [https://github.com/Raywonder/voicelink](https://github.com/Raywonder/voicelink)
 
 ## Support
 
@@ -180,3 +193,4 @@ For issues and support:
 - Frontend issues: Check browser console and network requests
 - Composr integration: Verify page creation and URL routing
 - Downloads: Check file permissions and directory structure
+- GitHub Issues: [https://github.com/Raywonder/openlink/issues](https://github.com/Raywonder/openlink/issues)
