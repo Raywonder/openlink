@@ -585,6 +585,64 @@
                 <p class="help-text" id="auto-enable-mic-desc">Automatically enables your microphone when connecting to allow voice communication.</p>
             </div>
 
+            <h4>VoiceLink Enhanced Audio</h4>
+            <div class="form-group checkbox" role="group" aria-labelledby="voicelink-enabled-label">
+                <input type="checkbox" id="voicelink-enabled" aria-describedby="voicelink-enabled-desc">
+                <label for="voicelink-enabled" id="voicelink-enabled-label">Enable VoiceLink audio</label>
+                <span class="setting-value" id="voicelink-enabled-value" aria-live="polite">Disabled</span>
+                <p class="help-text" id="voicelink-enabled-desc">Use VoiceLink for enhanced audio quality, spatial audio, and better firewall bypass. Requires a VoiceLink server.</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="voicelink-auto-discover-label">
+                <input type="checkbox" id="voicelink-auto-discover" checked aria-describedby="voicelink-auto-discover-desc">
+                <label for="voicelink-auto-discover" id="voicelink-auto-discover-label">Auto-discover VoiceLink servers</label>
+                <span class="setting-value" id="voicelink-auto-discover-value" aria-live="polite">Enabled</span>
+                <p class="help-text" id="voicelink-auto-discover-desc">Automatically find VoiceLink servers on your local network or from federated nodes.</p>
+            </div>
+
+            <div class="form-group" id="voicelink-server-group">
+                <label for="voicelink-server" id="voicelink-server-label">VoiceLink Server (optional)</label>
+                <input type="text" id="voicelink-server" placeholder="Auto-discover or enter URL" aria-labelledby="voicelink-server-label" aria-describedby="voicelink-server-desc">
+                <p class="help-text" id="voicelink-server-desc">Leave empty to auto-discover, or enter a specific VoiceLink server URL.</p>
+            </div>
+
+            <div class="form-group" id="voicelink-status-group" style="display: none;">
+                <label>VoiceLink Status</label>
+                <span class="setting-value" id="voicelink-status" aria-live="polite">Not connected</span>
+            </div>
+
+            <!-- VoiceLink Privacy Settings -->
+            <div class="form-group checkbox" role="group" aria-labelledby="voicelink-random-server-label" id="voicelink-privacy-group" style="display: none;">
+                <input type="checkbox" id="voicelink-random-server" checked aria-describedby="voicelink-random-server-desc">
+                <label for="voicelink-random-server" id="voicelink-random-server-label">Random server selection (Privacy)</label>
+                <span class="setting-value" id="voicelink-random-server-value" aria-live="polite">Enabled</span>
+                <p class="help-text" id="voicelink-random-server-desc">Randomly select from sharing servers to make tracking harder. Your data, your choice.</p>
+            </div>
+
+            <div class="form-group" id="voicelink-randomize-group" style="display: none;">
+                <label>Server Randomization</label>
+                <button id="voicelink-randomize-btn" class="btn secondary" aria-describedby="voicelink-randomize-desc">
+                    Randomize Server
+                </button>
+                <span class="setting-value" id="voicelink-servers-count" aria-live="polite">0 sharing servers</span>
+                <p class="help-text" id="voicelink-randomize-desc">Manually switch to a different VoiceLink server. Both connected users will sync together.</p>
+            </div>
+
+            <h4>Web3 DNS Support</h4>
+            <div class="form-group checkbox" role="group" aria-labelledby="web3-dns-enabled-label">
+                <input type="checkbox" id="web3-dns-enabled" checked aria-describedby="web3-dns-enabled-desc">
+                <label for="web3-dns-enabled" id="web3-dns-enabled-label">Enable Web3/Blockchain DNS</label>
+                <span class="setting-value" id="web3-dns-enabled-value" aria-live="polite">Enabled</span>
+                <p class="help-text" id="web3-dns-enabled-desc">Resolve Freename, ENS (.eth), Handshake, and Unstoppable Domains (.crypto). Quietly extends your DNS capabilities!</p>
+            </div>
+
+            <div class="form-group checkbox" role="group" aria-labelledby="web3-dns-persist-label">
+                <input type="checkbox" id="web3-dns-persist" aria-describedby="web3-dns-persist-desc">
+                <label for="web3-dns-persist" id="web3-dns-persist-label">Keep Web3 DNS after app removal</label>
+                <span class="setting-value" id="web3-dns-persist-value" aria-live="polite">Disabled</span>
+                <p class="help-text" id="web3-dns-persist-desc">When enabled, Web3 DNS support remains in your browser even after uninstalling. Otherwise, it will be removed with the app. Your data, your choice.</p>
+            </div>
+
             <h3>App Behavior</h3>
             <fieldset class="form-group radio-group" role="radiogroup" aria-labelledby="startup-behavior-label">
                 <legend id="startup-behavior-label">Window behavior on startup</legend>

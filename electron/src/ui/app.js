@@ -311,6 +311,29 @@ function cacheElements() {
     elements.autoEnableMic = document.getElementById('auto-enable-mic');
     elements.alwaysEnableMedia = document.getElementById('always-enable-media');
 
+    // VoiceLink settings
+    elements.voiceLinkEnabled = document.getElementById('voicelink-enabled');
+    elements.voiceLinkEnabledValue = document.getElementById('voicelink-enabled-value');
+    elements.voiceLinkAutoDiscover = document.getElementById('voicelink-auto-discover');
+    elements.voiceLinkAutoDiscoverValue = document.getElementById('voicelink-auto-discover-value');
+    elements.voiceLinkServer = document.getElementById('voicelink-server');
+    elements.voiceLinkStatus = document.getElementById('voicelink-status');
+    elements.voiceLinkStatusGroup = document.getElementById('voicelink-status-group');
+
+    // VoiceLink Privacy settings
+    elements.voiceLinkRandomServer = document.getElementById('voicelink-random-server');
+    elements.voiceLinkRandomServerValue = document.getElementById('voicelink-random-server-value');
+    elements.voiceLinkPrivacyGroup = document.getElementById('voicelink-privacy-group');
+    elements.voiceLinkRandomizeBtn = document.getElementById('voicelink-randomize-btn');
+    elements.voiceLinkRandomizeGroup = document.getElementById('voicelink-randomize-group');
+    elements.voiceLinkServersCount = document.getElementById('voicelink-servers-count');
+
+    // Web3 DNS settings
+    elements.web3DnsEnabled = document.getElementById('web3-dns-enabled');
+    elements.web3DnsEnabledValue = document.getElementById('web3-dns-enabled-value');
+    elements.web3DnsPersist = document.getElementById('web3-dns-persist');
+    elements.web3DnsPersistValue = document.getElementById('web3-dns-persist-value');
+
     // App behavior settings (in Settings tab)
     elements.startupVisible = document.getElementById('startup-visible');
     elements.startupMinimized = document.getElementById('startup-minimized');
@@ -1403,6 +1426,56 @@ function applySettings() {
     state.savedWallets = s.savedWallets || [];
     renderSavedWallets();
 
+    // VoiceLink settings
+    if (elements.voiceLinkEnabled) {
+        elements.voiceLinkEnabled.checked = s.audioSettings?.voiceLinkEnabled === true;
+        if (elements.voiceLinkEnabledValue) {
+            elements.voiceLinkEnabledValue.textContent = s.audioSettings?.voiceLinkEnabled ? 'Enabled' : 'Disabled';
+        }
+    }
+    if (elements.voiceLinkAutoDiscover) {
+        elements.voiceLinkAutoDiscover.checked = s.audioSettings?.voiceLinkAutoDiscover !== false;
+        if (elements.voiceLinkAutoDiscoverValue) {
+            elements.voiceLinkAutoDiscoverValue.textContent = s.audioSettings?.voiceLinkAutoDiscover !== false ? 'Enabled' : 'Disabled';
+        }
+    }
+    if (elements.voiceLinkServer && s.audioSettings?.voiceLinkServer) {
+        elements.voiceLinkServer.value = s.audioSettings.voiceLinkServer;
+    }
+    // Show/hide server input based on auto-discover
+    if (elements.voiceLinkStatusGroup) {
+        elements.voiceLinkStatusGroup.style.display = s.audioSettings?.voiceLinkAutoDiscover !== false ? 'none' : 'block';
+    }
+
+    // VoiceLink Privacy settings
+    if (elements.voiceLinkRandomServer) {
+        elements.voiceLinkRandomServer.checked = s.audioSettings?.voiceLinkRandomServer !== false;
+        if (elements.voiceLinkRandomServerValue) {
+            elements.voiceLinkRandomServerValue.textContent = s.audioSettings?.voiceLinkRandomServer !== false ? 'Enabled' : 'Disabled';
+        }
+    }
+    // Show privacy options only when VoiceLink is enabled
+    if (elements.voiceLinkPrivacyGroup) {
+        elements.voiceLinkPrivacyGroup.style.display = s.audioSettings?.voiceLinkEnabled ? 'block' : 'none';
+    }
+    if (elements.voiceLinkRandomizeGroup) {
+        elements.voiceLinkRandomizeGroup.style.display = s.audioSettings?.voiceLinkEnabled ? 'block' : 'none';
+    }
+
+    // Web3 DNS settings
+    if (elements.web3DnsEnabled) {
+        elements.web3DnsEnabled.checked = s.web3Settings?.dnsEnabled !== false;
+        if (elements.web3DnsEnabledValue) {
+            elements.web3DnsEnabledValue.textContent = s.web3Settings?.dnsEnabled !== false ? 'Enabled' : 'Disabled';
+        }
+    }
+    if (elements.web3DnsPersist) {
+        elements.web3DnsPersist.checked = s.web3Settings?.dnsPersist === true;
+        if (elements.web3DnsPersistValue) {
+            elements.web3DnsPersistValue.textContent = s.web3Settings?.dnsPersist ? 'Enabled' : 'Disabled';
+        }
+    }
+
     // Recent connections
     updateRecentConnections(s.recentConnections || []);
 
@@ -1839,6 +1912,88 @@ function setupEventListeners() {
     elements.alwaysEnableMedia.addEventListener('change', (e) => {
         window.openlink.setAlwaysEnableMedia(e.target.checked);
     });
+
+    // VoiceLink settings handlers
+    if (elements.voiceLinkEnabled) {
+        elements.voiceLinkEnabled.addEventListener('change', (e) => {
+            const enabled = e.target.checked;
+            elements.voiceLinkEnabledValue.textContent = enabled ? 'Enabled' : 'Disabled';
+            window.openlink.setVoiceLinkEnabled(enabled);
+
+            // Show/hide status and privacy options when enabled
+            if (elements.voiceLinkStatusGroup) {
+                elements.voiceLinkStatusGroup.style.display = enabled ? 'block' : 'none';
+            }
+            if (elements.voiceLinkPrivacyGroup) {
+                elements.voiceLinkPrivacyGroup.style.display = enabled ? 'block' : 'none';
+            }
+            if (elements.voiceLinkRandomizeGroup) {
+                elements.voiceLinkRandomizeGroup.style.display = enabled ? 'block' : 'none';
+            }
+        });
+    }
+
+    if (elements.voiceLinkAutoDiscover) {
+        elements.voiceLinkAutoDiscover.addEventListener('change', (e) => {
+            const enabled = e.target.checked;
+            elements.voiceLinkAutoDiscoverValue.textContent = enabled ? 'Enabled' : 'Disabled';
+            window.openlink.setVoiceLinkAutoDiscover(enabled);
+        });
+    }
+
+    if (elements.voiceLinkServer) {
+        elements.voiceLinkServer.addEventListener('change', (e) => {
+            window.openlink.setVoiceLinkServer(e.target.value);
+        });
+    }
+
+    // VoiceLink Privacy settings handlers
+    if (elements.voiceLinkRandomServer) {
+        elements.voiceLinkRandomServer.addEventListener('change', (e) => {
+            const enabled = e.target.checked;
+            if (elements.voiceLinkRandomServerValue) {
+                elements.voiceLinkRandomServerValue.textContent = enabled ? 'Enabled' : 'Disabled';
+            }
+            window.openlink.setVoiceLinkRandomServer(enabled);
+        });
+    }
+
+    if (elements.voiceLinkRandomizeBtn) {
+        elements.voiceLinkRandomizeBtn.addEventListener('click', async () => {
+            elements.voiceLinkRandomizeBtn.disabled = true;
+            elements.voiceLinkRandomizeBtn.textContent = 'Switching...';
+            try {
+                await window.openlink.randomizeVoiceLinkServer();
+                announce('VoiceLink server randomized');
+            } catch (error) {
+                console.error('Failed to randomize server:', error);
+                announce('Failed to randomize server');
+            }
+            elements.voiceLinkRandomizeBtn.disabled = false;
+            elements.voiceLinkRandomizeBtn.textContent = 'Randomize Server';
+        });
+    }
+
+    // Web3 DNS settings handlers
+    if (elements.web3DnsEnabled) {
+        elements.web3DnsEnabled.addEventListener('change', (e) => {
+            const enabled = e.target.checked;
+            if (elements.web3DnsEnabledValue) {
+                elements.web3DnsEnabledValue.textContent = enabled ? 'Enabled' : 'Disabled';
+            }
+            window.openlink.setWeb3DnsEnabled(enabled);
+        });
+    }
+
+    if (elements.web3DnsPersist) {
+        elements.web3DnsPersist.addEventListener('change', (e) => {
+            const enabled = e.target.checked;
+            if (elements.web3DnsPersistValue) {
+                elements.web3DnsPersistValue.textContent = enabled ? 'Enabled' : 'Disabled';
+            }
+            window.openlink.setWeb3DnsPersist(enabled);
+        });
+    }
 
     // Settings change handlers
     elements.runAtLogin.addEventListener('change', saveSettings);

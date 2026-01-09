@@ -220,7 +220,12 @@ const store = new Store({
             autoEnableMic: false,
             alwaysEnableMedia: true,
             remoteVolume: 100,
-            localVolume: 100
+            localVolume: 100,
+            // VoiceLink integration settings
+            voiceLinkEnabled: false,
+            voiceLinkServer: '', // Auto-discover if empty
+            voiceLinkAutoDiscover: true,
+            voiceLinkPreferLocal: true
         },
         clipboardSettings: {
             enableSharing: true,
@@ -2466,6 +2471,201 @@ ipcMain.handle('set-always-enable-media', (event, enabled) => {
     store.set('audioSettings.alwaysEnableMedia', enabled);
     return true;
 });
+
+// VoiceLink audio settings
+ipcMain.handle('set-voicelink-enabled', (event, enabled) => {
+    store.set('audioSettings.voiceLinkEnabled', enabled);
+    return true;
+});
+
+ipcMain.handle('set-voicelink-server', (event, server) => {
+    store.set('audioSettings.voiceLinkServer', server);
+    return true;
+});
+
+ipcMain.handle('set-voicelink-auto-discover', (event, enabled) => {
+    store.set('audioSettings.voiceLinkAutoDiscover', enabled);
+    return true;
+});
+
+ipcMain.handle('set-voicelink-prefer-local', (event, enabled) => {
+    store.set('audioSettings.voiceLinkPreferLocal', enabled);
+    return true;
+});
+
+ipcMain.handle('get-voicelink-settings', () => {
+    return {
+        enabled: store.get('audioSettings.voiceLinkEnabled', false),
+        server: store.get('audioSettings.voiceLinkServer', ''),
+        autoDiscover: store.get('audioSettings.voiceLinkAutoDiscover', true),
+        preferLocal: store.get('audioSettings.voiceLinkPreferLocal', true)
+    };
+});
+
+// VoiceLink Privacy settings
+ipcMain.handle('set-voicelink-random-server', (event, enabled) => {
+    store.set('audioSettings.voiceLinkRandomServer', enabled);
+    return true;
+});
+
+ipcMain.handle('randomize-voicelink-server', async () => {
+    // This will be called from the renderer to trigger server randomization
+    // The actual randomization happens in the VoiceLinkConnector class
+    // We just notify any active sessions to randomize
+    if (mainWindow) {
+        mainWindow.webContents.send('voicelink-randomize-requested');
+    }
+    return true;
+});
+
+ipcMain.handle('get-voicelink-privacy-settings', () => {
+    return {
+        randomServer: store.get('audioSettings.voiceLinkRandomServer', true),
+        autoSwitchServers: store.get('audioSettings.voiceLinkAutoSwitch', true)
+    };
+});
+
+// Web3 DNS settings
+ipcMain.handle('set-web3-dns-enabled', async (event, enabled) => {
+    store.set('web3Settings.dnsEnabled', enabled);
+
+    // Apply DNS configuration
+    if (enabled) {
+        await configureWeb3Dns(true);
+    } else if (!store.get('web3Settings.dnsPersist', false)) {
+        await configureWeb3Dns(false);
+    }
+
+    return true;
+});
+
+ipcMain.handle('set-web3-dns-persist', (event, enabled) => {
+    store.set('web3Settings.dnsPersist', enabled);
+
+    // If persist is enabled, write to system-level config
+    // If disabled, mark for cleanup on uninstall
+    if (enabled) {
+        writeWeb3DnsPersistConfig(true);
+    } else {
+        writeWeb3DnsPersistConfig(false);
+    }
+
+    return true;
+});
+
+ipcMain.handle('get-web3-dns-settings', () => {
+    return {
+        enabled: store.get('web3Settings.dnsEnabled', true),
+        persist: store.get('web3Settings.dnsPersist', false)
+    };
+});
+
+/**
+ * Configure Web3 DNS resolution
+ * Extends system DNS capabilities for blockchain domains
+ * @param {boolean} enable - Whether to enable Web3 DNS
+ */
+async function configureWeb3Dns(enable) {
+    const fs = require('fs');
+    const path = require('path');
+    const os = require('os');
+
+    // Web3 DNS gateway URLs
+    const web3Gateways = {
+        eth: 'https://eth.limo',           // ENS
+        crypto: 'https://unstoppabledomains.com', // Unstoppable
+        wallet: 'https://freename.io',     // Freename
+        hns: 'https://hdns.io'             // Handshake
+    };
+
+    if (process.platform === 'darwin') {
+        // macOS: Write to /etc/resolver/ for .eth, .crypto, etc.
+        const resolverDir = '/etc/resolver';
+
+        if (enable) {
+            try {
+                // Create resolver configs for Web3 TLDs
+                const domains = ['eth', 'crypto', 'wallet', 'zil', 'nft', 'blockchain', 'dao', 'bitcoin'];
+
+                for (const domain of domains) {
+                    const resolverPath = path.join(resolverDir, domain);
+                    // Note: Writing to /etc/resolver requires sudo
+                    // Store config for browser extension to use instead
+                }
+            } catch (error) {
+                console.log('[Web3 DNS] Could not configure system resolver, using browser extension mode');
+            }
+        }
+    }
+
+    // Store browser extension config that works without admin privileges
+    const configDir = path.join(os.homedir(), '.openlink', 'web3dns');
+    if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+    }
+
+    const configPath = path.join(configDir, 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify({
+        enabled: enable,
+        gateways: web3Gateways,
+        supportedTLDs: ['eth', 'crypto', 'wallet', 'zil', 'nft', 'blockchain', 'dao', 'bitcoin', 'x', 'coin'],
+        resolvers: [
+            'https://dns.eth.limo/dns-query',
+            'https://resolver.unstoppabledomains.com/dns-query'
+        ]
+    }, null, 2));
+
+    console.log(`[Web3 DNS] Configuration ${enable ? 'enabled' : 'disabled'}`);
+}
+
+/**
+ * Write Web3 DNS persist configuration
+ * If persist is enabled, DNS keeps working after app removal
+ * @param {boolean} persist - Whether to persist DNS on uninstall
+ */
+function writeWeb3DnsPersistConfig(persist) {
+    const fs = require('fs');
+    const path = require('path');
+    const os = require('os');
+
+    // Write to browser-accessible location
+    const configDir = path.join(os.homedir(), '.openlink', 'web3dns');
+    if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+    }
+
+    const persistPath = path.join(configDir, 'persist.json');
+    fs.writeFileSync(persistPath, JSON.stringify({
+        persist: persist,
+        message: persist
+            ? 'Web3 DNS will remain active after app removal. Visit ~/.openlink/web3dns to remove manually.'
+            : 'Web3 DNS will be removed with the app.',
+        uninstallScript: persist ? null : path.join(configDir, 'cleanup.sh')
+    }, null, 2));
+
+    // If not persisting, write cleanup script
+    if (!persist) {
+        const cleanupScript = process.platform === 'win32'
+            ? `@echo off\nrmdir /s /q "%USERPROFILE%\\.openlink\\web3dns"\necho Web3 DNS removed.`
+            : `#!/bin/bash\nrm -rf ~/.openlink/web3dns\necho "Web3 DNS removed."`;
+
+        const scriptPath = path.join(configDir, process.platform === 'win32' ? 'cleanup.bat' : 'cleanup.sh');
+        fs.writeFileSync(scriptPath, cleanupScript);
+        if (process.platform !== 'win32') {
+            fs.chmodSync(scriptPath, '755');
+        }
+    }
+
+    console.log(`[Web3 DNS] Persist setting: ${persist}`);
+}
+
+// Initialize Web3 DNS on startup if enabled
+(async function initWeb3Dns() {
+    const enabled = store.get('web3Settings.dnsEnabled', true);
+    if (enabled) {
+        await configureWeb3Dns(true);
+    }
+})();
 
 // Clipboard
 ipcMain.handle('set-clipboard', (event, text) => {

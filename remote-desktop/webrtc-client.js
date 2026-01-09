@@ -58,6 +58,11 @@ class OpenLinkRemoteDesktop {
         // Control swap state
         this.controlSwapped = false;
 
+        // VoiceLink integration
+        this.voiceLinkEnabled = options.voiceLinkEnabled || false;
+        this.voiceLinkConnector = null;
+        this.voiceLinkReady = false;
+
         // File transfer
         this.pendingFiles = [];
         this.fileTransferProgress = {};
@@ -1000,6 +1005,141 @@ class OpenLinkRemoteDesktop {
         if (this.audioMixer?.gainNode) {
             this.audioMixer.gainNode.gain.value = Math.max(0, Math.min(1, volume));
         }
+    }
+
+    // ==================== VoiceLink Integration ====================
+
+    /**
+     * Initialize VoiceLink audio integration
+     * @param {Object} options - VoiceLink options
+     * @returns {Promise<boolean>} Success status
+     */
+    async initializeVoiceLink(options = {}) {
+        if (!this.voiceLinkEnabled) {
+            console.log('[VoiceLink] Integration disabled');
+            return false;
+        }
+
+        try {
+            const VoiceLinkConnector = require('./voicelink-connector');
+            this.voiceLinkConnector = new VoiceLinkConnector({
+                localDiscoveryEnabled: options.autoDiscover !== false,
+                federatedNodes: options.federatedNodes || [
+                    'https://voicelink.devinecreations.net',
+                    'https://voicelink.tappedin.fm'
+                ],
+                ...options
+            });
+
+            // Setup event handlers
+            this.voiceLinkConnector.on('status', (msg) => {
+                console.log('[VoiceLink]', msg);
+                this.emit('voicelink_status', msg);
+            });
+
+            this.voiceLinkConnector.on('error', (err) => {
+                console.error('[VoiceLink Error]', err);
+                this.emit('voicelink_error', err);
+            });
+
+            this.voiceLinkConnector.on('ready', (data) => {
+                console.log('[VoiceLink] Ready:', data);
+                this.voiceLinkReady = true;
+                this.emit('voicelink_ready', data);
+            });
+
+            this.voiceLinkConnector.on('audio-received', (data) => {
+                this.handleVoiceLinkAudio(data);
+            });
+
+            // Initialize with OpenLink session ID
+            const sessionId = this.sessionId || `openlink_${Date.now()}`;
+            const success = await this.voiceLinkConnector.initialize(sessionId);
+
+            if (success) {
+                await this.voiceLinkConnector.connect();
+                this.announce('VoiceLink audio connected');
+            }
+
+            return success;
+
+        } catch (error) {
+            console.error('[VoiceLink] Initialization error:', error);
+            this.emit('voicelink_error', `Failed to initialize: ${error.message}`);
+            return false;
+        }
+    }
+
+    /**
+     * Enable or disable VoiceLink audio mode
+     * @param {boolean} enabled - Enable VoiceLink
+     */
+    async setVoiceLinkEnabled(enabled) {
+        this.voiceLinkEnabled = enabled;
+
+        if (enabled && !this.voiceLinkConnector) {
+            await this.initializeVoiceLink();
+        } else if (!enabled && this.voiceLinkConnector) {
+            this.voiceLinkConnector.disconnect();
+            this.voiceLinkConnector = null;
+            this.voiceLinkReady = false;
+            this.announce('VoiceLink audio disabled');
+        }
+    }
+
+    /**
+     * Start VoiceLink audio capture (for sending local audio)
+     * @param {MediaStream} stream - Optional existing stream
+     */
+    async startVoiceLinkAudio(stream = null) {
+        if (!this.voiceLinkConnector || !this.voiceLinkReady) {
+            console.warn('[VoiceLink] Not ready, cannot start audio');
+            return;
+        }
+
+        await this.voiceLinkConnector.startAudio(stream);
+    }
+
+    /**
+     * Stop VoiceLink audio
+     */
+    stopVoiceLinkAudio() {
+        if (this.voiceLinkConnector) {
+            this.voiceLinkConnector.stopAudio();
+        }
+    }
+
+    /**
+     * Handle incoming audio from VoiceLink
+     * @param {Object} data - Audio data from VoiceLink
+     */
+    handleVoiceLinkAudio(data) {
+        // Audio is played directly by VoiceLinkConnector
+        // This handler is for additional processing or monitoring
+        this.emit('voicelink_audio', data);
+    }
+
+    /**
+     * Get VoiceLink connection status
+     * @returns {Object} Status info
+     */
+    getVoiceLinkStatus() {
+        if (!this.voiceLinkConnector) {
+            return { enabled: false, connected: false };
+        }
+        return {
+            enabled: this.voiceLinkEnabled,
+            ...this.voiceLinkConnector.getStatus()
+        };
+    }
+
+    /**
+     * Get discovered VoiceLink servers
+     * @returns {Array} List of discovered servers
+     */
+    getVoiceLinkServers() {
+        if (!this.voiceLinkConnector) return [];
+        return this.voiceLinkConnector.getDiscoveredServers();
     }
 
     // ==================== Input Handling ====================

@@ -16,6 +16,23 @@ contextBridge.exposeInMainWorld('openlink', {
     setAutoEnableMic: (enabled) => ipcRenderer.invoke('set-auto-enable-mic', enabled),
     setAlwaysEnableMedia: (enabled) => ipcRenderer.invoke('set-always-enable-media', enabled),
 
+    // VoiceLink integration
+    setVoiceLinkEnabled: (enabled) => ipcRenderer.invoke('set-voicelink-enabled', enabled),
+    setVoiceLinkServer: (server) => ipcRenderer.invoke('set-voicelink-server', server),
+    setVoiceLinkAutoDiscover: (enabled) => ipcRenderer.invoke('set-voicelink-auto-discover', enabled),
+    setVoiceLinkPreferLocal: (enabled) => ipcRenderer.invoke('set-voicelink-prefer-local', enabled),
+    getVoiceLinkSettings: () => ipcRenderer.invoke('get-voicelink-settings'),
+
+    // VoiceLink Privacy settings
+    setVoiceLinkRandomServer: (enabled) => ipcRenderer.invoke('set-voicelink-random-server', enabled),
+    randomizeVoiceLinkServer: () => ipcRenderer.invoke('randomize-voicelink-server'),
+    getVoiceLinkPrivacySettings: () => ipcRenderer.invoke('get-voicelink-privacy-settings'),
+
+    // Web3 DNS settings
+    setWeb3DnsEnabled: (enabled) => ipcRenderer.invoke('set-web3-dns-enabled', enabled),
+    setWeb3DnsPersist: (enabled) => ipcRenderer.invoke('set-web3-dns-persist', enabled),
+    getWeb3DnsSettings: () => ipcRenderer.invoke('get-web3-dns-settings'),
+
     // Clipboard
     setClipboard: (text) => ipcRenderer.invoke('set-clipboard', text),
     getClipboard: () => ipcRenderer.invoke('get-clipboard'),
