@@ -328,6 +328,19 @@ function cacheElements() {
     elements.voiceLinkRandomizeGroup = document.getElementById('voicelink-randomize-group');
     elements.voiceLinkServersCount = document.getElementById('voicelink-servers-count');
 
+    // VoiceLink Network Info
+    elements.voiceLinkNetworkGroup = document.getElementById('voicelink-network-group');
+    elements.voiceLinkPublicIp = document.getElementById('voicelink-public-ip');
+    elements.voiceLinkHostname = document.getElementById('voicelink-hostname');
+    elements.voiceLinkConnectedServer = document.getElementById('voicelink-connected-server');
+    elements.voiceLinkCopyIp = document.getElementById('voicelink-copy-ip');
+
+    // VoiceLink URL sharing
+    elements.voiceLinkUrlGroup = document.getElementById('voicelink-url-group');
+    elements.voiceLinkShareUrl = document.getElementById('voicelink-share-url');
+    elements.voiceLinkCopyUrl = document.getElementById('voicelink-copy-url');
+    elements.voiceLinkGenerateLink = document.getElementById('voicelink-generate-link');
+
     // Web3 DNS settings
     elements.web3DnsEnabled = document.getElementById('web3-dns-enabled');
     elements.web3DnsEnabledValue = document.getElementById('web3-dns-enabled-value');
@@ -621,6 +634,73 @@ async function detectNetworkInfo() {
         }
     } catch (e) {
         console.warn('Network detection failed:', e);
+    }
+}
+
+/**
+ * Update VoiceLink network info display
+ * Shows public IP, hostname, connected server, and shareable URL
+ */
+async function updateVoiceLinkNetworkInfo() {
+    try {
+        // Get public IP (use cached if available)
+        let publicIp = state.publicIp;
+        if (!publicIp) {
+            publicIp = await fetchPublicIpWithFallbacks();
+        }
+
+        if (elements.voiceLinkPublicIp && publicIp) {
+            elements.voiceLinkPublicIp.textContent = publicIp;
+        }
+
+        // Detect hostname via reverse DNS or configured domains
+        let hostname = 'Not available';
+        try {
+            // Try to get hostname from system info
+            const systemInfo = await window.openlink.getSystemInfo();
+            if (systemInfo.hostname) {
+                hostname = systemInfo.hostname;
+            }
+
+            // Check for custom domain configuration
+            const domains = getCustomLinkDomains();
+            if (domains && domains.length > 0) {
+                hostname = domains[0]; // Primary domain
+            }
+        } catch (e) {
+            console.log('Hostname detection not available');
+        }
+
+        if (elements.voiceLinkHostname) {
+            elements.voiceLinkHostname.textContent = hostname;
+        }
+
+        // Get connected VoiceLink server info
+        if (elements.voiceLinkConnectedServer) {
+            try {
+                const settings = await window.openlink.getVoiceLinkSettings();
+                if (settings.server) {
+                    elements.voiceLinkConnectedServer.textContent = settings.server;
+                } else if (settings.autoDiscover) {
+                    elements.voiceLinkConnectedServer.textContent = 'Auto-discovering...';
+                } else {
+                    elements.voiceLinkConnectedServer.textContent = 'Not configured';
+                }
+            } catch (e) {
+                elements.voiceLinkConnectedServer.textContent = 'Unknown';
+            }
+        }
+
+        // Generate shareable VoiceLink URL
+        if (elements.voiceLinkShareUrl && state.sessionId) {
+            // Create shareable URL with room info
+            const baseUrl = elements.voiceLinkConnectedServer?.textContent || 'voicelink.tappedin.fm';
+            const roomId = `openlink_${state.sessionId}`;
+            const shareUrl = `https://${baseUrl.replace(/^https?:\/\//, '')}/#/join/${roomId}`;
+            elements.voiceLinkShareUrl.value = shareUrl;
+        }
+    } catch (error) {
+        console.error('Failed to update VoiceLink network info:', error);
     }
 }
 
@@ -1915,7 +1995,7 @@ function setupEventListeners() {
 
     // VoiceLink settings handlers
     if (elements.voiceLinkEnabled) {
-        elements.voiceLinkEnabled.addEventListener('change', (e) => {
+        elements.voiceLinkEnabled.addEventListener('change', async (e) => {
             const enabled = e.target.checked;
             elements.voiceLinkEnabledValue.textContent = enabled ? 'Enabled' : 'Disabled';
             window.openlink.setVoiceLinkEnabled(enabled);
@@ -1929,6 +2009,17 @@ function setupEventListeners() {
             }
             if (elements.voiceLinkRandomizeGroup) {
                 elements.voiceLinkRandomizeGroup.style.display = enabled ? 'block' : 'none';
+            }
+            if (elements.voiceLinkNetworkGroup) {
+                elements.voiceLinkNetworkGroup.style.display = enabled ? 'block' : 'none';
+            }
+            if (elements.voiceLinkUrlGroup) {
+                elements.voiceLinkUrlGroup.style.display = enabled ? 'block' : 'none';
+            }
+
+            // Fetch public IP and hostname when enabled
+            if (enabled) {
+                updateVoiceLinkNetworkInfo();
             }
         });
     }
@@ -1971,6 +2062,69 @@ function setupEventListeners() {
             }
             elements.voiceLinkRandomizeBtn.disabled = false;
             elements.voiceLinkRandomizeBtn.textContent = 'Randomize Server';
+        });
+    }
+
+    // VoiceLink Network Info handlers
+    if (elements.voiceLinkCopyIp) {
+        elements.voiceLinkCopyIp.addEventListener('click', () => {
+            const ip = elements.voiceLinkPublicIp?.textContent;
+            if (ip && ip !== 'Detecting...') {
+                navigator.clipboard.writeText(ip);
+                announce('Public IP copied to clipboard');
+            }
+        });
+    }
+
+    if (elements.voiceLinkCopyUrl) {
+        elements.voiceLinkCopyUrl.addEventListener('click', () => {
+            const url = elements.voiceLinkShareUrl?.value;
+            if (url) {
+                navigator.clipboard.writeText(url);
+                announce('VoiceLink URL copied to clipboard');
+            }
+        });
+    }
+
+    if (elements.voiceLinkGenerateLink) {
+        elements.voiceLinkGenerateLink.addEventListener('click', async () => {
+            const url = elements.voiceLinkShareUrl?.value;
+            if (!url) {
+                announce('No URL to shorten');
+                return;
+            }
+
+            elements.voiceLinkGenerateLink.disabled = true;
+            elements.voiceLinkGenerateLink.textContent = 'Generating...';
+
+            try {
+                // Generate short link via Devine Webserver
+                const response = await fetch('https://openlink.tappedin.fm/api/shorten', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        url: url,
+                        type: 'voicelink'
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.shortUrl) {
+                        elements.voiceLinkShareUrl.value = data.shortUrl;
+                        navigator.clipboard.writeText(data.shortUrl);
+                        announce('Short link generated and copied');
+                    }
+                } else {
+                    throw new Error('Failed to generate link');
+                }
+            } catch (error) {
+                console.error('Failed to generate link:', error);
+                announce('Failed to generate short link');
+            }
+
+            elements.voiceLinkGenerateLink.disabled = false;
+            elements.voiceLinkGenerateLink.textContent = 'Generate Link';
         });
     }
 

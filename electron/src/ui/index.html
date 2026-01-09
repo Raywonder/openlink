@@ -628,6 +628,37 @@
                 <p class="help-text" id="voicelink-randomize-desc">Manually switch to a different VoiceLink server. Both connected users will sync together.</p>
             </div>
 
+            <!-- VoiceLink Network Info -->
+            <div class="form-group" id="voicelink-network-group" style="display: none;">
+                <label>VoiceLink Network Info</label>
+                <div class="network-info-box">
+                    <div class="info-row">
+                        <span class="info-label">Public IP:</span>
+                        <code id="voicelink-public-ip">Detecting...</code>
+                        <button id="voicelink-copy-ip" class="btn secondary small">Copy</button>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Hostname:</span>
+                        <code id="voicelink-hostname">Detecting...</code>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Connected Server:</span>
+                        <code id="voicelink-connected-server">Not connected</code>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VoiceLink Shareable URL -->
+            <div class="form-group" id="voicelink-url-group" style="display: none;">
+                <label>Shareable VoiceLink URL</label>
+                <div class="url-display-box">
+                    <input type="text" id="voicelink-share-url" readonly placeholder="Connect to generate URL">
+                    <button id="voicelink-copy-url" class="btn secondary">Copy URL</button>
+                    <button id="voicelink-generate-link" class="btn secondary" title="Generate short link via Devine Webserver">Generate Link</button>
+                </div>
+                <p class="help-text">Share this URL to let others join your VoiceLink audio session.</p>
+            </div>
+
             <h4>Web3 DNS Support</h4>
             <div class="form-group checkbox" role="group" aria-labelledby="web3-dns-enabled-label">
                 <input type="checkbox" id="web3-dns-enabled" checked aria-describedby="web3-dns-enabled-desc">
