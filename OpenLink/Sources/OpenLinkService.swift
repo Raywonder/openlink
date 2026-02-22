@@ -344,7 +344,8 @@ class OpenLinkService: ObservableObject {
             .replacingOccurrences(of: "http://", with: "ws://")
             .replacingOccurrences(of: "https://", with: "wss://")
 
-        guard let url = URL(string: "\(wsURL)/openlink/connect") else {
+        // Native signaling uses /ws; keep health checks backward-compatible below.
+        guard let url = URL(string: "\(wsURL)/ws") else {
             return
         }
 
@@ -461,14 +462,35 @@ class OpenLinkService: ObservableObject {
     }
 
     func testConnection(_ server: PairedServer) {
-        guard let url = URL(string: "\(server.url)/api/health") else { return }
+        // Try current health endpoint first, then legacy fallback for older servers.
+        let healthCandidates = ["/health", "/api/health"]
 
-        URLSession.shared.dataTask(with: url) { [weak self] _, response, _ in
-            let isOnline = (response as? HTTPURLResponse)?.statusCode == 200
-            DispatchQueue.main.async {
-                self?.updateServerOnlineStatus(serverId: server.id, isOnline: isOnline)
+        func checkCandidate(_ index: Int) {
+            guard index < healthCandidates.count else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.updateServerOnlineStatus(serverId: server.id, isOnline: false)
+                }
+                return
             }
-        }.resume()
+
+            guard let url = URL(string: "\(server.url)\(healthCandidates[index])") else {
+                checkCandidate(index + 1)
+                return
+            }
+
+            URLSession.shared.dataTask(with: url) { [weak self] _, response, error in
+                let ok = (response as? HTTPURLResponse)?.statusCode == 200 && error == nil
+                if ok {
+                    DispatchQueue.main.async {
+                        self?.updateServerOnlineStatus(serverId: server.id, isOnline: true)
+                    }
+                } else {
+                    checkCandidate(index + 1)
+                }
+            }.resume()
+        }
+
+        checkCandidate(0)
     }
 
     // MARK: - Server Management
