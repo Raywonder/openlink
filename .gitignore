@@ -13,6 +13,13 @@ releases/
 *.zip
 *.blockmap
 
+# Swift build artifacts
+.build/
+.swiftpm/
+*.xcodeproj/
+DerivedData/
+*.dSYM/
+
 # OS files
 .DS_Store
 Thumbs.db
@@ -22,6 +29,7 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+*~
 
 # Logs
 *.log
