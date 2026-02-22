@@ -45,7 +45,7 @@ class UniversalAPIClient {
       primaryAPI: {
         baseUrl: 'https://api.devine-creations.com',
         endpoints: {
-          status: '/api/v1/status',
+          status: '/health',
           register: '/api/v1/register',
           heartbeat: '/api/v1/heartbeat'
         }
@@ -54,7 +54,7 @@ class UniversalAPIClient {
         {
           baseUrl: 'https://api.devinecreations.net',
           endpoints: {
-            status: '/api/v1/status',
+            status: '/health',
             register: '/api/v1/register'
           }
         }
@@ -180,7 +180,7 @@ class UniversalAPIClient {
   // Convenience methods for common operations
 
   async getStatus() {
-    const endpoint = this.config.primaryAPI?.endpoints?.status || '/api/v1/status';
+    const endpoint = this.config.primaryAPI?.endpoints?.status || '/health';
     return this.request(endpoint);
   }
 

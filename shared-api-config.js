@@ -149,7 +149,16 @@ class UniversalAPIClient {
 
   // Health & Status
   async getStatus() {
-    return this.request('/api/v1/status');
+    const candidates = ['/api/v1/status', '/health', '/api/v2/status'];
+    let lastError = null;
+    for (const path of candidates) {
+      try {
+        return await this.request(path);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error('No status endpoint available');
   }
 
   async heartbeat() {
@@ -492,27 +501,38 @@ class UniversalAPIClient {
   // Health check for all endpoints
   async checkAllEndpoints() {
     const results = {};
+    const healthCandidates = ['/api/v1/status', '/health', '/api/v2/status'];
 
     for (const endpoint of this.config.endpoints) {
-      try {
-        const startTime = Date.now();
-        await this.makeRequest(endpoint, '/api/v1/status', {});
-        const responseTime = Date.now() - startTime;
+      let success = false;
+      let responseTime = 0;
+      let lastError = null;
 
+      for (const path of healthCandidates) {
+        try {
+          const startTime = Date.now();
+          await this.makeRequest(endpoint, path, {});
+          responseTime = Date.now() - startTime;
+          success = true;
+          break;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      if (success) {
         results[endpoint] = {
           status: 'healthy',
           responseTime,
           timestamp: new Date().toISOString()
         };
-
         this.updateEndpointHealth(endpoint, true, responseTime);
-      } catch (error) {
+      } else {
         results[endpoint] = {
           status: 'unhealthy',
-          error: error.message,
+          error: lastError?.message || 'No status endpoint available',
           timestamp: new Date().toISOString()
         };
-
         this.updateEndpointHealth(endpoint, false);
       }
     }

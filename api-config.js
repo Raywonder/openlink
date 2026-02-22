@@ -14,7 +14,7 @@ module.exports = {
     apiVersion: 'v1',
     endpoints: {
       // Core endpoints
-      status: '/api/v1/status',
+      status: '/health',
       register: '/api/v1/register',
       heartbeat: '/api/v1/heartbeat',
 
@@ -89,7 +89,7 @@ module.exports = {
       baseUrl: 'https://api.devinecreations.net',
       apiVersion: 'v1',
       endpoints: {
-        status: '/api/v1/status',
+        status: '/health',
         register: '/api/v1/register',
         synthesize: '/api/v1/synthesize',
         voices: '/api/v1/voices',
@@ -115,7 +115,7 @@ module.exports = {
       endpoints: {
         synthesize: '/api/v1/synthesize',
         voices: '/api/v1/voices',
-        status: '/api/v1/status',
+        status: '/health',
         stream: '/api/v1/stream'
       },
       features: {
