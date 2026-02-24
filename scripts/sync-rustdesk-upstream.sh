@@ -11,10 +11,8 @@ KEYWORDS="${2:-keyboard|audio|compat|signal|api}"
 cd "$REPO_ROOT"
 
 if ! git remote | grep -qx "rustdesk"; then
-  echo "Missing remote: rustdesk"
-  echo "Add it with:"
-  echo "  git remote add rustdesk git@github.com:Raywonder/rustdesk.git"
-  exit 1
+  echo "Adding missing remote: rustdesk -> git@github.com:Raywonder/rustdesk.git"
+  git remote add rustdesk git@github.com:Raywonder/rustdesk.git
 fi
 
 echo "Fetching rustdesk remote..."
