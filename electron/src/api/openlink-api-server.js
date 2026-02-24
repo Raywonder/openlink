@@ -19,7 +19,8 @@ class OpenLinkAPIServer {
             port: options.port || 3000,
             nginxConfigPath: options.nginxConfigPath || '/etc/nginx/conf.d/openlink-domains.conf',
             nginxMainConfig: options.nginxMainConfig || '/etc/nginx/nginx.conf',
-            sudoPassword: options.sudoPassword || 'DsmotifXS678!$',
+            // Use sudoers for non-interactive nginx operations; never hardcode secrets.
+            sudoCommandPrefix: options.sudoCommandPrefix || 'sudo -n',
             allowedDomains: options.allowedDomains || ['raywonderis.me', 'openlink.local'],
             basePort: options.basePort || 8000,
             maxPorts: options.maxPorts || 1000,
@@ -453,8 +454,8 @@ server {
             // Write to temp file first
             fs.writeFileSync(tempFile, content);
 
-            // Use sudo to move to final location
-            const command = `echo "${this.options.sudoPassword}" | sudo -S cp "${tempFile}" "${filePath}"`;
+            // Use non-interactive sudo; requires sudoers policy for the runtime user.
+            const command = `${this.options.sudoCommandPrefix} cp "${tempFile}" "${filePath}"`;
 
             exec(command, { timeout: 10000 }, (error, stdout, stderr) => {
                 // Clean up temp file
@@ -475,7 +476,7 @@ server {
 
     async testNginxConfig() {
         return new Promise((resolve, reject) => {
-            const command = `echo "${this.options.sudoPassword}" | sudo -S nginx -t`;
+            const command = `${this.options.sudoCommandPrefix} nginx -t`;
 
             exec(command, { timeout: 10000 }, (error, stdout, stderr) => {
                 if (error) {
@@ -489,7 +490,7 @@ server {
 
     async reloadNginx() {
         return new Promise((resolve, reject) => {
-            const command = `echo "${this.options.sudoPassword}" | sudo -S nginx -s reload`;
+            const command = `${this.options.sudoCommandPrefix} nginx -s reload`;
 
             exec(command, { timeout: 10000 }, (error, stdout, stderr) => {
                 if (error) {
