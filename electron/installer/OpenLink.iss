@@ -62,7 +62,7 @@ Root: HKCR; Subkey: "{#MyAppAssocKey}\\DefaultIcon"; ValueType: string; ValueNam
 Root: HKCR; Subkey: "{#MyAppAssocKey}\\shell\\open\\command"; ValueType: string; ValueName: ""; ValueData: "\"{app}\\{#MyAppExeName}\" \"%1\""
 
 [Run]
-Filename: "{app}\\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent; Tasks: launchapp
+Filename: "{app}\\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent runasoriginaluser; Tasks: launchapp
 
 [Code]
 function PrepareToInstall(var NeedsRestart: Boolean): String;
