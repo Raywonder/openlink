@@ -14,6 +14,8 @@
     "dev": "concurrently \"node src/signaling-server.js\" \"electron .\"",
     "build": "electron-builder",
     "build:win": "electron-builder --win",
+    "build:win:dir": "electron-builder --win dir",
+    "build:win:inno": "powershell -ExecutionPolicy Bypass -File scripts/build-win-inno.ps1",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux",
     "build:all": "electron-builder --win --mac --linux",
@@ -49,7 +51,7 @@
     "electron-winstaller": "^5.4.0"
   },
   "build": {
-    "appId": "com.openlink.app",
+    "appId": "com.devinecreations.openlink",
     "productName": "OpenLink",
     "protocols": {
       "name": "OpenLink Protocol",
@@ -68,7 +70,17 @@
       {
         "from": "../assets/sounds",
         "to": "assets/sounds"
+      },
+      {
+        "from": "src/native",
+        "to": "native"
       }
+    ],
+    "asarUnpack": [
+      "src/native/**/*",
+      "node_modules/ffi-napi/**/*",
+      "node_modules/ref-napi/**/*",
+      "node_modules/@nut-tree-fork/**/*"
     ],
     "win": {
       "target": [
@@ -104,7 +116,7 @@
       "gatekeeperAssess": false,
       "entitlements": "entitlements.mac.plist",
       "entitlementsInherit": "entitlements.mac.plist",
-      "notarize": false
+      "notarize": true
     },
     "afterSign": "scripts/notarize.js",
     "linux": {
@@ -115,9 +127,6 @@
       "icon": "assets/icon.png",
       "category": "Utility",
       "maintainer": "Devine Creations <webmaster@devine-creations.com>",
-      "asarUnpack": [
-        "node_modules/@nut-tree-fork/**"
-      ],
       "files": [
         "!node_modules/mac-screen-capture-permissions",
         "!node_modules/macos-accessibility-permissions",

@@ -12,6 +12,10 @@ const Store = require('electron-store');
 const log = require('electron-log');
 const { autoUpdater } = require('electron-updater');
 
+if (process.platform === 'win32') {
+    app.setAppUserModelId('com.devinecreations.openlink');
+}
+
 // Early startup recovery - check for crashes and updates before loading other modules
 const StartupRecovery = require('./services/startup-recovery');
 const startupRecovery = new StartupRecovery();
@@ -227,6 +231,11 @@ const store = new Store({
             voiceLinkAutoDiscover: true,
             voiceLinkPreferLocal: true
         },
+        accessibilitySettings: {
+            useLocalTTS: false,
+            enableRemoteScreenReader: true,
+            preferLocalScreenReaderFallback: true
+        },
         clipboardSettings: {
             enableSharing: true,
             doubleCopyTransfer: true  // Copy twice to transfer
@@ -263,6 +272,12 @@ let trustScoreService = null;
 let alternativePaymentService = null;
 let announcementService = null;
 let splashWindow = null;
+let launchReadyNotificationSent = false;
+let startupStatus = {
+    localSignalingReady: false,
+    localSignalingMode: 'unavailable',
+    ollamaReady: false
+};
 
 // Clipboard monitoring for double-copy feature
 let lastClipboardText = '';
@@ -423,6 +438,31 @@ function closeSplashAndShowMain() {
     }
 }
 
+function sendLaunchReadyNotification() {
+    if (launchReadyNotificationSent || !notificationService) {
+        return;
+    }
+
+    launchReadyNotificationSent = true;
+
+    const details = [];
+    details.push(
+        startupStatus.localSignalingReady
+            ? `Local signaling ready (${startupStatus.localSignalingMode})`
+            : 'Local signaling unavailable'
+    );
+    details.push(startupStatus.ollamaReady ? 'AI ready' : 'AI not detected');
+
+    notificationService.send({
+        title: 'OpenLink Ready',
+        message: `OpenLink launched and is ready for use. ${details.join('. ')}.`,
+        priority: 'normal',
+        sound: true
+    }).catch((error) => {
+        log.warn('Failed to send launch-ready notification:', error.message);
+    });
+}
+
 // Fix macOS permissions on startup (for unsigned apps)
 async function fixMacPermissionsOnStartup() {
     if (process.platform !== 'darwin') return;
@@ -439,7 +479,7 @@ async function fixMacPermissionsOnStartup() {
             log.info('[Permissions] Screen Recording not granted, attempting to fix...');
 
             // Write permission fix script to temp file and execute with admin privileges
-            const bundleId = 'com.openlink.app';
+            const bundleId = 'com.devinecreations.openlink';
             const tmpScript = '/tmp/openlink-fix-permissions.sh';
             const tccDb = '/Library/Application Support/com.apple.TCC/TCC.db';
 
@@ -580,8 +620,7 @@ app.whenReady().then(async () => {
 
     // Show splash screen and check for updates first
     if (SplashUpdaterService) {
-        createSplashWindow();
-        splashUpdaterService = new SplashUpdaterService(splashWindow, autoUpdater);
+        splashUpdaterService = new SplashUpdaterService(store);
 
         try {
             const updateResult = await splashUpdaterService.run();
@@ -595,11 +634,7 @@ app.whenReady().then(async () => {
             log.error('Splash update check failed:', updateError);
         }
 
-        // Close splash, will show main window after initialization
-        if (splashWindow && !splashWindow.isDestroyed()) {
-            splashWindow.close();
-            splashWindow = null;
-        }
+        splashUpdaterService.closeSplash();
     }
 
     // Create shared files directory
@@ -624,7 +659,13 @@ app.whenReady().then(async () => {
     // Initialize Ollama service for AI-powered notifications
     ollamaService = new OllamaService({ model: 'llama3.2:3b' });
     ollamaService.checkAvailability().then(available => {
+        startupStatus.ollamaReady = !!available;
         log.info(`Ollama service ${available ? 'available' : 'not available'}`);
+        sendLaunchReadyNotification();
+    }).catch((error) => {
+        startupStatus.ollamaReady = false;
+        log.warn('Ollama availability check failed:', error.message);
+        sendLaunchReadyNotification();
     });
 
     // Initialize remote management service
@@ -748,8 +789,12 @@ async function initializeComponents() {
         const SignalingServer = require('./signaling-server');
         signalingServer = new SignalingServer({ port: 8765 });
         const result = await signalingServer.start();
+        startupStatus.localSignalingReady = true;
+        startupStatus.localSignalingMode = result.mode || 'local';
         log.info(`Signaling server started (mode: ${result.mode}, port: ${result.port})`);
     } catch (e) {
+        startupStatus.localSignalingReady = false;
+        startupStatus.localSignalingMode = 'client-only';
         log.warn('Signaling server not started, running in client-only mode:', e.message);
         // App can still work without local signaling server
     }
@@ -1172,9 +1217,49 @@ async function checkAndPromptForPermissionsAfterUpdate() {
 
 // ==================== Window Management ====================
 
+function getSafeWindowState(savedState = {}) {
+    const fallback = {
+        width: 1024,
+        height: 768,
+        x: undefined,
+        y: undefined
+    };
+
+    const width = Number.isFinite(savedState.width) ? Math.max(800, savedState.width) : fallback.width;
+    const height = Number.isFinite(savedState.height) ? Math.max(600, savedState.height) : fallback.height;
+
+    if (!Number.isFinite(savedState.x) || !Number.isFinite(savedState.y)) {
+        return { width, height, x: fallback.x, y: fallback.y };
+    }
+
+    const displays = screen.getAllDisplays();
+    const targetBounds = {
+        x: savedState.x,
+        y: savedState.y,
+        width,
+        height
+    };
+
+    const isVisibleOnAnyDisplay = displays.some(display => {
+        const area = display.workArea;
+        const horizontalOverlap = Math.min(targetBounds.x + targetBounds.width, area.x + area.width) - Math.max(targetBounds.x, area.x);
+        const verticalOverlap = Math.min(targetBounds.y + targetBounds.height, area.y + area.height) - Math.max(targetBounds.y, area.y);
+        return horizontalOverlap > 120 && verticalOverlap > 120;
+    });
+
+    if (!isVisibleOnAnyDisplay) {
+        log.warn('Saved window position is off-screen; resetting to centered defaults');
+        return { width, height, x: fallback.x, y: fallback.y };
+    }
+
+    return targetBounds;
+}
+
 function createMainWindow() {
-    const savedState = store.get('windowState') || {};
-    const shouldStartHidden = store.get('startMinimized') || process.argv.includes('--hidden');
+    const savedState = getSafeWindowState(store.get('windowState') || {});
+    const firstLaunch = !store.get('setupComplete');
+    const hiddenArg = process.argv.includes('--hidden');
+    const shouldStartHidden = !firstLaunch && (store.get('startMinimized') || hiddenArg);
 
     mainWindow = new BrowserWindow({
         width: savedState.width || 1024,
@@ -1279,6 +1364,14 @@ function createMainWindow() {
             recentConnections: store.get('recentConnections')
         });
 
+        if (!shouldStartHidden && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+            log.info('Forcing main window visible after did-finish-load');
+            mainWindow.show();
+            mainWindow.focus();
+        }
+
+        sendLaunchReadyNotification();
+
         // Handle pending protocol URL (from app launch via openlink://)
         if (pendingProtocolUrl) {
             log.info('[Protocol] Sending pending URL to renderer:', pendingProtocolUrl);
@@ -1286,6 +1379,25 @@ function createMainWindow() {
             pendingProtocolUrl = null;
         }
     });
+
+    mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+        log.error(`Main window failed to load: ${errorCode} ${errorDescription}`);
+
+        if (!shouldStartHidden && !mainWindow.isDestroyed()) {
+            mainWindow.show();
+            mainWindow.focus();
+        }
+    });
+
+    setTimeout(() => {
+        if (!mainWindow || mainWindow.isDestroyed() || shouldStartHidden || mainWindow.isVisible()) {
+            return;
+        }
+
+        log.warn('Main window still hidden after startup timeout; forcing visible');
+        mainWindow.show();
+        mainWindow.focus();
+    }, 2500);
 }
 
 function getIconPath() {
@@ -1840,12 +1952,37 @@ function setupAutoStart() {
 // ==================== Global Shortcuts ====================
 
 function registerGlobalShortcuts() {
-    // Control menu hotkey: Option+Shift+Backspace
-    globalShortcut.register('Alt+Shift+Backspace', () => {
-        if (mainWindow) {
+    const accelerators = process.platform === 'darwin'
+        ? ['Command+Alt+\\']
+        : ['Alt+Super+\\'];
+
+    for (const accelerator of accelerators) {
+        const registered = globalShortcut.register(accelerator, () => {
+            if (!mainWindow) {
+                return;
+            }
+
+            if (mainWindow.isMinimized()) {
+                mainWindow.restore();
+            }
+
+            mainWindow.show();
+            mainWindow.focus();
+
+            if (process.platform === 'darwin') {
+                app.focus({ steal: true });
+            }
+
             mainWindow.webContents.send('open-control-menu');
+        });
+
+        if (registered) {
+            log.info(`Registered global shortcut: ${accelerator}`);
+            return;
         }
-    });
+
+        log.warn(`Failed to register global shortcut: ${accelerator}`);
+    }
 }
 
 // ==================== Clipboard Sharing ====================
@@ -1919,7 +2056,7 @@ ipcMain.handle('get-permission-commands', () => {
         return { supported: false };
     }
 
-    const bundleId = 'com.openlink.app';
+    const bundleId = 'com.devinecreations.openlink';
     const commands = {
         // Screen Recording - add to TCC database
         screenRecording: `sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version) VALUES ('kTCCServiceScreenCapture', '${bundleId}', 0, 2, 0, 1);"`,
@@ -1944,7 +2081,7 @@ ipcMain.handle('grant-permissions-with-sudo', async () => {
     }
 
     const { exec } = require('child_process');
-    const bundleId = 'com.openlink.app';
+    const bundleId = 'com.devinecreations.openlink';
 
     // Use osascript to prompt for admin password and run sqlite3
     const script = `
@@ -3266,6 +3403,8 @@ ipcMain.handle('get-system-info', async () => {
     let localIp = 'Unknown';
     let tailscaleIp = null;
     let tailscaleStatus = 'not_installed'; // 'connected', 'stopped', 'not_installed'
+    let wslUser = null;
+    let wslAvailable = false;
 
     // Find all IPs including Tailscale
     const candidates = [];
@@ -3386,8 +3525,22 @@ ipcMain.handle('get-system-info', async () => {
         }
     }
 
+    if (process.platform === 'win32') {
+        try {
+            const { stdout } = await execAsync('wsl.exe sh -lc whoami', { timeout: 3000 });
+            const detectedUser = stdout.trim();
+            if (detectedUser) {
+                wslUser = detectedUser;
+                wslAvailable = true;
+            }
+        } catch {
+            wslAvailable = false;
+        }
+    }
+
     return {
         hostname: os.hostname(),
+        username: os.userInfo().username,
         platform: os.platform(),
         arch: os.arch(),
         release: os.release(),
@@ -3396,6 +3549,9 @@ ipcMain.handle('get-system-info', async () => {
         publicIp: publicIp,
         tailscaleIp: tailscaleIp, // Tailscale network IP if available
         tailscaleStatus: tailscaleStatus, // 'connected', 'stopped', or 'not_installed'
+        wslAvailable: wslAvailable,
+        wslUser: wslUser,
+        wslSshPort: wslAvailable ? 2222 : null,
         totalMemory: `${Math.round(os.totalmem() / (1024 * 1024 * 1024))} GB`,
         freeMemory: `${Math.round(os.freemem() / (1024 * 1024 * 1024))} GB`,
         cpus: os.cpus().length,

@@ -18,6 +18,7 @@
  */
 
 const path = require('path');
+const fs = require('fs');
 const { exec, execSync } = require('child_process');
 const os = require('os');
 
@@ -130,8 +131,13 @@ class ScreenReaderController {
             // Determine DLL path
             let dllPath = this.options.nvdaDllPath;
             if (!dllPath) {
-                const dllName = this.arch === 'x64' ? 'nvdaControllerClient64.dll' : 'nvdaControllerClient32.dll';
-                dllPath = path.join(__dirname, 'native', this.arch === 'x64' ? 'win64' : 'win32', dllName);
+                dllPath = this.resolveBundledNVDADllPath();
+            }
+
+            if (!dllPath) {
+                console.warn('[NVDA] No bundled controller DLL found for architecture:', this.arch);
+                this.nvdaController = null;
+                return;
             }
 
             // Load the DLL
@@ -155,6 +161,27 @@ class ScreenReaderController {
             console.warn('[NVDA] Install ffi-napi and ref-napi for NVDA control support');
             this.nvdaController = null;
         }
+    }
+
+    resolveBundledNVDADllPath() {
+        const candidatesByArch = {
+            x64: [
+                path.join(__dirname, 'native', 'win64', 'nvdaControllerClient64.dll'),
+                path.join(__dirname, 'native', 'win64', 'nvdaControllerClient.dll')
+            ],
+            ia32: [
+                path.join(__dirname, 'native', 'win32', 'nvdaControllerClient32.dll'),
+                path.join(__dirname, 'native', 'win32', 'nvdaControllerClient.dll')
+            ],
+            arm64: [
+                path.join(__dirname, 'native', 'winarm64', 'nvdaControllerClientARM64.dll'),
+                path.join(__dirname, 'native', 'winarm64', 'nvdaControllerClient.dll'),
+                path.join(__dirname, 'native', 'win64', 'nvdaControllerClient64.dll')
+            ]
+        };
+
+        const candidates = candidatesByArch[this.arch] || candidatesByArch.x64;
+        return candidates.find(candidate => fs.existsSync(candidate)) || null;
     }
 
     async initMacOS() {

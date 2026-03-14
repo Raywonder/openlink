@@ -4,7 +4,7 @@
 # This script runs after the app update is installed
 
 APP_NAME="OpenLink"
-BUNDLE_ID="com.openlink.app"
+BUNDLE_ID="com.devinecreations.openlink"
 APP_PATH="/Applications/${APP_NAME}.app"
 LOG_FILE="$HOME/Library/Logs/${APP_NAME}/post-update.log"
 

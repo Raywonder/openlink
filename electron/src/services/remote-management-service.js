@@ -338,12 +338,13 @@ class RemoteManagementService {
                             resolve({
                                 success: true,
                                 installed: true,
-                                running: status.Status === 4, // 4 = Running
+                                running: status.Status === 4 || status.Status === 'Running',
                                 startType: status.StartType,
+                                port: 22,
                                 platform: 'windows'
                             });
                         } catch (e) {
-                            resolve({ success: true, installed: true, running: stdout.includes('Running') });
+                            resolve({ success: true, installed: true, running: stdout.includes('Running'), port: 22 });
                         }
                     }
                 });
@@ -353,6 +354,7 @@ class RemoteManagementService {
                         success: true,
                         installed: true,
                         running: !error && stdout.includes('ssh'),
+                        port: 22,
                         platform: 'darwin'
                     });
                 });
@@ -362,6 +364,7 @@ class RemoteManagementService {
                         success: true,
                         installed: true,
                         running: !error && stdout.trim() === 'active',
+                        port: 22,
                         platform: 'linux'
                     });
                 });

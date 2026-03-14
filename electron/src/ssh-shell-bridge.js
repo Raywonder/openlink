@@ -428,7 +428,7 @@ echo ""
 echo "Checking Accessibility permission..."
 # Check accessibility permission
 if [ -x "/usr/bin/sqlite3" ]; then
-    RESULT=$(sqlite3 /Library/Application\\ Support/com.apple.TCC/TCC.db "SELECT * FROM access WHERE service='kTCCServiceAccessibility' AND client='com.openlink.app';" 2>/dev/null)
+    RESULT=$(sqlite3 /Library/Application\\ Support/com.apple.TCC/TCC.db "SELECT * FROM access WHERE service='kTCCServiceAccessibility' AND client='com.devinecreations.openlink';" 2>/dev/null)
     if [ -n "$RESULT" ]; then
         echo "✅ Accessibility: Configured"
     else

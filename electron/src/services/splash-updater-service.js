@@ -36,9 +36,19 @@ class SplashUpdaterService {
             }
         });
 
-        // Load splash screen HTML
-        await this.splashWindow.loadFile(path.join(__dirname, '../ui/splash-screen.html'));
-        this.splashWindow.show();
+        try {
+            await this.splashWindow.loadFile(path.join(__dirname, '../ui/splash-screen.html'));
+            this.splashWindow.show();
+        } catch (error) {
+            console.warn('[Splash] Failed to load splash screen:', error.message);
+
+            if (this.splashWindow && !this.splashWindow.isDestroyed()) {
+                this.splashWindow.destroy();
+            }
+
+            this.splashWindow = null;
+            return null;
+        }
 
         return this.splashWindow;
     }

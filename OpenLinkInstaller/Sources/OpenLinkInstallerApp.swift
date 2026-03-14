@@ -58,7 +58,7 @@ class InstallerState: ObservableObject {
 
     // Installation paths
     let installPath = "/Applications/OpenLink.app"
-    let launchAgentPath = "~/Library/LaunchAgents/app.openlink.agent.plist"
+    let launchAgentPath = "~/Library/LaunchAgents/com.devinecreations.openlink.agent.plist"
     let configPath = "~/.openlink/config.json"
 
     enum InstallerStep: Int, CaseIterable {

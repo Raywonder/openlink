@@ -234,10 +234,8 @@ async function detectAndConfigureScreenReader() {
 
         if (srStatus.detected) {
             statusEl.textContent = `Screen reader detected: ${srStatus.screenReader}`;
-            // Auto-enable local TTS if screen reader is running
             if (srStatus.isEnabled) {
                 elements.useLocalTts.checked = true;
-                elements.enableRemoteSr.checked = true;
             }
             state.screenReaderDetected = true;
             state.detectedScreenReader = srStatus.screenReader;
@@ -354,6 +352,13 @@ function cacheElements() {
     elements.closeQuit = document.getElementById('close-quit');
     elements.autoCopyUrl = document.getElementById('auto-copy-url');
     elements.allowDropin = document.getElementById('allow-dropin');
+    elements.hostSshStatus = document.getElementById('host-ssh-status');
+    elements.hostSshCommand = document.getElementById('host-ssh-command');
+    elements.copyHostSshCommand = document.getElementById('copy-host-ssh-command');
+    elements.wslSshCommand = document.getElementById('wsl-ssh-command');
+    elements.copyWslSshCommand = document.getElementById('copy-wsl-ssh-command');
+    elements.refreshSshStatus = document.getElementById('refresh-ssh-status');
+    elements.enableHostSsh = document.getElementById('enable-host-ssh');
 
     // Screen reader settings (in Settings tab)
     elements.useLocalTts = document.getElementById('use-local-tts');
@@ -426,6 +431,7 @@ async function loadSettings() {
         // Initialize server list and key ID
         await initializeServers();
         await generateKeyId();
+        await updateRemoteAccessInfo();
 
         // Check for first-time setup
         if (!state.settings.setupComplete) {
@@ -634,6 +640,55 @@ async function detectNetworkInfo() {
         }
     } catch (e) {
         console.warn('Network detection failed:', e);
+    }
+}
+
+async function updateRemoteAccessInfo() {
+    if (!elements.hostSshStatus) {
+        return;
+    }
+
+    try {
+        const [systemInfo, sshStatus] = await Promise.all([
+            window.openlink.getSystemInfo(),
+            window.remoteManagement.getSSHStatus()
+        ]);
+
+        const preferredHost = systemInfo.tailscaleIp || systemInfo.localIp || systemInfo.hostname || 'host';
+        const hostUser = systemInfo.username || 'user';
+        const hostPort = sshStatus?.port || 22;
+        const hostPortSuffix = hostPort === 22 ? '' : ` -p ${hostPort}`;
+        const hostCommand = `ssh ${hostUser}@${preferredHost}${hostPortSuffix}`;
+
+        elements.hostSshStatus.textContent = sshStatus?.running
+            ? `Enabled (port ${hostPort})`
+            : sshStatus?.installed
+                ? 'Installed but not running'
+                : 'Not installed';
+        elements.hostSshCommand.value = hostCommand;
+
+        if (elements.enableHostSsh) {
+            elements.enableHostSsh.disabled = !!sshStatus?.running;
+            elements.enableHostSsh.textContent = sshStatus?.running ? 'Host SSH Enabled' : 'Enable Host SSH';
+        }
+
+        if (elements.wslSshCommand) {
+            if (systemInfo.platform === 'win32' && systemInfo.wslAvailable && systemInfo.wslUser) {
+                const wslPort = systemInfo.wslSshPort || 2222;
+                elements.wslSshCommand.value = `ssh ${systemInfo.wslUser}@${preferredHost} -p ${wslPort}`;
+            } else {
+                elements.wslSshCommand.value = 'WSL SSH not detected on this device';
+            }
+        }
+    } catch (error) {
+        console.error('Failed to update remote access info:', error);
+        elements.hostSshStatus.textContent = 'Unable to detect';
+        if (elements.hostSshCommand) {
+            elements.hostSshCommand.value = '';
+        }
+        if (elements.wslSshCommand) {
+            elements.wslSshCommand.value = '';
+        }
     }
 }
 
@@ -1414,6 +1469,14 @@ function applySettings() {
         elements.localVolumeValue.textContent = `${s.audioSettings.localVolume}%`;
         elements.autoEnableMic.checked = s.audioSettings.autoEnableMic;
         elements.alwaysEnableMedia.checked = s.audioSettings.alwaysEnableMedia;
+    }
+
+    if (s.accessibilitySettings) {
+        elements.useLocalTts.checked = s.accessibilitySettings.useLocalTTS === true;
+        elements.enableRemoteSr.checked = s.accessibilitySettings.enableRemoteScreenReader !== false;
+    } else {
+        elements.useLocalTts.checked = false;
+        elements.enableRemoteSr.checked = true;
     }
 
     // Clipboard
@@ -2214,20 +2277,12 @@ function setupEventListeners() {
         elements.addWalletBtn.addEventListener('click', addSavedWallet);
     }
 
-    // Screen reader settings - mutually exclusive
-    elements.useLocalTts.addEventListener('change', (e) => {
-        if (e.target.checked) {
-            // Disable remote screen reader when local TTS is enabled
-            elements.enableRemoteSr.checked = false;
-        }
+    // Screen reader settings
+    elements.useLocalTts.addEventListener('change', () => {
         saveSettings();
     });
 
-    elements.enableRemoteSr.addEventListener('change', (e) => {
-        if (e.target.checked) {
-            // Disable local TTS when remote screen reader is enabled
-            elements.useLocalTts.checked = false;
-        }
+    elements.enableRemoteSr.addEventListener('change', () => {
         saveSettings();
     });
 
@@ -2272,11 +2327,51 @@ function setupEventListeners() {
         refreshNowBtn.addEventListener('click', async () => {
             announce('Refreshing network info and servers...');
             await detectNetworkInfo();
+            await updateRemoteAccessInfo();
             await initializeServers();
             if (state.currentPanel === 'servers') {
                 await renderServerList();
             }
             announce('Network info and servers refreshed');
+        });
+    }
+
+    if (elements.refreshSshStatus) {
+        elements.refreshSshStatus.addEventListener('click', async () => {
+            await updateRemoteAccessInfo();
+            announce('SSH status refreshed');
+        });
+    }
+
+    if (elements.copyHostSshCommand) {
+        elements.copyHostSshCommand.addEventListener('click', async () => {
+            if (elements.hostSshCommand?.value) {
+                await navigator.clipboard.writeText(elements.hostSshCommand.value);
+                announce('Host SSH command copied');
+            }
+        });
+    }
+
+    if (elements.copyWslSshCommand) {
+        elements.copyWslSshCommand.addEventListener('click', async () => {
+            if (elements.wslSshCommand?.value && !elements.wslSshCommand.value.includes('not detected')) {
+                await navigator.clipboard.writeText(elements.wslSshCommand.value);
+                announce('WSL SSH command copied');
+            }
+        });
+    }
+
+    if (elements.enableHostSsh) {
+        elements.enableHostSsh.addEventListener('click', async () => {
+            announce('Requesting host SSH enable...');
+            elements.enableHostSsh.disabled = true;
+            const result = await window.remoteManagement.enableSSH();
+            if (result?.success) {
+                announce(result.message || 'Host SSH enabled');
+            } else {
+                announce(result?.error || 'Failed to enable host SSH');
+            }
+            await updateRemoteAccessInfo();
         });
     }
 
@@ -2308,9 +2403,10 @@ function setupEventListeners() {
     // Minimize
     document.getElementById('minimize-btn').addEventListener('click', () => {
         announce('OpenLink minimized to tray');
+        const shortcut = navigator.platform.includes('Mac') ? 'Cmd+Opt+\\' : 'Alt+Win+\\';
         window.openlink.showNotification({
             title: 'OpenLink',
-            body: 'Minimized to tray. Use Option+Shift+\\ to restore.'
+            body: `Minimized to tray. Use ${shortcut} to restore.`
         });
         window.openlink.minimizeToTray();
     });
@@ -2329,6 +2425,19 @@ function setupEventListeners() {
             openControlMenu();
         }
     });
+
+    if (window.remoteManagement?.onApprovalRequest) {
+        window.remoteManagement.onApprovalRequest(async (request) => {
+            const approved = await showConfirmDialog(
+                'Approve OpenLink Action',
+                `Allow ${request.action} from ${request.fromDevice || 'this device'}?`,
+                'Allow',
+                'Deny'
+            );
+            await window.remoteManagement.approveCommand(request.id, approved);
+            announce(approved ? `${request.action} approved` : `${request.action} denied`);
+        });
+    }
 
     window.openlink.onClipboardTransfer((data) => {
         if (state.isConnected && state.dataChannel) {
@@ -3261,6 +3370,7 @@ async function initWebRTC() {
         } else if (event.track.kind === 'audio') {
             elements.remoteAudio.srcObject = event.streams[0];
             elements.remoteAudio.volume = (state.settings?.audioSettings?.remoteVolume || 100) / 100;
+            elements.remoteAudio.play?.().catch(() => {});
         }
     };
 
@@ -4508,9 +4618,12 @@ function handleDataMessage(data) {
             break;
 
         case 'speak':
-            // Local TTS for accessibility
-            const utterance = new SpeechSynthesisUtterance(data.text);
-            speechSynthesis.speak(utterance);
+            if (state.settings?.accessibilitySettings?.useLocalTTS) {
+                const utterance = new SpeechSynthesisUtterance(data.text);
+                speechSynthesis.speak(utterance);
+            } else {
+                announce(data.text);
+            }
             break;
 
         case 'sync-capslock':
@@ -5678,7 +5791,12 @@ async function saveSettings() {
         sessionPassword: document.getElementById('session-password')?.value?.trim() || '',
         sessionIdWords: document.getElementById('session-id-words')?.value?.trim() || '',
         // Server selection
-        selectedServer: elements.serverSelect?.value || ''
+        selectedServer: elements.serverSelect?.value || '',
+        accessibilitySettings: {
+            useLocalTTS: elements.useLocalTts?.checked ?? false,
+            enableRemoteScreenReader: elements.enableRemoteSr?.checked !== false,
+            preferLocalScreenReaderFallback: true
+        }
     };
 
     // Update local state immediately
@@ -6528,8 +6646,10 @@ window.restoreWalletsFromServer = restoreWalletsFromServer;
 // ==================== Keyboard Handler ====================
 
 function handleGlobalKeydown(event) {
-    // Alt+Shift+\ - Control menu (avoids conflict with RIM)
-    if (event.altKey && event.shiftKey && event.key === '\\') {
+    const isMacMenuHotkey = navigator.platform.includes('Mac') && event.metaKey && event.altKey && event.key === '\\';
+    const isWindowsMenuHotkey = !navigator.platform.includes('Mac') && event.altKey && event.metaKey && event.key === '\\';
+
+    if (isMacMenuHotkey || isWindowsMenuHotkey) {
         event.preventDefault();
         if (state.isConnected) {
             // In session - toggle control menu

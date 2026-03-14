@@ -1,6 +1,6 @@
 /**
  * OpenLink Remote Desktop - Application Logic
- * Control Menu: Option+Shift+Backspace
+ * Control Menu: Cmd+Opt+\ on Mac or Alt+Win+\ on Windows
  */
 
 class OpenLinkApp {
@@ -376,7 +376,7 @@ class OpenLinkApp {
         // Connection events
         this.remoteDesktop.on('connected', () => {
             this.updateConnectionStatus('connected');
-            this.announce('Connected to remote desktop. Press Option+Shift+Backspace for control menu.');
+            this.announce('Connected to remote desktop. Press the OpenLink menu hotkey for control menu.');
         });
 
         this.remoteDesktop.on('disconnected', (reason) => {
@@ -399,6 +399,7 @@ class OpenLinkApp {
 
         this.remoteDesktop.on('remote_audio', (stream) => {
             this.elements.remoteAudio.srcObject = stream;
+            this.elements.remoteAudio.play?.().catch(() => {});
         });
 
         this.remoteDesktop.on('peer_joined', (data) => {

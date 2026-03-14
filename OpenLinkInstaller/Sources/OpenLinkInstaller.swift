@@ -12,7 +12,7 @@ class OpenLinkInstaller: ObservableObject {
     let appBundlePath = "/Applications/OpenLink.app"
     let configDirectory = NSHomeDirectory() + "/.openlink"
     let configPath = NSHomeDirectory() + "/.openlink/config.json"
-    let launchAgentPath = NSHomeDirectory() + "/Library/LaunchAgents/app.openlink.agent.plist"
+    let launchAgentPath = NSHomeDirectory() + "/Library/LaunchAgents/com.devinecreations.openlink.agent.plist"
 
     func install(state: InstallerState) {
         Task { @MainActor in
@@ -159,7 +159,7 @@ class OpenLinkInstaller: ObservableObject {
             <key>CFBundleIconFile</key>
             <string>AppIcon</string>
             <key>CFBundleIdentifier</key>
-            <string>app.openlink.service</string>
+            <string>com.devinecreations.openlink</string>
             <key>CFBundleInfoDictionaryVersion</key>
             <string>6.0</string>
             <key>CFBundleName</key>
@@ -192,7 +192,7 @@ class OpenLinkInstaller: ObservableObject {
         <plist version="1.0">
         <dict>
             <key>Label</key>
-            <string>app.openlink.agent</string>
+            <string>com.devinecreations.openlink.agent</string>
             <key>ProgramArguments</key>
             <array>
                 <string>/Applications/OpenLink.app/Contents/MacOS/OpenLink</string>
@@ -300,7 +300,7 @@ class OpenLinkSettings: ObservableObject {
     static let shared = OpenLinkSettings()
 
     private let configPath = NSHomeDirectory() + "/.openlink/config.json"
-    private let userDefaults = UserDefaults(suiteName: "app.openlink.settings")
+    private let userDefaults = UserDefaults(suiteName: "com.devinecreations.openlink.settings")
 
     @Published var config: OpenLinkConfig?
 
@@ -380,7 +380,7 @@ class OpenLinkSettings: ObservableObject {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: "openlink-\(serverId)",
-            kSecAttrService as String: "app.openlink.tokens",
+            kSecAttrService as String: "com.devinecreations.openlink.tokens",
             kSecValueData as String: token.data(using: .utf8)!
         ]
 
@@ -392,7 +392,7 @@ class OpenLinkSettings: ObservableObject {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: "openlink-\(serverId)",
-            kSecAttrService as String: "app.openlink.tokens",
+            kSecAttrService as String: "com.devinecreations.openlink.tokens",
             kSecReturnData as String: true
         ]
 
@@ -412,7 +412,7 @@ class OpenLinkSettings: ObservableObject {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: "openlink-\(serverId)",
-            kSecAttrService as String: "app.openlink.tokens"
+            kSecAttrService as String: "com.devinecreations.openlink.tokens"
         ]
 
         SecItemDelete(query as CFDictionary)

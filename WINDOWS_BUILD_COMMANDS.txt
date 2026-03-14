@@ -1,0 +1,44 @@
+OpenLink Windows build commands
+
+Repo root:
+C:\Users\40493\git\Raywonder\openlink
+
+Electron app dir:
+C:\Users\40493\git\Raywonder\openlink\electron
+
+Run in PowerShell:
+
+cd C:\Users\40493\git\Raywonder\openlink
+git pull
+
+cd .\electron
+npm install
+npm run build:win:inno
+
+Expected installer output:
+
+C:\Users\40493\Downloads\OpenLink Setup 1.7.15.exe
+
+If build:win:inno fails, try:
+
+cd C:\Users\40493\git\Raywonder\openlink\electron
+npm run build:win:dir
+powershell -ExecutionPolicy Bypass -File .\scripts\build-win-inno.ps1
+
+Inno Setup compiler path expected by the script:
+
+C:\Program Files (x86)\Inno Setup 6\ISCC.exe
+
+Repo files involved:
+
+electron\installer\OpenLink.iss
+electron\scripts\build-win-inno.ps1
+
+After build, test:
+
+1. Launch OpenLink Setup 1.7.15.exe from Downloads
+2. Confirm the window appears on launch
+3. Confirm Alt+Win+\ opens the OpenLink menu
+4. Confirm remote audio is heard
+5. Confirm local TTS works when remote screen reader relay is off
+6. Connect to the Mac target and verify session stability

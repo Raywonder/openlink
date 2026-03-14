@@ -60,6 +60,27 @@ class VoiceLinkConnector extends EventEmitter {
         this.audioStream = null;
         this.audioContext = null;
         this.audioProcessor = null;
+        this.roomInfo = null;
+        this.sessionContext = {
+            sessionName: null,
+            initiatorId: null,
+            initiatorName: 'OpenLink User',
+            peerId: null,
+            peerName: 'Remote User',
+            domain: null,
+            generatedDomain: null,
+            connectionStatus: {
+                directVoiceWorking: false,
+                openLinkStatus: 'initializing',
+                voiceLinkStatus: 'starting'
+            },
+            aiStatus: {
+                summary: null,
+                score: null,
+                state: null
+            },
+            voiceFallbackReason: 'p2p-unavailable'
+        };
 
         // Discovery cache
         this.discoveredServers = [];
@@ -77,8 +98,9 @@ class VoiceLinkConnector extends EventEmitter {
      * @param {string} openLinkSessionId - The OpenLink session ID to link audio to
      * @returns {Promise<boolean>} Success status
      */
-    async initialize(openLinkSessionId) {
+    async initialize(openLinkSessionId, sessionContext = {}) {
         this.openLinkSessionId = openLinkSessionId;
+        this.updateSessionContext(sessionContext);
 
         try {
             // Step 1: Discover available servers
@@ -111,6 +133,27 @@ class VoiceLinkConnector extends EventEmitter {
             this.emit('error', `Initialization failed: ${error.message}`);
             return false;
         }
+    }
+
+    updateSessionContext(sessionContext = {}) {
+        const nextConnectionStatus = (sessionContext.connectionStatus && typeof sessionContext.connectionStatus === 'object')
+            ? sessionContext.connectionStatus
+            : {};
+        const nextAiStatus = (sessionContext.aiStatus && typeof sessionContext.aiStatus === 'object')
+            ? sessionContext.aiStatus
+            : {};
+        this.sessionContext = {
+            ...this.sessionContext,
+            ...sessionContext,
+            connectionStatus: {
+                ...(this.sessionContext.connectionStatus || {}),
+                ...nextConnectionStatus
+            },
+            aiStatus: {
+                ...(this.sessionContext.aiStatus || {}),
+                ...nextAiStatus
+            }
+        };
     }
 
     /**
@@ -273,6 +316,13 @@ class VoiceLinkConnector extends EventEmitter {
                 this.roomId = currentRoomId;
                 this.joinRoom();
             }
+
+            await this.reportOpenLinkStatus({
+                connectionStatus: {
+                    openLinkStatus: 'server-switched',
+                    voiceLinkStatus: 'fallback-active'
+                }
+            });
 
             this.emit('server-switched', { server: newServer });
             return true;
@@ -627,41 +677,22 @@ class VoiceLinkConnector extends EventEmitter {
      */
     async createSessionRoom() {
         try {
-            // Generate cryptographically random room ID for extra privacy
-            const randomSuffix = this.secureRandom(1000000).toString(36);
-            const roomName = `openlink_audio_${this.openLinkSessionId}_${randomSuffix}`;
-
-            const response = await fetch(`${this.server.url}/api/rooms`, {
+            const response = await fetch(`${this.server.url}/api/rooms/create-openlink`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: this.buildJsonHeaders(),
                 body: JSON.stringify({
-                    name: roomName,
-                    visibility: 'hidden',        // Not visible in room listings
-                    accessType: 'app-only',      // Only OpenLink can access
-                    locked: true,                // No external joins allowed
-                    adminAccess: 'stats-only',   // Admins see stats, not content
-                    maxUsers: 10,
-                    duration: 24 * 60, // 24 hours in minutes
-                    // Privacy metadata - no personal data stored
-                    metadata: {
-                        type: 'openlink-remote-audio',
-                        createdBy: 'openlink-connector',
-                        sessionHash: this.hashSessionId(this.openLinkSessionId),
-                        privacy: {
-                            adminCanAccess: false,
-                            statsOnly: true,
-                            noLogging: true,
-                            encryptedTransport: true
-                        }
-                    },
-                    // Admin statistics (non-personal)
-                    statsConfig: {
-                        showInUsage: true,           // Show in server statistics
-                        label: 'Remote OpenLink Audio', // What admins see
-                        hideUserDetails: true,       // Don't show user info
-                        hideIPs: true,               // Don't log IPs
-                        aggregateOnly: true          // Only aggregate data
-                    }
+                    sessionId: this.openLinkSessionId,
+                    sessionName: this.sessionContext.sessionName,
+                    initiatorId: this.sessionContext.initiatorId,
+                    initiatorName: this.sessionContext.initiatorName,
+                    peerId: this.sessionContext.peerId,
+                    peerName: this.sessionContext.peerName,
+                    domain: this.sessionContext.generatedDomain || this.sessionContext.domain || null,
+                    generatedDomain: this.sessionContext.generatedDomain || null,
+                    connectionStatus: this.sessionContext.connectionStatus,
+                    aiStatus: this.sessionContext.aiStatus,
+                    voiceFallbackReason: this.sessionContext.voiceFallbackReason || 'p2p-unavailable',
+                    ownerName: 'openlink-connector'
                 })
             });
 
@@ -670,15 +701,17 @@ class VoiceLinkConnector extends EventEmitter {
             }
 
             const data = await response.json();
-            this.roomId = data.roomId || data.id;
+            this.roomId = data.roomId || data.id || data.room?.id;
+            this.roomInfo = data.room || null;
 
             this.emit('room-created', {
                 roomId: this.roomId,
-                roomName,
+                roomName: data.room?.name || this.roomInfo?.name || `OpenLink Audio ${this.openLinkSessionId}`,
+                domain: data.room?.openlinkSession?.domain || this.sessionContext.generatedDomain || this.sessionContext.domain || null,
                 security: {
                     hidden: true,
-                    locked: true,
-                    adminAccessLevel: 'stats-only'
+                    locked: data.room?.locked !== false,
+                    adminAccessLevel: data.room?.adminAccess || 'overview-only'
                 }
             });
 
@@ -737,6 +770,12 @@ class VoiceLinkConnector extends EventEmitter {
                     clearTimeout(timeout);
                     this.connected = true;
                     this.joinRoom();
+                    this.reportOpenLinkStatus({
+                        connectionStatus: {
+                            openLinkStatus: 'connected',
+                            voiceLinkStatus: 'fallback-active'
+                        }
+                    }).catch(() => {});
                     resolve(true);
                 });
 
@@ -857,6 +896,12 @@ class VoiceLinkConnector extends EventEmitter {
         }
 
         this.emit('error', 'Failed to reconnect after multiple attempts');
+        this.reportOpenLinkStatus({
+            connectionStatus: {
+                openLinkStatus: 'reconnect-failed',
+                voiceLinkStatus: 'fallback-disconnected'
+            }
+        }).catch(() => {});
     }
 
     /**
@@ -900,6 +945,12 @@ class VoiceLinkConnector extends EventEmitter {
                 enabled: true,
                 sampleRate: 48000,
                 channels: 1
+            });
+
+            await this.reportOpenLinkStatus({
+                connectionStatus: {
+                    voiceLinkStatus: 'audio-relay-active'
+                }
             });
 
             this.emit('audio-started');
@@ -965,6 +1016,12 @@ class VoiceLinkConnector extends EventEmitter {
             this.socket.emit('enable-audio-relay', { enabled: false });
         }
 
+        this.reportOpenLinkStatus({
+            connectionStatus: {
+                voiceLinkStatus: 'audio-relay-stopped'
+            }
+        }).catch(() => {});
+
         this.emit('audio-stopped');
     }
 
@@ -980,7 +1037,66 @@ class VoiceLinkConnector extends EventEmitter {
         }
 
         this.connected = false;
+        this.reportOpenLinkStatus({
+            connectionStatus: {
+                openLinkStatus: 'disconnected',
+                voiceLinkStatus: 'fallback-disconnected'
+            }
+        }).catch(() => {});
         this.emit('disconnected', 'manual');
+    }
+
+    buildJsonHeaders() {
+        const headers = { 'Content-Type': 'application/json' };
+        if (this.sessionToken) {
+            headers.Authorization = `Bearer ${this.sessionToken}`;
+        }
+        return headers;
+    }
+
+    async reportOpenLinkStatus(updates = {}) {
+        if (!this.server || !this.roomId) return false;
+        this.updateSessionContext(updates);
+
+        try {
+            const response = await fetch(`${this.server.url}/api/rooms/${encodeURIComponent(this.roomId)}/openlink-status`, {
+                method: 'PUT',
+                headers: this.buildJsonHeaders(),
+                body: JSON.stringify({
+                    domain: this.sessionContext.generatedDomain || this.sessionContext.domain || null,
+                    connectionStatus: this.sessionContext.connectionStatus,
+                    aiStatus: this.sessionContext.aiStatus,
+                    voiceFallbackReason: this.sessionContext.voiceFallbackReason || 'p2p-unavailable'
+                })
+            });
+            return response.ok;
+        } catch (error) {
+            this.emit('warning', `OpenLink status sync failed: ${error.message}`);
+            return false;
+        }
+    }
+
+    setGeneratedDomain(domain) {
+        this.updateSessionContext({ generatedDomain: domain });
+        return this.reportOpenLinkStatus({});
+    }
+
+    setAIStatus(aiStatus = {}) {
+        this.updateSessionContext({ aiStatus });
+        return this.reportOpenLinkStatus({});
+    }
+
+    setDirectVoiceState(directVoiceWorking, reason = null) {
+        const normalizedReason = directVoiceWorking ? 'direct-p2p-active' : (reason || 'p2p-unavailable');
+        this.updateSessionContext({
+            voiceFallbackReason: normalizedReason,
+            connectionStatus: {
+                directVoiceWorking: !!directVoiceWorking,
+                openLinkStatus: directVoiceWorking ? 'connected' : (this.sessionContext.connectionStatus?.openLinkStatus || 'active'),
+                voiceLinkStatus: directVoiceWorking ? 'standby' : 'fallback-active'
+            }
+        });
+        return this.reportOpenLinkStatus({});
     }
 
     /**

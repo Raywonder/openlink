@@ -722,6 +722,40 @@
                 <p class="help-text" id="always-enable-media-desc">Keeps audio and video streams active throughout the session.</p>
             </div>
 
+            <h3>Remote Access</h3>
+            <div class="form-group">
+                <label>Host SSH Status</label>
+                <span class="setting-value" id="host-ssh-status" aria-live="polite">Checking...</span>
+                <p class="help-text">Shows whether the computer itself is reachable over SSH for Tailscale/Headscale-connected devices.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="host-ssh-command">Host SSH Command</label>
+                <div class="url-display-box">
+                    <input type="text" id="host-ssh-command" readonly placeholder="Detecting SSH endpoint...">
+                    <button id="copy-host-ssh-command" class="btn secondary">Copy</button>
+                </div>
+                <p class="help-text">Direct SSH endpoint for the local machine over LAN or Tailscale/Headscale.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="wsl-ssh-command">WSL SSH Command</label>
+                <div class="url-display-box">
+                    <input type="text" id="wsl-ssh-command" readonly placeholder="WSL SSH not detected">
+                    <button id="copy-wsl-ssh-command" class="btn secondary">Copy</button>
+                </div>
+                <p class="help-text">Separate Linux/WSL shell endpoint when available. Default WSL SSH port is 2222.</p>
+            </div>
+
+            <div class="form-group">
+                <label>Remote Access Controls</label>
+                <div class="button-group">
+                    <button id="refresh-ssh-status" class="btn secondary">Refresh SSH Status</button>
+                    <button id="enable-host-ssh" class="btn secondary">Enable Host SSH</button>
+                </div>
+                <p class="help-text">Use OpenLink to expose and verify remote shell access for this device. Host SSH is the main endpoint; WSL SSH is optional.</p>
+            </div>
+
             <h3>Screen Reader</h3>
             <p id="sr-detection-status" class="help-text">Detecting screen reader...</p>
             <div class="form-group checkbox" role="group" aria-labelledby="use-local-tts-label">
@@ -954,7 +988,7 @@
                             <tr><th>Shortcut</th><th>Action</th></tr>
                         </thead>
                         <tbody>
-                            <tr><td><kbd>Alt+Shift+\</kbd></td><td>Open Control Menu (during session) / Bring window to front</td></tr>
+                            <tr><td><kbd>Mac: Cmd+Opt+\</kbd><br><kbd>Windows: Alt+Win+\</kbd></td><td>Open Control Menu (during session) / Bring window to front</td></tr>
                             <tr><td><kbd>Escape</kbd></td><td>Close Control Menu</td></tr>
                             <tr><td><kbd>Arrow Keys</kbd></td><td>Navigate menu items</td></tr>
                             <tr><td><kbd>Enter</kbd></td><td>Select menu item</td></tr>
@@ -999,7 +1033,7 @@
                     </ol>
 
                     <h4>During a Session</h4>
-                    <p>Press <kbd>Alt+Shift+\</kbd> to open the Control Menu with these options:</p>
+                    <p>Press <kbd>Cmd+Opt+\</kbd> on Mac or <kbd>Alt+Win+\</kbd> on Windows to open the Control Menu with these options:</p>
                     <ul>
                         <li><strong>Disconnect:</strong> End the session</li>
                         <li><strong>Send File:</strong> Transfer a file to the remote computer</li>
@@ -1121,7 +1155,7 @@
                 <button id="toggle-fullscreen" class="remote-btn" aria-label="Toggle fullscreen">
                     <span class="icon">&#9974;</span>
                 </button>
-                <button id="open-control-menu" class="remote-btn" aria-label="Open control menu (Alt+Shift+\)">
+                <button id="open-control-menu" class="remote-btn" aria-label="Open control menu (Cmd+Opt+\\ on Mac, Alt+Win+\\ on Windows)">
                     <span class="icon">&#9776;</span>
                 </button>
             </div>

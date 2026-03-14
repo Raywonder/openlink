@@ -1,7 +1,7 @@
 /**
  * OpenLink Remote Desktop - WebRTC Client
  * Accessible remote desktop with bidirectional audio support
- * All keys go to remote by default - Option+Shift+Backspace opens control menu
+ * All keys go to remote by default - Cmd+Opt+\ on Mac or Alt+Win+\ on Windows opens control menu
  */
 
 class OpenLinkRemoteDesktop {
@@ -16,9 +16,11 @@ class OpenLinkRemoteDesktop {
             enableAudio: options.enableAudio !== false,
             enableVideo: options.enableVideo !== false,
             keyboardMode: 'remote',  // Default: all keys go to remote
-            menuHotkey: { alt: true, shift: true, key: 'Backspace' },  // Option+Shift+Backspace
+            menuHotkey: { meta: true, alt: true, key: '\\' },
             sharedFilesPath: 'Documents/OpenLink/shared_files',
             useLocalTTS: options.useLocalTTS || false,
+            captureRemoteScreenReader: options.captureRemoteScreenReader !== false,
+            preferLocalScreenReaderFallback: options.preferLocalScreenReaderFallback !== false,
             ...options
         };
 
@@ -49,7 +51,7 @@ class OpenLinkRemoteDesktop {
         this.screenReaderOutput = [];
         this.announceQueue = [];
         this.localTTS = null;
-        this.remoteScreenReaderEnabled = true;
+        this.remoteScreenReaderEnabled = this.options.captureRemoteScreenReader !== false;
 
         // Connection permissions
         this.trustedMachines = this.loadTrustedMachines();
@@ -107,6 +109,11 @@ class OpenLinkRemoteDesktop {
         this.localTTS.speak(utterance);
     }
 
+    shouldUseLocalScreenReaderSpeech() {
+        return this.options.useLocalTTS ||
+            (!this.remoteScreenReaderEnabled && this.options.preferLocalScreenReaderFallback !== false);
+    }
+
     // ==================== Control Menu ====================
 
     isMenuHotkey(e) {
@@ -121,7 +128,7 @@ class OpenLinkRemoteDesktop {
     }
 
     handleKeyDown(e) {
-        // Check for menu hotkey (Option+Shift+Backspace)
+        // Check for menu hotkey
         if (this.isMenuHotkey(e)) {
             e.preventDefault();
             e.stopPropagation();
@@ -490,9 +497,13 @@ class OpenLinkRemoteDesktop {
             enabled: this.remoteScreenReaderEnabled
         });
 
+        if (!this.remoteScreenReaderEnabled && !this.localTTS) {
+            this.initLocalTTS();
+        }
+
         this.announce(this.remoteScreenReaderEnabled
             ? 'Remote screen reader enabled'
-            : 'Remote screen reader disabled');
+            : 'Remote screen reader disabled. Local speech fallback will be used when available.');
     }
 
     toggleLocalTTS() {
@@ -520,7 +531,7 @@ class OpenLinkRemoteDesktop {
         });
 
         if (this.controlSwapped) {
-            this.announce('Control swapped. The remote user can now control your machine. Press Option+Shift+Backspace to take back control.');
+            this.announce('Control swapped. The remote user can now control your machine. Press the OpenLink menu hotkey to take back control.');
         } else {
             this.announce('Control restored. You are now controlling the remote machine.');
         }
@@ -629,7 +640,7 @@ class OpenLinkRemoteDesktop {
                 isHost: this.isHost
             });
 
-            this.announce('Connecting to remote session. Press Option+Shift+Backspace to open control menu.');
+            this.announce('Connecting to remote session. Press the OpenLink menu hotkey to open control menu.');
             return true;
         } catch (error) {
             console.error('[RemoteDesktop] Connection failed:', error);
@@ -789,14 +800,20 @@ class OpenLinkRemoteDesktop {
 
             if (state === 'connected') {
                 this.isConnected = true;
-                this.announce('Connected to remote desktop. Press Option+Shift+Backspace for control menu.');
+                this.announce('Connected to remote desktop. Press the OpenLink menu hotkey for control menu.');
                 this.emit('connected');
+                if (this.voiceLinkConnector) {
+                    this.voiceLinkConnector.setDirectVoiceState(true, 'direct-p2p-active').catch(() => {});
+                }
                 // Request machine info on connect
                 this.requestMachineInfo();
             } else if (state === 'disconnected' || state === 'failed') {
                 this.isConnected = false;
                 this.announce('Connection lost');
                 this.emit('connection_lost');
+                if (this.voiceLinkConnector) {
+                    this.voiceLinkConnector.setDirectVoiceState(false, state === 'failed' ? 'p2p-failed' : 'p2p-disconnected').catch(() => {});
+                }
             }
         };
 
@@ -988,8 +1005,13 @@ class OpenLinkRemoteDesktop {
     }
 
     setupRemoteAudio(stream) {
+        if (this.audioContext) {
+            this.audioContext.close().catch(() => {});
+        }
+
         // Create audio context for mixing and playback
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        this.audioContext.resume().catch(() => {});
 
         const source = this.audioContext.createMediaStreamSource(stream);
         const gainNode = this.audioContext.createGain();
@@ -999,6 +1021,7 @@ class OpenLinkRemoteDesktop {
         gainNode.connect(this.audioContext.destination);
 
         this.audioMixer = { source, gainNode };
+        this.announce('Remote audio connected');
     }
 
     setRemoteVolume(volume) {
@@ -1054,7 +1077,22 @@ class OpenLinkRemoteDesktop {
 
             // Initialize with OpenLink session ID
             const sessionId = this.sessionId || `openlink_${Date.now()}`;
-            const success = await this.voiceLinkConnector.initialize(sessionId);
+            const success = await this.voiceLinkConnector.initialize(sessionId, {
+                sessionName: this.remoteMachineInfo?.hostname || sessionId,
+                initiatorName: 'OpenLink User',
+                peerName: this.remoteMachineInfo?.hostname || 'Remote User',
+                generatedDomain: this.options.generatedDomain || null,
+                connectionStatus: {
+                    directVoiceWorking: false,
+                    openLinkStatus: this.isConnected ? 'connected' : 'connecting',
+                    voiceLinkStatus: 'initializing'
+                },
+                aiStatus: {
+                    state: this.isConnected ? 'connected' : 'starting',
+                    summary: this.isConnected ? 'OpenLink desktop session connected' : 'OpenLink desktop session starting'
+                },
+                voiceFallbackReason: 'p2p-unavailable'
+            });
 
             if (success) {
                 await this.voiceLinkConnector.connect();
@@ -1285,7 +1323,7 @@ class OpenLinkRemoteDesktop {
         }
 
         // Use local TTS if enabled, otherwise ARIA live region
-        if (this.options.useLocalTTS) {
+        if (this.shouldUseLocalScreenReaderSpeech()) {
             this.speakLocal(message.text, message.priority);
         } else {
             this.announce(message.text, message.priority);
