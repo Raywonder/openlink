@@ -58,6 +58,11 @@ exports.default = async function notarizing(context) {
         return;
     }
 
+    if (process.env.OPENLINK_SKIP_NOTARIZE === '1') {
+        console.log('Skipping notarization: OPENLINK_SKIP_NOTARIZE=1');
+        return;
+    }
+
     // Check if notarization is enabled in config
     const pkg = require('../package.json');
     if (pkg.build?.mac?.notarize === false) {

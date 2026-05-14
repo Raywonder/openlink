@@ -179,7 +179,7 @@ class OpenLinkInstaller: ObservableObject {
             <key>NSHighResolutionCapable</key>
             <true/>
             <key>NSHumanReadableCopyright</key>
-            <string>Copyright 2026 VoiceLink. All rights reserved.</string>
+            <string>Copyright 2026 OpenLink. All rights reserved.</string>
         </dict>
         </plist>
         """

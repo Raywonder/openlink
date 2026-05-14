@@ -98,7 +98,7 @@ struct InstallerSidebar: View {
                 Text("Version 1.0.0")
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.5))
-                Text("VoiceLink Native")
+                Text("OpenLink")
                     .font(.caption2)
                     .foregroundColor(.white.opacity(0.4))
             }

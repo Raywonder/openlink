@@ -1329,7 +1329,8 @@ function generateComplexSessionId() {
 
 /**
  * Generate shareable URL with selected domain
- * Now uses subdomain-based URLs: https://sessionId.openlink.domain.com
+ * Uses full OpenLink domains with token paths:
+ * https://sessionId.openlink.domain.com/token/sessionId
  * Also supports direct IP fallback when domain is 'direct:IP'
  */
 function generateShareableUrl(sessionId, preferredDomain = null) {
@@ -1377,10 +1378,13 @@ function generateShareableUrl(sessionId, preferredDomain = null) {
         domain = allDomains[0] || 'openlink.tappedin.fm';
     }
 
-    // Generate subdomain-based URL
-    const subdomainUrl = `https://${subdomainSafeId}.${domain}`;
-    // Also keep path-based URL as fallback
-    const pathUrl = `https://${domain}/${sessionId}`;
+    const encodedSessionId = encodeURIComponent(sessionId);
+    const tokenPath = `/token/${encodedSessionId}`;
+
+    // Generate subdomain-based URL on the full selected OpenLink domain.
+    const subdomainUrl = `https://${subdomainSafeId}.${domain}${tokenPath}`;
+    // Also keep a path-based URL as fallback for servers that do not wildcard route subdomains.
+    const pathUrl = `https://${domain}${tokenPath}`;
 
     return {
         url: subdomainUrl,
@@ -1388,8 +1392,67 @@ function generateShareableUrl(sessionId, preferredDomain = null) {
         sessionId: sessionId,
         subdomainId: subdomainSafeId,
         domain: domain,
-        shortUrl: `${subdomainSafeId}.${domain}`,
+        shortUrl: `${subdomainSafeId}.${domain}${tokenPath}`,
         isDirect: false
+    };
+}
+
+function parseSessionFromOpenLinkUrl(input) {
+    let urlToParse = input;
+    if (!urlToParse.includes('://')) {
+        urlToParse = 'https://' + urlToParse;
+    }
+
+    const url = new URL(urlToParse);
+    const pathParts = url.pathname
+        .split('/')
+        .map(part => part.trim())
+        .filter(Boolean);
+
+    const knownDomains = getAllLinkDomains();
+    const matchedDomain = knownDomains
+        .slice()
+        .sort((a, b) => b.length - a.length)
+        .find(domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`));
+    const serverDomain = matchedDomain || url.hostname;
+
+    const tokenIndex = pathParts.findIndex(part => part.toLowerCase() === 'token');
+    if (tokenIndex >= 0 && pathParts[tokenIndex + 1]) {
+        return {
+            server: serverDomain,
+            sessionId: decodeURIComponent(pathParts[tokenIndex + 1])
+        };
+    }
+
+    const querySession = url.searchParams.get('session') || url.searchParams.get('token');
+    if (querySession) {
+        return {
+            server: serverDomain,
+            sessionId: querySession
+        };
+    }
+
+    if (pathParts[0]) {
+        return {
+            server: serverDomain,
+            sessionId: decodeURIComponent(pathParts[0])
+        };
+    }
+
+    if (matchedDomain && url.hostname !== matchedDomain) {
+        const subdomain = url.hostname.slice(0, -(matchedDomain.length + 1));
+        const sessionFromSubdomain = subdomain.split('.').pop();
+        if (sessionFromSubdomain) {
+            return {
+                server: matchedDomain,
+                sessionId: sessionFromSubdomain
+            };
+        }
+    }
+
+    return {
+        server: url.hostname,
+        sessionId: null
     };
 }
 
@@ -2403,7 +2466,7 @@ function setupEventListeners() {
     // Minimize
     document.getElementById('minimize-btn').addEventListener('click', () => {
         announce('OpenLink minimized to tray');
-        const shortcut = navigator.platform.includes('Mac') ? 'Cmd+Opt+\\' : 'Alt+Win+\\';
+        const shortcut = navigator.platform.includes('Mac') ? 'Cmd+Opt+Shift+\\' : 'Alt+Win+Shift+\\';
         window.openlink.showNotification({
             title: 'OpenLink',
             body: `Minimized to tray. Use ${shortcut} to restore.`
@@ -2763,24 +2826,15 @@ async function connect() {
             if (!urlToParse.includes('://')) {
                 urlToParse = 'https://' + urlToParse;
             }
-            const url = new URL(urlToParse);
+            const parsed = parseSessionFromOpenLinkUrl(urlToParse);
 
             // Extract server domain
-            serverFromUrl = url.hostname;
+            serverFromUrl = parsed.server;
             console.log('[Connect] Parsed server from URL:', serverFromUrl);
 
-            // Extract session ID from path (e.g., /macmini-fl)
-            const pathSession = url.pathname.replace(/^\/+/, '').split('/')[0];
-            if (pathSession && pathSession.length > 0) {
-                targetSession = pathSession;
-                console.log('[Connect] Parsed session from path:', targetSession);
-            }
-
-            // Also check query param format (?session=xxx)
-            const querySession = url.searchParams.get('session');
-            if (querySession) {
-                targetSession = querySession;
-                console.log('[Connect] Parsed session from query:', targetSession);
+            if (parsed.sessionId) {
+                targetSession = parsed.sessionId;
+                console.log('[Connect] Parsed session from OpenLink URL:', targetSession);
             }
         } catch (e) {
             console.warn('[Connect] URL parse failed, using as session ID:', e.message);
@@ -2789,7 +2843,8 @@ async function connect() {
 
     // Set server from URL if found
     if (serverFromUrl && elements.serverSelect) {
-        elements.serverSelect.value = serverFromUrl;
+        const serverUrl = serverFromUrl.includes('://') ? serverFromUrl : `wss://${serverFromUrl}/ws`;
+        elements.serverSelect.value = serverUrl;
         console.log('[Connect] Set server to:', serverFromUrl);
     }
 
@@ -6646,8 +6701,8 @@ window.restoreWalletsFromServer = restoreWalletsFromServer;
 // ==================== Keyboard Handler ====================
 
 function handleGlobalKeydown(event) {
-    const isMacMenuHotkey = navigator.platform.includes('Mac') && event.metaKey && event.altKey && event.key === '\\';
-    const isWindowsMenuHotkey = !navigator.platform.includes('Mac') && event.altKey && event.metaKey && event.key === '\\';
+    const isMacMenuHotkey = navigator.platform.includes('Mac') && event.metaKey && event.altKey && event.shiftKey && event.key === '\\';
+    const isWindowsMenuHotkey = !navigator.platform.includes('Mac') && event.altKey && event.metaKey && event.shiftKey && event.key === '\\';
 
     if (isMacMenuHotkey || isWindowsMenuHotkey) {
         event.preventDefault();
@@ -7195,9 +7250,11 @@ async function updateActiveConnectionUrl() {
     const domainSelect = document.getElementById('link-domain');
     const selectedDomain = domainSelect?.value || 'openlink.tappedin.fm';
 
-    // Generate subdomain-based HTTPS URL
+    const tokenPath = `/token/${encodeURIComponent(state.sessionId)}`;
+
+    // Generate subdomain-based HTTPS URL on the full selected OpenLink domain.
     const subdomainSafeId = state.sessionId.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-    const httpsUrl = `https://${subdomainSafeId}.${selectedDomain}`;
+    const httpsUrl = `https://${subdomainSafeId}.${selectedDomain}${tokenPath}`;
     urlInput.value = httpsUrl;
     state.activeConnectionUrl = httpsUrl;
     state.activeLinkDomain = selectedDomain;

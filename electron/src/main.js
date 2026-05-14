@@ -273,6 +273,19 @@ let alternativePaymentService = null;
 let announcementService = null;
 let splashWindow = null;
 let launchReadyNotificationSent = false;
+
+function announceToScreenReader(title, body = '', interrupt = false) {
+    if (!screenReaderController) return;
+
+    const text = [title, body].filter(Boolean).join('. ').trim();
+    if (!text) return;
+
+    try {
+        screenReaderController.speak(text, interrupt);
+    } catch (error) {
+        log.warn('Screen reader announcement failed:', error.message);
+    }
+}
 let startupStatus = {
     localSignalingReady: false,
     localSignalingMode: 'unavailable',
@@ -550,9 +563,17 @@ async function cleanupOnStartup() {
                 }
             } catch (e) {}
         } else if (process.platform === 'win32') {
-            // Windows: Kill leftover OpenLink processes
+            // Windows: Kill leftover OpenLink processes, but never our own PID
             try {
-                await execAsync('taskkill /F /IM "OpenLink.exe" /T 2>nul', { shell: true });
+                const { stdout } = await execAsync('tasklist /FO CSV /NH /FI "IMAGENAME eq OpenLink.exe"', { shell: true });
+                const lines = stdout.trim().split('\n').filter(Boolean);
+                for (const line of lines) {
+                    const fields = line.split('","').map(part => part.replace(/^"|"$/g, ''));
+                    const pid = parseInt(fields[1], 10);
+                    if (pid && pid !== process.pid) {
+                        await execAsync(`taskkill /F /PID ${pid} /T 2>nul`, { shell: true });
+                    }
+                }
             } catch (e) {
                 // May fail if no processes to kill
             }
@@ -647,7 +668,9 @@ app.whenReady().then(async () => {
     await initializeComponents();
 
     // Initialize notification service
-    notificationService = new NotificationService(store);
+    notificationService = new NotificationService(store, {
+        announce: (text, interrupt = false) => announceToScreenReader(text, '', interrupt)
+    });
     log.info('Notification service initialized');
 
     // Initialize user verification service
@@ -1953,8 +1976,8 @@ function setupAutoStart() {
 
 function registerGlobalShortcuts() {
     const accelerators = process.platform === 'darwin'
-        ? ['Command+Alt+\\']
-        : ['Alt+Super+\\'];
+        ? ['Command+Alt+Shift+\\']
+        : ['Alt+Super+Shift+\\'];
 
     for (const accelerator of accelerators) {
         const registered = globalShortcut.register(accelerator, () => {
@@ -3108,6 +3131,7 @@ ipcMain.handle('show-notification', (event, { title, body, silent }) => {
             silent: silent || false
         });
         notification.show();
+        announceToScreenReader(title || 'OpenLink', body || '', false);
         return true;
     }
     return false;
@@ -3194,6 +3218,7 @@ ipcMain.handle('notify-connection', async (event, { type, name, machineId, sessi
         });
 
         notification.show();
+        announceToScreenReader(title, body, true);
     }
 
     // Update tray connection state

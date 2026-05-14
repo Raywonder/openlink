@@ -9,8 +9,9 @@ const nodemailer = require('nodemailer');
 const log = require('electron-log');
 
 class NotificationService {
-    constructor(store) {
+    constructor(store, options = {}) {
         this.store = store;
+        this.announce = typeof options.announce === 'function' ? options.announce : null;
         this.emailTransporter = null;
         this.initEmailTransporter();
 
@@ -95,7 +96,7 @@ class NotificationService {
         // Native notification
         if (settings.native.enabled) {
             try {
-                results.native = await this.sendNative(title, message, sound);
+                results.native = await this.sendNative(title, message, sound, priority);
             } catch (e) {
                 log.error('Native notification failed:', e);
                 results.native = { error: e.message };
@@ -235,7 +236,7 @@ class NotificationService {
     /**
      * Send native desktop notification
      */
-    sendNative(title, body, sound = true) {
+    sendNative(title, body, sound = true, priority = 'normal') {
         return new Promise((resolve, reject) => {
             if (!Notification.isSupported()) {
                 reject(new Error('Native notifications not supported'));
@@ -258,6 +259,17 @@ class NotificationService {
             });
 
             notification.show();
+
+            if (this.announce) {
+                try {
+                    const spokenText = [title, body].filter(Boolean).join('. ');
+                    if (spokenText) {
+                        this.announce(spokenText, priority === 'high' || priority === 'emergency');
+                    }
+                } catch (e) {
+                    log.warn('Screen reader announcement failed:', e.message);
+                }
+            }
         });
     }
 

@@ -35,7 +35,7 @@ struct WelcomeView: View {
                     .font(.largeTitle)
                     .fontWeight(.bold)
 
-                Text("The secure connection layer for VoiceLink")
+                Text("The secure connection layer for OpenLink")
                     .font(.title3)
                     .foregroundColor(.gray)
             }
@@ -131,7 +131,7 @@ struct LicenseView: View {
         """
         MIT License
 
-        Copyright (c) 2026 VoiceLink
+        Copyright (c) 2026 OpenLink
 
         Permission is hereby granted, free of charge, to any person obtaining a copy
         of this software and associated documentation files (the "Software"), to deal
@@ -155,19 +155,19 @@ struct LicenseView: View {
 
         OpenLink Connection Service
 
-        OpenLink provides secure, encrypted tunneling for VoiceLink voice chat
+        OpenLink provides secure, encrypted tunneling for remote access
         connections. This software:
 
         - Creates secure WebSocket connections between devices
         - Handles automatic network discovery on local networks
         - Provides fallback routing when direct connections fail
-        - Integrates with VoiceLink Native for remote server control
+        - Integrates with OpenLink for remote server control
 
         Privacy Notice:
         OpenLink does not collect or store personal data. Connection metadata
         is temporarily cached for routing purposes and automatically purged.
 
-        For support, visit: https://voicelink.app/support
+        For support, visit: https://openlink.tappedin.fm/support
         """
     }
 }
@@ -351,7 +351,7 @@ struct ServerPairingView: View {
                 .padding(.top)
 
             HStack {
-                Text("Connect OpenLink to a VoiceLink server.")
+                Text("Connect OpenLink to an OpenLink server.")
                     .font(.subheadline)
                     .foregroundColor(.gray)
 
@@ -402,7 +402,7 @@ struct ServerPairingView: View {
                                 .disabled(state.pairingCode.count != 6 || state.isPairing)
                             }
 
-                            Text("Get a pairing code from VoiceLink Native > Settings > Server Pairing")
+                            Text("Get a pairing code from OpenLink > Settings > Server Pairing")
                                 .font(.caption)
                                 .foregroundColor(.gray)
                         }
@@ -516,7 +516,7 @@ struct ServerPairingView: View {
             if state.pairingCode.count == 6 {
                 state.pairedServer = InstallerState.PairedServer(
                     id: UUID().uuidString,
-                    name: "VoiceLink Server",
+                    name: "OpenLink Server",
                     url: "http://localhost:3000",
                     accessToken: UUID().uuidString,
                     pairedAt: Date()
@@ -663,7 +663,7 @@ struct CompleteView: View {
                     .font(.headline)
 
                 NextStepRow(number: 1, text: "Look for the OpenLink icon in your menu bar")
-                NextStepRow(number: 2, text: "Open VoiceLink Native and connect to your server")
+                NextStepRow(number: 2, text: "Open OpenLink and connect to your server")
                 NextStepRow(number: 3, text: "Start a voice chat and enjoy secure connections!")
             }
             .padding()
@@ -686,7 +686,7 @@ struct CompleteView: View {
                 Button(action: openVoiceLink) {
                     HStack {
                         Image(systemName: "mic.circle")
-                        Text("Open VoiceLink Native")
+                        Text("Open OpenLink")
                     }
                 }
                 .buttonStyle(.bordered)
@@ -704,8 +704,8 @@ struct CompleteView: View {
     }
 
     func openVoiceLink() {
-        // Launch VoiceLink Native
-        if let url = URL(string: "file:///Applications/VoiceLink%20Native.app") {
+        // Launch OpenLink
+        if let url = URL(string: "file:///Applications/OpenLink.app") {
             NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
         }
     }
@@ -761,12 +761,12 @@ struct PairingHelpSheet: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    // Method 1: VoiceLink Native
+                    // Method 1: OpenLink on Mac
                     PairingMethodSection(
                         icon: "desktopcomputer",
-                        title: "From VoiceLink Native (Mac)",
+                        title: "From OpenLink (Mac)",
                         steps: [
-                            "Open VoiceLink Native on your Mac",
+                            "Open OpenLink on your Mac",
                             "Click the menu bar icon and select \"Settings\"",
                             "Go to \"Server & Pairing\" tab",
                             "Click \"Generate Pairing Code\"",
@@ -774,12 +774,12 @@ struct PairingHelpSheet: View {
                         ]
                     )
 
-                    // Method 2: VoiceLink Desktop (Windows/Linux)
+                    // Method 2: OpenLink Desktop (Windows/Linux)
                     PairingMethodSection(
                         icon: "pc",
-                        title: "From VoiceLink Desktop (Windows/Linux)",
+                        title: "From OpenLink Desktop (Windows/Linux)",
                         steps: [
-                            "Open VoiceLink Desktop application",
+                            "Open OpenLink Desktop application",
                             "Go to Settings (gear icon)",
                             "Navigate to \"Server Settings\"",
                             "Under \"Remote Connections\", click \"Generate Code\"",
@@ -860,7 +860,7 @@ struct PairingHelpSheet: View {
             // Footer
             HStack {
                 Button(action: {
-                    if let url = URL(string: "https://voicelink.app/docs/pairing") {
+                    if let url = URL(string: "https://openlink.tappedin.fm/docs/pairing") {
                         NSWorkspace.shared.open(url)
                     }
                 }) {

@@ -501,7 +501,7 @@ class OpenLinkService: ObservableObject {
         guard code.count == 6 else { return }
 
         let newServer = PairedServer(
-            name: "VoiceLink Server",
+            name: "OpenLink Server",
             url: "http://localhost:3000",
             accessToken: UUID().uuidString
         )

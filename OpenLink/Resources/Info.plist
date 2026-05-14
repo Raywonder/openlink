@@ -31,10 +31,10 @@
     <key>NSHumanReadableCopyright</key>
     <string>Copyright 2026 OpenLink by Devine Creations. All rights reserved.</string>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>OpenLink needs access to your local network to discover and connect to VoiceLink devices.</string>
+    <string>OpenLink needs access to your local network to discover and connect to OpenLink devices.</string>
     <key>NSBonjourServices</key>
     <array>
-        <string>_voicelink._tcp</string>
+        <string>_openlink._tcp</string>
         <string>_openlink._tcp</string>
     </array>
 </dict>
