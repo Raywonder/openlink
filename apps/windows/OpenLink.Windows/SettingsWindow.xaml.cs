@@ -35,6 +35,8 @@ public partial class SettingsWindow : Window
         AllowKeyboardCoUseBox.IsChecked = Settings.AllowKeyboardCoUse;
         AllowMicrophoneAudioBox.IsChecked = Settings.AllowMicrophoneAudio;
         AllowSystemAudioBox.IsChecked = Settings.AllowSystemAudio;
+        RemoteAudioVolumeSlider.Value = Settings.RemoteAudioVolumePercent;
+        LocalAudioCaptureVolumeSlider.Value = Settings.LocalAudioCaptureVolumePercent;
         AutoMuteControlledComputerAudioBox.IsChecked = Settings.AutoMuteControlledComputerAudio;
         MuteRemoteAudioWhenInactiveBox.IsChecked = Settings.MuteRemoteAudioWhenInactive;
         AutoMuteProcessesOnConnectBox.Text = Settings.AutoMuteProcessesOnConnect;
@@ -88,6 +90,8 @@ public partial class SettingsWindow : Window
         Settings.AllowKeyboardCoUse = AllowKeyboardCoUseBox.IsChecked == true;
         Settings.AllowMicrophoneAudio = AllowMicrophoneAudioBox.IsChecked == true;
         Settings.AllowSystemAudio = AllowSystemAudioBox.IsChecked == true;
+        Settings.RemoteAudioVolumePercent = (int)RemoteAudioVolumeSlider.Value;
+        Settings.LocalAudioCaptureVolumePercent = (int)LocalAudioCaptureVolumeSlider.Value;
         Settings.AutoMuteControlledComputerAudio = AutoMuteControlledComputerAudioBox.IsChecked == true;
         Settings.MuteRemoteAudioWhenInactive = MuteRemoteAudioWhenInactiveBox.IsChecked == true;
         Settings.AutoMuteProcessesOnConnect = AutoMuteProcessesOnConnectBox.Text.Trim();

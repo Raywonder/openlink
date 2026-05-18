@@ -23,6 +23,8 @@ public sealed class OpenLinkAudioBridge : IDisposable
     private Func<OpenLinkAudioFrame, Task>? _frameSink;
     private long _lastMicrophoneFrameTicks;
     private long _lastSystemFrameTicks;
+    private float _localCaptureGain = 1.0f;
+    private float _remotePlaybackVolume = 1.0f;
     private string _microphoneFormatText = "microphone format unknown";
     private string _systemFormatText = "system audio format unknown";
     private int _framesInFlight;
@@ -60,6 +62,13 @@ public sealed class OpenLinkAudioBridge : IDisposable
 
     public void Configure(OpenLinkSettings settings, Action<string>? log = null)
     {
+        _localCaptureGain = PercentToGain(settings.LocalAudioCaptureVolumePercent);
+        _remotePlaybackVolume = PercentToGain(settings.RemoteAudioVolumePercent);
+        if (_remotePlaybackSession is not null)
+        {
+            _remotePlaybackSession.Volume = _remotePlaybackVolume;
+        }
+
         ConfigureMicrophone(settings.AllowMicrophoneAudio, log);
         ConfigureSystemAudio(settings.AllowSystemAudio, log);
         ConfigurePlaybackSession(settings.AllowAudio, log);
@@ -240,7 +249,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
             return;
         }
 
-        var payload = ConvertCaptureBufferToPcm16(format, buffer, byteCount);
+        var payload = ConvertCaptureBufferToPcm16(format, buffer, byteCount, _localCaptureGain);
         if (payload.Length == 0)
         {
             Interlocked.Decrement(ref _framesInFlight);
@@ -289,7 +298,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
             BufferDuration = TimeSpan.FromSeconds(2),
             DiscardOnBufferOverflow = true
         };
-        _remotePlaybackSession = new WaveOutEvent { DesiredLatency = 120 };
+        _remotePlaybackSession = new WaveOutEvent { DesiredLatency = 120, Volume = _remotePlaybackVolume };
         _remotePlaybackSession.Init(_remotePlaybackBuffer);
         _remotePlaybackSession.Play();
     }
@@ -319,7 +328,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
         capture = null;
     }
 
-    private static byte[] ConvertCaptureBufferToPcm16(WaveFormat format, byte[] buffer, int byteCount)
+    private static byte[] ConvertCaptureBufferToPcm16(WaveFormat format, byte[] buffer, int byteCount, float gain)
     {
         if (byteCount <= 0)
         {
@@ -330,6 +339,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
         {
             var payload = new byte[byteCount];
             Buffer.BlockCopy(buffer, 0, payload, 0, byteCount);
+            ApplyPcm16Gain(payload, gain);
             return payload;
         }
 
@@ -341,7 +351,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
             {
                 var value = BitConverter.ToSingle(buffer, sampleIndex * sizeof(float));
                 var clipped = Math.Clamp(value, -1.0f, 1.0f);
-                var pcm = (short)Math.Round(clipped * short.MaxValue);
+                var pcm = FloatToPcm16(clipped * gain);
                 BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(sampleIndex * sizeof(short), sizeof(short)), pcm);
             }
 
@@ -355,7 +365,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
             for (var sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
             {
                 var value = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(sampleIndex * sizeof(int), sizeof(int)));
-                var pcm = (short)(value >> 16);
+                var pcm = ApplyGain((short)(value >> 16), gain);
                 BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(sampleIndex * sizeof(short), sizeof(short)), pcm);
             }
 
@@ -375,7 +385,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
                     value |= unchecked((int)0xFF000000);
                 }
 
-                var pcm = (short)(value >> 8);
+                var pcm = ApplyGain((short)(value >> 8), gain);
                 BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(sampleIndex * sizeof(short), sizeof(short)), pcm);
             }
 
@@ -383,6 +393,36 @@ public sealed class OpenLinkAudioBridge : IDisposable
         }
 
         return [];
+    }
+
+    private static float PercentToGain(int percent)
+    {
+        return Math.Clamp(percent, 0, 150) / 100.0f;
+    }
+
+    private static void ApplyPcm16Gain(byte[] payload, float gain)
+    {
+        if (Math.Abs(gain - 1.0f) < 0.001f)
+        {
+            return;
+        }
+
+        for (var offset = 0; offset + 1 < payload.Length; offset += sizeof(short))
+        {
+            var sample = BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan(offset, sizeof(short)));
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(offset, sizeof(short)), ApplyGain(sample, gain));
+        }
+    }
+
+    private static short ApplyGain(short sample, float gain)
+    {
+        return FloatToPcm16(sample / (float)short.MaxValue * gain);
+    }
+
+    private static short FloatToPcm16(float value)
+    {
+        var clipped = Math.Clamp(value, -1.0f, 1.0f);
+        return (short)Math.Round(clipped * short.MaxValue);
     }
 
     private static string FormatDescription(WaveFormat format)

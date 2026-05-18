@@ -28,6 +28,8 @@ public sealed class OpenLinkSettings
     public bool AllowKeyboardCoUse { get; set; } = true;
     public bool AllowMicrophoneAudio { get; set; } = true;
     public bool AllowSystemAudio { get; set; } = true;
+    public int RemoteAudioVolumePercent { get; set; } = 100;
+    public int LocalAudioCaptureVolumePercent { get; set; } = 100;
     public bool AutoMuteControlledComputerAudio { get; set; }
     public bool MuteRemoteAudioWhenInactive { get; set; } = true;
     public string AutoMuteProcessesOnConnect { get; set; } = "VoiceOver, Music";
@@ -76,6 +78,8 @@ public sealed class OpenLinkSettings
             AllowKeyboardCoUse = AllowKeyboardCoUse,
             AllowMicrophoneAudio = AllowMicrophoneAudio,
             AllowSystemAudio = AllowSystemAudio,
+            RemoteAudioVolumePercent = RemoteAudioVolumePercent,
+            LocalAudioCaptureVolumePercent = LocalAudioCaptureVolumePercent,
             AutoMuteControlledComputerAudio = AutoMuteControlledComputerAudio,
             MuteRemoteAudioWhenInactive = MuteRemoteAudioWhenInactive,
             AutoMuteProcessesOnConnect = AutoMuteProcessesOnConnect,
@@ -144,6 +148,9 @@ public static class OpenLinkSettingsStore
             {
                 settings.VoiceLinkAudioFallbackUrl = new OpenLinkSettings().VoiceLinkAudioFallbackUrl;
             }
+
+            settings.RemoteAudioVolumePercent = Math.Clamp(settings.RemoteAudioVolumePercent, 0, 150);
+            settings.LocalAudioCaptureVolumePercent = Math.Clamp(settings.LocalAudioCaptureVolumePercent, 0, 150);
 
             return settings;
         }

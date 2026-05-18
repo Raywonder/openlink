@@ -139,6 +139,26 @@
                     <CheckBox x:Name="AllowSystemAudioBox"
                               Margin="0,0,0,8"
                               Content="Allow system audio" />
+                    <Label x:Name="RemoteAudioVolumeLabel"
+                           Content="Remote audio volume"
+                           Target="{Binding ElementName=RemoteAudioVolumeSlider}" />
+                    <Slider x:Name="RemoteAudioVolumeSlider"
+                            Minimum="0"
+                            Maximum="150"
+                            TickFrequency="10"
+                            IsSnapToTickEnabled="True"
+                            Margin="0,0,0,8"
+                            AutomationProperties.LabeledBy="{Binding ElementName=RemoteAudioVolumeLabel}" />
+                    <Label x:Name="LocalAudioCaptureVolumeLabel"
+                           Content="Local audio capture volume"
+                           Target="{Binding ElementName=LocalAudioCaptureVolumeSlider}" />
+                    <Slider x:Name="LocalAudioCaptureVolumeSlider"
+                            Minimum="0"
+                            Maximum="150"
+                            TickFrequency="10"
+                            IsSnapToTickEnabled="True"
+                            Margin="0,0,0,8"
+                            AutomationProperties.LabeledBy="{Binding ElementName=LocalAudioCaptureVolumeLabel}" />
                     <CheckBox x:Name="AutoMuteControlledComputerAudioBox"
                               Margin="0,0,0,8"
                               Content="Ask the controlled computer to auto-mute audio on connect" />
