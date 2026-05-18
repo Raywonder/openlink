@@ -44,20 +44,16 @@ This is infrastructure governance, not AI configuration.
 
 ---
 
-## 1. Electron is deprecated
+## 1. Electron is removed
 
-Electron is legacy and transitional.
+Electron is no longer an OpenLink desktop target.
 
 Rules:
-- Do NOT introduce Electron by default
+- Do NOT introduce Electron
 - Do NOT assume Electron APIs
 - Do NOT embed Node runtimes
 
-Exception (X + Y rule):
-- A documented technical requirement exists
-- A written migration plan to native clients exists
-
-Electron apps are clients only and contain no server logic.
+Windows desktop work belongs in the native WPF client. macOS desktop work belongs in the native Swift client.
 
 ---
 

@@ -1,8 +1,8 @@
 #define MyAppName "OpenLink"
-#define MyAppVersion "1.7.15"
+#define MyAppVersion "1.7.18"
 #define MyAppPublisher "Devine Creations"
 #define MyAppExeName "OpenLink.exe"
-#define SourceDir "..\\dist\\openlink\\win-unpacked"
+#define SourceDir "..\\dist\\native-windows\\OpenLink"
 #define OutputDir "..\\dist\\openlink"
 
 [Setup]
@@ -26,10 +26,12 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
 
 [Files]
 Source: "{#SourceDir}\\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\\remote-desktop\\*"; DestDir: "{app}\\resources\\local-server"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\\packaging\\local-server-entitlement.json"; DestDir: "{app}\\resources\\local-server"; DestName: "entitlement.json"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

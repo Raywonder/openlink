@@ -4,6 +4,8 @@ node_modules/
 # Build output
 dist/
 releases/
+bin/
+obj/
 *.dmg
 *.exe
 *.AppImage

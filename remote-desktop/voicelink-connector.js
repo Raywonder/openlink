@@ -464,11 +464,11 @@ class VoiceLinkConnector extends EventEmitter {
      * @returns {Array<string>} Array of addresses to check
      */
     getLocalNetworkAddresses() {
-        // In Electron, we can get actual local IPs
-        // For now, return common local addresses
+        // In native/browser contexts, return common local addresses unless
+        // the runtime exposes Node network interfaces.
         const addresses = [];
 
-        // Check if we're in Electron and can access network interfaces
+        // Check if a Node-compatible runtime exposes network interfaces.
         if (typeof require !== 'undefined') {
             try {
                 const os = require('os');
@@ -1107,11 +1107,6 @@ class VoiceLinkConnector extends EventEmitter {
         try {
             if (typeof localStorage !== 'undefined') {
                 localStorage.setItem('voicelink_api_key', apiKey);
-            } else if (typeof require !== 'undefined') {
-                // Electron store
-                const Store = require('electron-store');
-                const store = new Store();
-                store.set('voicelink.apiKey', apiKey);
             }
         } catch (e) {
             // Storage not available
@@ -1126,10 +1121,6 @@ class VoiceLinkConnector extends EventEmitter {
         try {
             if (typeof localStorage !== 'undefined') {
                 return localStorage.getItem('voicelink_api_key');
-            } else if (typeof require !== 'undefined') {
-                const Store = require('electron-store');
-                const store = new Store();
-                return store.get('voicelink.apiKey');
             }
         } catch (e) {
             // Storage not available

@@ -313,6 +313,12 @@ class OpenLink_Server {
                 'name' => 'OpenLink Main Server',
                 'isPublic' => true,
                 'verified' => true
+            ),
+            array(
+                'url' => 'wss://ol.tappedin.fm',
+                'name' => 'OpenLink TappedIn Short Domain',
+                'isPublic' => true,
+                'verified' => true
             )
         );
 

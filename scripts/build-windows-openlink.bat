@@ -2,25 +2,23 @@
 setlocal EnableExtensions
 
 set "ROOT=%~dp0.."
-set "ELECTRON_DIR=%ROOT%\electron"
-set "DIST_DIR=%ROOT%\dist\openlink"
+set "PROJECT=%ROOT%\apps\windows\OpenLink.Windows\OpenLink.Windows.csproj"
+set "PUBLISH_DIR=%ROOT%\dist\native-windows\OpenLink"
 set "INNO_SCRIPT=%ROOT%\scripts\openlink-windows-installer.iss"
+set "DOTNET_EXE=%ProgramFiles%\dotnet\dotnet.exe"
 set "ISCC_EXE="
 set "PF86=%ProgramFiles(x86)%"
 set "PF64=%ProgramFiles%"
+set "INSTALL_DIR=%ProgramFiles%\OpenLink"
+set "INSTALL_LOCAL=%OPENLINK_INSTALL_LOCAL%"
+set "LAUNCH_LOCAL=%OPENLINK_LAUNCH_LOCAL%"
 
-if not exist "%ELECTRON_DIR%\package.json" goto missing_electron
+if not exist "%PROJECT%" goto missing_project
+if not exist "%DOTNET_EXE%" set "DOTNET_EXE=dotnet"
 
-pushd "%ELECTRON_DIR%" || goto fail
-
-if not exist "node_modules" call npm install
-if errorlevel 1 goto fail_pop
-
-echo Building OpenLink Windows app...
-call npm run build:win
-if errorlevel 1 goto fail_pop
-
-popd
+echo Building native OpenLink Windows app...
+"%DOTNET_EXE%" publish "%PROJECT%" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "%PUBLISH_DIR%"
+if errorlevel 1 goto fail
 
 if exist "%PF86%\Inno Setup 6\ISCC.exe" set "ISCC_EXE=%PF86%\Inno Setup 6\ISCC.exe"
 if not defined ISCC_EXE if exist "%PF64%\Inno Setup 6\ISCC.exe" set "ISCC_EXE=%PF64%\Inno Setup 6\ISCC.exe"
@@ -28,16 +26,37 @@ if not defined ISCC_EXE if exist "%PF64%\Inno Setup 6\ISCC.exe" set "ISCC_EXE=%P
 if not exist "%INNO_SCRIPT%" goto missing_iss
 if not defined ISCC_EXE goto missing_iscc
 
-echo Building Inno Setup installer...
+echo Building native Inno Setup installer...
 "%ISCC_EXE%" /Qp "%INNO_SCRIPT%"
 if errorlevel 1 goto fail
 
-if exist "%DIST_DIR%\OpenLink-Inno-Setup.exe" echo Output: %DIST_DIR%\OpenLink-Inno-Setup.exe
+if exist "%ROOT%\dist\openlink\OpenLink-Inno-Setup.exe" echo Output: "%ROOT%\dist\openlink\OpenLink-Inno-Setup.exe"
+
+if /I "%INSTALL_LOCAL%"=="1" call :install_local
+if /I "%LAUNCH_LOCAL%"=="1" call :launch_local
+
 echo Build complete.
 exit /b 0
 
-:missing_electron
-echo Missing electron project: %ELECTRON_DIR%
+:install_local
+echo Updating local OpenLink install at "%INSTALL_DIR%"...
+taskkill /IM OpenLink.exe /F >nul 2>nul
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
+robocopy "%PUBLISH_DIR%" "%INSTALL_DIR%" /MIR /NFL /NDL /NJH /NJS /NP
+if %ERRORLEVEL% GEQ 8 exit /b %ERRORLEVEL%
+exit /b 0
+
+:launch_local
+if exist "%INSTALL_DIR%\OpenLink.exe" (
+  echo Relaunching local OpenLink install...
+  start "" "%INSTALL_DIR%\OpenLink.exe"
+) else (
+  echo Local OpenLink executable not found at "%INSTALL_DIR%\OpenLink.exe".
+)
+exit /b 0
+
+:missing_project
+echo Missing native Windows project: %PROJECT%
 exit /b 1
 
 :missing_iss
@@ -49,11 +68,6 @@ exit /b 0
 echo Inno Setup compiler not found (ISCC.exe).
 echo Install Inno Setup 6 or add ISCC.exe to PATH, then rerun.
 exit /b 0
-
-:fail_pop
-set "RC=%ERRORLEVEL%"
-popd
-exit /b %RC%
 
 :fail
 set "RC=%ERRORLEVEL%"

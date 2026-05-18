@@ -130,9 +130,9 @@ The web application connects to the OpenLink Node.js backend:
 - Domains: raywonderis.me, devinecreations.net, tappedin.fm
 - Preview: `https://{domain}/{shortCode}?preview=true`
 
-## Desktop Client (Electron)
+## Desktop Clients (Native)
 
-The OpenLink desktop client provides remote desktop connectivity with cross-platform keyboard support.
+The OpenLink desktop clients provide remote desktop connectivity with cross-platform keyboard support. Windows uses the native WPF client in `apps/windows/OpenLink.Windows/`; macOS uses the native Swift app in `OpenLink/`.
 
 ### Cross-Platform Keyboard Mapping
 
@@ -161,6 +161,10 @@ The original setting is restored when:
 - The app exits for any reason
 
 ### Keyboard Shortcut Reference
+
+| Action | Press |
+|--------|-------|
+| Open OpenLink control menu | Ctrl+Alt+\ |
 
 | Action (on Mac host) | Press on Windows client |
 |---------------------|------------------------|

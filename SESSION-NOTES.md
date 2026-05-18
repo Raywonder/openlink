@@ -127,7 +127,7 @@ Trust scores determine user privileges and access levels. Higher scores unlock m
 - **Session ID:** `macmini-fl`
 - **Password:** `connect123`
 - **Server:** `openlink.raywonderis.me`
-- **Host script:** `/Users/admin/dev/apps/openlink/electron/openlink-host.js`
+- **Host script:** native OpenLink app in `/Applications/OpenLink.app`
 
 ## Known Issues - SOLVED
 
@@ -242,8 +242,12 @@ Currently, user-specific domains (walterharper.com, tetoeehoward.com) are hardco
 
 ## Build Commands
 ```bash
-cd /Users/admin/dev/apps/openlink/electron
-npm run build:all  # Mac, Windows, Linux
+# macOS
+cd /Users/admin/dev/apps/openlink
+./scripts/build-macos-native.sh
+
+# Windows
+scripts/build-windows-openlink.bat
 ```
 
 ## eCripto Website Issues

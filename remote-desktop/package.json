@@ -24,6 +24,7 @@
     "ws": "^8.14.2"
   },
   "optionalDependencies": {
+    "@nut-tree-fork/nut-js": "^4.2.6",
     "robotjs": "^0.6.0",
     "@nut-tree/nut-js": "^3.1.2",
     "ffi-napi": "^4.0.3",

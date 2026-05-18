@@ -1,0 +1,288 @@
+<Window x:Class="OpenLink.Windows.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="OpenLink"
+        Height="560"
+        Width="820"
+        MinHeight="560"
+        MinWidth="680"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Menu Grid.Row="0"
+              Margin="0,0,0,12"
+              IsTabStop="False"
+              KeyboardNavigation.IsTabStop="False"
+              KeyboardNavigation.TabNavigation="None">
+            <MenuItem Header="_File">
+                <MenuItem Header="_Settings" Click="SettingsButton_Click" />
+                <MenuItem Header="Check for _Updates" Click="CheckUpdatesMenuItem_Click" />
+                <Separator />
+                <MenuItem Header="_Quit" Click="QuitMenuItem_Click" />
+            </MenuItem>
+            <MenuItem Header="_Connections">
+                <MenuItem Header="Start _Hosting" Click="StartHostingMenuItem_Click" />
+                <MenuItem Header="Sto_p Hosting" Click="StopHostingMenuItem_Click" />
+                <Separator />
+                <MenuItem Header="_Copy Connection Link" Click="CopyLinkMenuItem_Click" />
+                <MenuItem Header="Connect _Last Machine" Click="ConnectLastMachineMenuItem_Click" />
+                <Separator />
+                <MenuItem x:Name="StartUsingSelectedMenuItem" Header="Start Using Selected Device" Click="StartUsingSelectedMachineMenuItem_Click" />
+                <MenuItem Header="Machine _Details" Click="MachineDetailsMenuItem_Click" />
+                <MenuItem Header="Running _Applications" Click="RunningApplicationsMenuItem_Click" />
+                <Separator />
+                <MenuItem x:Name="DisconnectFromSelectedMenuItem" Header="Disconnect from Selected Device" Click="DisconnectFromSelectedDeviceMenuItem_Click" />
+                <MenuItem Header="Disconnect Remote _User from This Device" Click="DisconnectRemoteUserMenuItem_Click" />
+                <MenuItem Header="S_wap Control" Click="SwapSelectedMachineMenuItem_Click" />
+            </MenuItem>
+        </Menu>
+
+        <DockPanel Grid.Row="1" Margin="0,0,0,18">
+            <Button x:Name="SettingsButton"
+                    DockPanel.Dock="Right"
+                    MinWidth="96"
+                    Margin="12,0,0,0"
+                    Content="Settings"
+                    AutomationProperties.Name="OpenLink settings"
+                    Click="SettingsButton_Click" />
+            <StackPanel>
+                <TextBlock Text="OpenLink"
+                           FontSize="28"
+                           FontWeight="SemiBold"
+                           AutomationProperties.Name="OpenLink" />
+                <TextBlock Text="Native Windows remote access"
+                           FontSize="14"
+                           Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+            </StackPanel>
+        </DockPanel>
+
+        <Grid Grid.Row="2" Margin="0,0,0,18">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Label x:Name="ServerLabel"
+                   Grid.Row="0"
+                   Grid.Column="0"
+                   Content="Server"
+                   Target="{Binding ElementName=ServerCombo}"
+                   Visibility="Collapsed" />
+            <ComboBox x:Name="ServerCombo"
+                      Grid.Row="1"
+                      Grid.Column="0"
+                      Margin="0,4,12,0"
+                      IsEditable="True"
+                      AutomationProperties.LabeledBy="{Binding ElementName=ServerLabel}"
+                      Visibility="Collapsed">
+                <ComboBoxItem Content="wss://openlink.devinecreations.net/ws" IsSelected="True" />
+                <ComboBoxItem Content="wss://openlink.raywonderis.me/ws" />
+                <ComboBoxItem Content="wss://openlink.tappedin.fm/ws" />
+                <ComboBoxItem Content="wss://ol.tappedin.fm/ws" />
+            </ComboBox>
+
+            <Label x:Name="SessionLabel"
+                   Grid.Row="0"
+                   Grid.Column="0"
+                   Content="Connection link"
+                   Target="{Binding ElementName=LinkTextBox}" />
+            <TextBox x:Name="SessionTextBox"
+                     Grid.Row="1"
+                     Grid.Column="1"
+                     Margin="0,4,12,0"
+                     Visibility="Collapsed"
+                     AutomationProperties.LabeledBy="{Binding ElementName=SessionLabel}" />
+
+            <TextBox x:Name="LinkTextBox"
+                     Grid.Row="1"
+                     Grid.Column="0"
+                     Margin="0,4,12,0"
+                     IsReadOnly="True"
+                     AutomationProperties.Name="Generated connection link" />
+
+            <StackPanel Grid.Row="1"
+                        Grid.Column="2"
+                        Margin="0,4,0,0"
+                        Orientation="Horizontal">
+                <Button x:Name="StartHostingButton"
+                        MinWidth="118"
+                        Margin="0,0,8,0"
+                        Content="Start Hosting"
+                        Visibility="Collapsed"
+                        Click="StartHostingButton_Click" />
+                <Button x:Name="StopHostingButton"
+                        MinWidth="104"
+                        Margin="0,0,8,0"
+                        Content="Stop"
+                        IsEnabled="False"
+                        Visibility="Collapsed"
+                        Click="StopHostingButton_Click" />
+                <Button x:Name="CopyLinkButton"
+                        MinWidth="96"
+                        Content="Copy Link"
+                        IsEnabled="False"
+                        AutomationProperties.Name="Copy generated connection link"
+                        Click="CopyLinkButton_Click" />
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*" />
+                <ColumnDefinition Width="2*" />
+            </Grid.ColumnDefinitions>
+
+            <GroupBox Grid.Column="1"
+                      Header="Connection"
+                      AutomationProperties.Name="Connection status and activity">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock x:Name="StatusTextBlock"
+                               Grid.Row="0"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               Text="Ready"
+                               AutomationProperties.Name="Status: Ready"
+                               AutomationProperties.LiveSetting="Polite" />
+
+                    <TextBlock x:Name="HealthTextBlock"
+                             Grid.Row="1"
+                             Margin="0,10,0,0"
+                             Text="Connection health unknown"
+                             AutomationProperties.Name="Connection health unknown"
+                             AutomationProperties.LiveSetting="Polite" />
+
+                    <TextBlock x:Name="SignalTextBlock"
+                             Grid.Row="2"
+                             Margin="0,4,0,12"
+                             Text="Signal strength unknown"
+                             AutomationProperties.Name="Signal strength unknown"
+                             AutomationProperties.LiveSetting="Polite" />
+
+                    <ListBox x:Name="LogListBox"
+                             Grid.Row="3"
+                             AutomationProperties.Name="Activity log" />
+                </Grid>
+            </GroupBox>
+
+            <GroupBox Grid.Column="0"
+                      Header="Machines"
+                      Margin="0,0,12,0"
+                      AutomationProperties.Name="Machines">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <ListBox x:Name="MachinesListBox"
+                             Grid.Row="0"
+                             KeyDown="MachinesListBox_KeyDown"
+                             MouseDoubleClick="MachinesListBox_MouseDoubleClick"
+                             SelectionChanged="MachinesListBox_SelectionChanged"
+                             PreviewMouseRightButtonDown="MachinesListBox_PreviewMouseRightButtonDown"
+                             AutomationProperties.Name="Machines a user can connect to">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="{x:Type ListBoxItem}">
+                                <Setter Property="AutomationProperties.Name" Value="{Binding AccessibleSummary}" />
+                                <Setter Property="AutomationProperties.HelpText" Value="Press Enter to connect. Press Shift F10 or the context menu key for machine actions." />
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,4"
+                                      AutomationProperties.Name="{Binding AccessibleSummary}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="{Binding DisplayName}"
+                                                   FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding MachineHostname}"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock FontSize="12"
+                                                   Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}">
+                                            <Run Text="Last: " />
+                                            <Run Text="{Binding LastConnectedText, Mode=OneWay}" />
+                                            <Run Text=" for " />
+                                            <Run Text="{Binding LastDurationText, Mode=OneWay}" />
+                                        </TextBlock>
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1"
+                                               Margin="8,0,0,0"
+                                               VerticalAlignment="Center"
+                                               Text="{Binding DropInText, Mode=OneWay}"
+                                               FontSize="12" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                        <ListBox.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem x:Name="StartUsingMachineContextItem" Header="Start Using Device" Click="StartUsingSelectedMachineMenuItem_Click" />
+                                <MenuItem x:Name="ConnectMachineContextItem" Header="Connect" Click="ConnectMachineMenuItem_Click" />
+                                <MenuItem x:Name="DropInMachineContextItem" Header="Drop-In Connect" Click="DropInMachineMenuItem_Click" />
+                                <Separator />
+                                <MenuItem x:Name="DisconnectFromMachineContextItem" Header="Disconnect from Device" Click="DisconnectFromSelectedDeviceMenuItem_Click" />
+                                <MenuItem Header="Disconnect Remote User from This Device" Click="DisconnectRemoteUserMenuItem_Click" />
+                                <MenuItem Header="Swap Control" Click="SwapControlMenuItem_Click" />
+                                <Separator />
+                                <MenuItem x:Name="ToggleMachineMicContextItem" Header="Microphone Audio" IsCheckable="True" Click="ToggleMachineMicMenuItem_Click" />
+                                <MenuItem x:Name="ToggleMachineSystemAudioContextItem" Header="System Audio" IsCheckable="True" Click="ToggleMachineSystemAudioMenuItem_Click" />
+                                <MenuItem x:Name="ToggleMachineDropInContextItem" Header="Drop-In Access" IsCheckable="True" Click="ToggleMachineDropInMenuItem_Click" />
+                                <MenuItem x:Name="ToggleMachineAutoConnectContextItem" Header="Auto-Connect" IsCheckable="True" Click="ToggleMachineAutoConnectMenuItem_Click" />
+                                <MenuItem x:Name="ToggleMachineRemoteControlContextItem" Header="Remote Control" IsCheckable="True" Click="ToggleMachineRemoteControlMenuItem_Click" />
+                                <MenuItem x:Name="ToggleMachineSwapControlContextItem" Header="Swap Control" IsCheckable="True" Click="ToggleMachineSwapControlMenuItem_Click" />
+                                <MenuItem x:Name="ToggleMachineKeyboardCoUseContextItem" Header="Keyboard Co-Use" IsCheckable="True" Click="ToggleMachineKeyboardCoUseMenuItem_Click" />
+                                <MenuItem x:Name="ToggleMachineClipboardContextItem" Header="Clipboard Sync" IsCheckable="True" Click="ToggleMachineClipboardMenuItem_Click" />
+                                <MenuItem x:Name="ToggleMachineFileTransferContextItem" Header="File Transfer" IsCheckable="True" Click="ToggleMachineFileTransferMenuItem_Click" />
+                                <MenuItem Header="Use Canonical Public Domain" Click="UseCanonicalDomainMenuItem_Click" />
+                                <MenuItem Header="Use Tailnet Address" Click="UseTailnetDomainMenuItem_Click" />
+                                <Separator />
+                                <MenuItem Header="Running Applications" Click="RunningApplicationsMenuItem_Click" />
+                                <MenuItem Header="Machine Details" Click="MachineDetailsMenuItem_Click" />
+                                <MenuItem Header="Remove From List" Click="RemoveMachineMenuItem_Click" />
+                            </ContextMenu>
+                        </ListBox.ContextMenu>
+                    </ListBox>
+
+                    <TextBlock Grid.Row="1"
+                               Margin="0,10,0,0"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"
+                               Text="Enter connects to the selected machine. Use the context menu for drop-in, disconnect, swap control, and audio." />
+                </Grid>
+            </GroupBox>
+        </Grid>
+
+        <TextBlock Grid.Row="4"
+                   Margin="0,14,0,0"
+                   TextWrapping="Wrap"
+                   Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"
+                   Text="Use the Connections menu to host or connect. Press Enter on a selected machine to connect." />
+    </Grid>
+</Window>

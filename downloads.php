@@ -30,7 +30,7 @@ function get_openlink_download_urls() {
             'direct_url' => $base_url . '/uploads/website_specific/apps/OpenLink/clients/mac/',
             'title' => 'OpenLink for macOS',
             'description' => 'Desktop application for macOS 10.15 and later',
-            'file_types' => ['dmg', 'zip'],
+            'file_types' => ['dmg', 'pkg', 'zip'],
             'icon' => 'fab fa-apple'
         ],
         'linux' => [
@@ -65,6 +65,9 @@ function get_installer_type_label($filename) {
     if (strpos($filename_lower, '.dmg') !== false) {
         return ['type' => 'Intel', 'description' => 'For Intel-based Macs'];
     }
+    if (strpos($filename_lower, '.pkg') !== false) {
+        return ['type' => 'Package', 'description' => 'macOS package installer'];
+    }
     if (strpos($filename_lower, '-mac.zip') !== false) {
         return ['type' => 'Portable', 'description' => 'ZIP archive, no installation'];
     }
@@ -94,7 +97,7 @@ function get_platform_files($platform) {
     }
 
     $files = [];
-    $allowed_extensions = ['exe', 'dmg', 'AppImage', 'zip', 'tar.gz'];
+    $allowed_extensions = ['exe', 'dmg', 'pkg', 'AppImage', 'zip', 'tar.gz'];
 
     foreach (scandir($upload_path) as $file) {
         if ($file === '.' || $file === '..') continue;
@@ -111,12 +114,16 @@ function get_platform_files($platform) {
 
         $type_info = get_installer_type_label($file);
 
+        $modified = (int) filemtime($file_path);
         $files[] = [
             'name' => $file,
             'size' => filesize($file_path),
-            'modified' => filemtime($file_path),
+            'modified' => $modified,
+            'modified_label' => date('Y-m-d H:i:s T', $modified),
+            'age_seconds' => max(0, time() - $modified),
             'extension' => $extension,
             'download_url' => get_base_url() . '/uploads/website_specific/apps/OpenLink/clients/' . $platform . '/' . $file,
+            'sha256' => hash_file('sha256', $file_path),
             'type' => $type_info['type'],
             'type_description' => $type_info['description']
         ];
@@ -232,6 +239,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['download'])) {
     $mime_types = [
         'exe' => 'application/octet-stream',
         'dmg' => 'application/x-apple-diskimage',
+        'pkg' => 'application/octet-stream',
         'zip' => 'application/zip',
         'AppImage' => 'application/x-executable',
         'gz' => 'application/gzip'
@@ -322,6 +330,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['download'])) {
                                 <?php if (!empty($file['type_description'])): ?>
                                     <span class="type-desc">- <?php echo htmlspecialchars($file['type_description']); ?></span>
                                 <?php endif; ?>
+                                <br>
+                                <span class="type-desc">Updated: <?php echo htmlspecialchars($file['modified_label']); ?>. SHA256: <?php echo htmlspecialchars($file['sha256']); ?>.</span>
                             </span>
                             <a href="?download=1&platform=<?php echo $platform_key; ?>&filename=<?php echo urlencode($file['name']); ?>"
                                class="download-btn">Download</a>

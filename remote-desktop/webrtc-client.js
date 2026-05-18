@@ -1,7 +1,7 @@
 /**
  * OpenLink Remote Desktop - WebRTC Client
  * Accessible remote desktop with bidirectional audio support
- * All keys go to remote by default - Cmd+Opt+\ on Mac or Alt+Win+\ on Windows opens control menu
+ * All keys go to remote by default - Ctrl+Alt+\ opens the control menu
  */
 
 class OpenLinkRemoteDesktop {
@@ -16,7 +16,7 @@ class OpenLinkRemoteDesktop {
             enableAudio: options.enableAudio !== false,
             enableVideo: options.enableVideo !== false,
             keyboardMode: 'remote',  // Default: all keys go to remote
-            menuHotkey: { meta: true, alt: true, key: '\\' },
+            menuHotkey: options.menuHotkey || { ctrl: true, alt: true, key: '\\' },
             sharedFilesPath: 'Documents/OpenLink/shared_files',
             useLocalTTS: options.useLocalTTS || false,
             captureRemoteScreenReader: options.captureRemoteScreenReader !== false,
@@ -43,6 +43,8 @@ class OpenLinkRemoteDesktop {
         // Audio state
         this.remoteAudioMuted = false;
         this.localMicMuted = false;
+        this.interactionActive = false;
+        this.muteRemoteAudioWhenInactive = true;
 
         // Remote machine info
         this.remoteMachineInfo = null;
@@ -64,6 +66,7 @@ class OpenLinkRemoteDesktop {
         this.voiceLinkEnabled = options.voiceLinkEnabled || false;
         this.voiceLinkConnector = null;
         this.voiceLinkReady = false;
+        this.hostInputHandler = options.hostInputHandler || null;
 
         // File transfer
         this.pendingFiles = [];
@@ -123,7 +126,7 @@ class OpenLinkRemoteDesktop {
             e.shiftKey === (hotkey.shift || false) &&
             e.ctrlKey === (hotkey.ctrl || false) &&
             e.metaKey === (hotkey.meta || false) &&
-            e.key === hotkey.key
+            (e.key === hotkey.key || e.code === 'Backslash')
         );
     }
 
@@ -612,6 +615,7 @@ class OpenLinkRemoteDesktop {
             // If host, start sharing screen and audio
             if (asHost) {
                 await this.startHostStreams();
+                await this.ensureHostInputHandler();
             }
 
             // Set up keyboard handler
@@ -640,7 +644,7 @@ class OpenLinkRemoteDesktop {
                 isHost: this.isHost
             });
 
-            this.announce('Connecting to remote session. Press the OpenLink menu hotkey to open control menu.');
+            this.announce('Connecting to remote session. Press Control plus Alt plus backslash to open the control menu.');
             return true;
         } catch (error) {
             console.error('[RemoteDesktop] Connection failed:', error);
@@ -761,6 +765,14 @@ class OpenLinkRemoteDesktop {
             case 'peer_disconnected':
                 this.announce('Peer disconnected');
                 this.emit('peer_disconnected');
+                break;
+
+            case 'start_interaction':
+                await this.applyStartInteraction(message);
+                break;
+
+            case 'pause_interaction':
+                this.applyPauseInteraction(message);
                 break;
 
             case 'error':
@@ -1183,6 +1195,10 @@ class OpenLinkRemoteDesktop {
     // ==================== Input Handling ====================
 
     handleDataChannelMessage(message) {
+        if (this.isHost && this.hostInputHandler && this.isRemoteInputMessage(message)) {
+            this.hostInputHandler.handleInput(message);
+        }
+
         switch (message.type) {
             case 'mouse_move':
                 this.emit('remote_mouse_move', message);
@@ -1231,7 +1247,59 @@ class OpenLinkRemoteDesktop {
             case 'request_machine_info':
                 this.sendMachineInfo();
                 break;
+
+            case 'start_interaction':
+                this.applyStartInteraction(message);
+                break;
+
+            case 'pause_interaction':
+                this.applyPauseInteraction(message);
+                break;
         }
+    }
+
+    async applyStartInteraction(message = {}) {
+        this.interactionActive = true;
+        this.options.keyboardMode = message.fullKeyboardControl === false ? 'hybrid' : 'remote';
+        this.remoteAudioMuted = false;
+        if (this.audioMixer?.gainNode) {
+            this.audioMixer.gainNode.gain.value = 1;
+        }
+
+        if (message.transmitMicrophoneAudio !== false && this.options.enableAudio && !this.localStream) {
+            await this.startClientAudio();
+        } else if (this.localStream) {
+            this.localStream.getAudioTracks().forEach(track => {
+                track.enabled = true;
+            });
+        }
+
+        this.localMicMuted = false;
+        this.announce('Start using remote machine. Full keyboard control and remote audio are active. Press Control plus Alt plus backslash for controller actions.', 'assertive');
+        this.emit('interaction_started', {
+            keyboardMode: this.options.keyboardMode,
+            audioActive: !this.remoteAudioMuted,
+            microphoneActive: !!this.localStream
+        });
+    }
+
+    applyPauseInteraction(message = {}) {
+        this.interactionActive = false;
+        this.options.keyboardMode = 'local';
+        this.muteRemoteAudioWhenInactive = message.muteRemoteAudio !== false;
+        if (this.muteRemoteAudioWhenInactive) {
+            this.remoteAudioMuted = true;
+            if (this.audioMixer?.gainNode) {
+                this.audioMixer.gainNode.gain.value = 0;
+            }
+        }
+        this.announce(this.muteRemoteAudioWhenInactive
+            ? 'Remote interaction minimized. Keyboard returned to local computer. Remote audio muted.'
+            : 'Remote interaction minimized. Keyboard returned to local computer. Remote audio remains active.', 'assertive');
+        this.emit('interaction_paused', {
+            keyboardMode: this.options.keyboardMode,
+            remoteAudioMuted: this.remoteAudioMuted
+        });
     }
 
     sendMachineInfo() {
@@ -1290,6 +1358,42 @@ class OpenLinkRemoteDesktop {
             isDown,
             timestamp: Date.now()
         });
+    }
+
+    isRemoteInputMessage(message) {
+        return [
+            'mouse_move',
+            'mouse_click',
+            'mouse_down',
+            'mouse_up',
+            'mouse_scroll',
+            'key_event',
+            'key_down',
+            'key_up',
+            'clipboard'
+        ].includes(message?.type);
+    }
+
+    async ensureHostInputHandler() {
+        if (this.hostInputHandler) {
+            return this.hostInputHandler;
+        }
+
+        const Handler = (typeof window !== 'undefined' && window.HostInputHandler)
+            ? window.HostInputHandler
+            : null;
+        if (!Handler) {
+            this.announce('Remote keyboard and mouse control need the native OpenLink input helper on the controlled computer.', 'assertive');
+            return null;
+        }
+
+        this.hostInputHandler = new Handler({
+            enableKeyboard: true,
+            enableMouse: true,
+            enableClipboard: true
+        });
+        this.announce('Remote keyboard and mouse input helper is active on this computer.');
+        return this.hostInputHandler;
     }
 
     sendClipboard(text) {

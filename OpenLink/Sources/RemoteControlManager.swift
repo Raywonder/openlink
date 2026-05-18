@@ -1123,6 +1123,72 @@ class RemoteControlManager: ObservableObject {
 
     // MARK: - Message Handling
 
+    func handleSignalingMessage(_ json: [String: Any]) -> [String: Any]? {
+        guard let type = json["type"] as? String else { return nil }
+
+        switch type {
+        case "start_interaction":
+            let canReceiveInput = canReceiveRemoteInput()
+            isRemoteControlActive = canReceiveInput
+            isReceivingControl = canReceiveInput
+            screenSharingEnabled = (json["screenSharingAllowed"] as? Bool) ?? screenSharingEnabled
+            return [
+                "type": "start_interaction_ack",
+                "requestId": json["requestId"] as? String ?? "",
+                "success": canReceiveInput,
+                "receivingControl": canReceiveInput,
+                "inputForwardingEnabled": inputForwardingEnabled,
+                "accessibilityTrusted": AXIsProcessTrusted(),
+                "message": canReceiveInput
+                    ? "Remote keyboard control is active. Both keyboards remain available when allowed."
+                    : "OpenLink on this Mac is not approved for keyboard control yet. Check Accessibility and Input Monitoring permissions."
+            ]
+
+        case "pause_interaction", "controller_disconnect", "disconnect_user":
+            isReceivingControl = false
+            if type != "pause_interaction" {
+                isRemoteControlActive = false
+            }
+            return [
+                "type": "\(type)_ack",
+                "success": true,
+                "receivingControl": isReceivingControl
+            ]
+
+        case "input_event":
+            guard canReceiveRemoteInput() else {
+                return ["type": "input_event_ack", "success": false, "error": "Mac input permissions are not ready"]
+            }
+            if !isReceivingControl {
+                isRemoteControlActive = true
+                isReceivingControl = true
+            }
+            let handled = handleInputEvent(json)
+            return ["type": "input_event_ack", "success": handled]
+
+        case "key_event":
+            if let normalized = normalizeLegacyKeyEvent(json) {
+                guard canReceiveRemoteInput() else {
+                    return ["type": "key_event_ack", "success": false, "error": "Mac input permissions are not ready"]
+                }
+                if !isReceivingControl {
+                    isRemoteControlActive = true
+                    isReceivingControl = true
+                }
+                let handled = handleInputEvent(normalized)
+                return ["type": "key_event_ack", "success": handled]
+            }
+            return ["type": "key_event_ack", "success": false, "error": "Unsupported key event"]
+
+        default:
+            return nil
+        }
+    }
+
+    private func canReceiveRemoteInput() -> Bool {
+        inputForwardingEnabled && AXIsProcessTrusted()
+    }
+
     private func sendMessage(_ message: [String: Any], completion: @escaping (Bool) -> Void) {
         guard let socket = controlSocket,
               let data = try? JSONSerialization.data(withJSONObject: message),
@@ -1165,8 +1231,19 @@ class RemoteControlManager: ObservableObject {
         switch type {
         case "command":
             handleRemoteCommand(json)
-        case "input_event":
-            handleInputEvent(json)
+        case "start_interaction", "pause_interaction", "controller_disconnect", "disconnect_user", "input_event", "key_event":
+            if let response = handleSignalingMessage(json) {
+                if type == "start_interaction", let controllerMachineId = controllerMachineId(from: json) {
+                    OpenLinkAudioBridge.shared.startCapture(targetMachineId: controllerMachineId) { [weak self] frame in
+                        self?.sendMessage(frame) { _ in }
+                    }
+                } else if type == "pause_interaction" || type == "controller_disconnect" || type == "disconnect_user" {
+                    OpenLinkAudioBridge.shared.stopCapture()
+                }
+                sendMessage(response) { _ in }
+            }
+        case "audio_frame":
+            OpenLinkAudioBridge.shared.play(frame: json)
         case "clipboard_update":
             handleClipboardUpdate(json)
         case "file_chunk":
@@ -1174,6 +1251,18 @@ class RemoteControlManager: ObservableObject {
         default:
             break
         }
+    }
+
+    private func controllerMachineId(from json: [String: Any]) -> String? {
+        if let sourceMachineId = json["sourceMachineId"] as? String, !sourceMachineId.isEmpty {
+            return sourceMachineId
+        }
+        if let machineInfo = json["machineInfo"] as? [String: Any],
+           let machineId = machineInfo["id"] as? String,
+           !machineId.isEmpty {
+            return machineId
+        }
+        return nil
     }
 
     private func handleRemoteCommand(_ json: [String: Any]) {
@@ -1190,77 +1279,142 @@ class RemoteControlManager: ObservableObject {
         sendMessage(response) { _ in }
     }
 
-    private func handleInputEvent(_ json: [String: Any]) {
-        guard isReceivingControl else { return }
+    @discardableResult
+    private func handleInputEvent(_ json: [String: Any]) -> Bool {
+        guard isReceivingControl else { return false }
 
-        guard let eventTypeRaw = json["eventType"] as? UInt32,
-              let eventType = CGEventType(rawValue: eventTypeRaw) else { return }
+        guard let eventTypeRaw = uint32Value(json["eventType"]),
+              let eventType = CGEventType(rawValue: eventTypeRaw) else { return false }
 
         switch eventType {
         case .mouseMoved:
-            if let x = json["x"] as? CGFloat, let y = json["y"] as? CGFloat {
+            if let x = cgFloatValue(json["x"]), let y = cgFloatValue(json["y"]) {
                 _ = executeMouseMove(["x": x, "y": y])
+                return true
             }
 
         case .leftMouseDown:
-            if let x = json["x"] as? CGFloat, let y = json["y"] as? CGFloat {
+            if let x = cgFloatValue(json["x"]), let y = cgFloatValue(json["y"]) {
                 let point = CGPoint(x: x, y: y)
                 if let event = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left) {
                     event.post(tap: .cghidEventTap)
+                    return true
                 }
             }
 
         case .leftMouseUp:
-            if let x = json["x"] as? CGFloat, let y = json["y"] as? CGFloat {
+            if let x = cgFloatValue(json["x"]), let y = cgFloatValue(json["y"]) {
                 let point = CGPoint(x: x, y: y)
                 if let event = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) {
                     event.post(tap: .cghidEventTap)
+                    return true
                 }
             }
 
         case .rightMouseDown:
-            if let x = json["x"] as? CGFloat, let y = json["y"] as? CGFloat {
+            if let x = cgFloatValue(json["x"]), let y = cgFloatValue(json["y"]) {
                 let point = CGPoint(x: x, y: y)
                 if let event = CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: point, mouseButton: .right) {
                     event.post(tap: .cghidEventTap)
+                    return true
                 }
             }
 
         case .rightMouseUp:
-            if let x = json["x"] as? CGFloat, let y = json["y"] as? CGFloat {
+            if let x = cgFloatValue(json["x"]), let y = cgFloatValue(json["y"]) {
                 let point = CGPoint(x: x, y: y)
                 if let event = CGEvent(mouseEventSource: nil, mouseType: .rightMouseUp, mouseCursorPosition: point, mouseButton: .right) {
                     event.post(tap: .cghidEventTap)
+                    return true
                 }
             }
 
         case .keyDown:
-            if let keyCode = json["keyCode"] as? Int64 {
+            if let keyCode = int64Value(json["keyCode"]) {
                 if let event = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(keyCode), keyDown: true) {
-                    if let flags = json["flags"] as? UInt64 {
+                    if let flags = uint64Value(json["flags"]) {
                         event.flags = CGEventFlags(rawValue: flags)
                     }
                     event.post(tap: .cghidEventTap)
+                    return true
                 }
             }
 
         case .keyUp:
-            if let keyCode = json["keyCode"] as? Int64 {
+            if let keyCode = int64Value(json["keyCode"]) {
                 if let event = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(keyCode), keyDown: false) {
+                    if let flags = uint64Value(json["flags"]) {
+                        event.flags = CGEventFlags(rawValue: flags)
+                    }
                     event.post(tap: .cghidEventTap)
+                    return true
                 }
             }
 
         case .scrollWheel:
-            if let deltaY = json["deltaY"] as? Int64, let deltaX = json["deltaX"] as? Int64 {
+            if let deltaY = int64Value(json["deltaY"]), let deltaX = int64Value(json["deltaX"]) {
                 if let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: Int32(deltaY), wheel2: Int32(deltaX), wheel3: 0) {
                     event.post(tap: .cghidEventTap)
+                    return true
                 }
             }
 
         default:
             break
         }
+
+        return false
+    }
+
+    private func normalizeLegacyKeyEvent(_ json: [String: Any]) -> [String: Any]? {
+        guard let keyCode = int64Value(json["keyCode"]) else { return nil }
+        let isDown = (json["isDown"] as? Bool) ?? ((json["type"] as? String) != "key_up")
+        return [
+            "type": "input_event",
+            "eventType": isDown ? CGEventType.keyDown.rawValue : CGEventType.keyUp.rawValue,
+            "keyCode": keyCode,
+            "flags": uint64Value(json["flags"]) ?? 0
+        ]
+    }
+
+    private func int64Value(_ value: Any?) -> Int64? {
+        if let value = value as? Int64 { return value }
+        if let value = value as? Int { return Int64(value) }
+        if let value = value as? UInt32 { return Int64(value) }
+        if let value = value as? UInt64 { return Int64(value) }
+        if let value = value as? NSNumber { return value.int64Value }
+        if let value = value as? String { return Int64(value) }
+        return nil
+    }
+
+    private func uint32Value(_ value: Any?) -> UInt32? {
+        if let value = value as? UInt32 { return value }
+        if let value = value as? UInt { return UInt32(value) }
+        if let value = value as? Int { return UInt32(value) }
+        if let value = value as? Int64 { return UInt32(value) }
+        if let value = value as? NSNumber { return value.uint32Value }
+        if let value = value as? String { return UInt32(value) }
+        return nil
+    }
+
+    private func uint64Value(_ value: Any?) -> UInt64? {
+        if let value = value as? UInt64 { return value }
+        if let value = value as? UInt { return UInt64(value) }
+        if let value = value as? Int { return UInt64(value) }
+        if let value = value as? Int64 { return UInt64(value) }
+        if let value = value as? NSNumber { return value.uint64Value }
+        if let value = value as? String { return UInt64(value) }
+        return nil
+    }
+
+    private func cgFloatValue(_ value: Any?) -> CGFloat? {
+        if let value = value as? CGFloat { return value }
+        if let value = value as? Double { return CGFloat(value) }
+        if let value = value as? Float { return CGFloat(value) }
+        if let value = value as? Int { return CGFloat(value) }
+        if let value = value as? NSNumber { return CGFloat(value.doubleValue) }
+        if let value = value as? String, let doubleValue = Double(value) { return CGFloat(doubleValue) }
+        return nil
     }
 
     private func handleClipboardUpdate(_ json: [String: Any]) {

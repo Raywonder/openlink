@@ -1,0 +1,6 @@
+{
+  "enabled": false,
+  "visible": false,
+  "managedBy": "https://openlink.tappedin.fm",
+  "reason": "Private local server access requires a server-managed entitlement."
+}

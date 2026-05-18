@@ -4,7 +4,7 @@
  * Requires native module (robotjs or nut.js) for input simulation
  *
  * Features:
- * - Prefers @nut-tree-fork/nut-js (better Electron compatibility)
+ * - Prefers @nut-tree-fork/nut-js for modern native desktop compatibility
  * - Mac-to-Windows key mapping to prevent dangerous shortcuts like Win+L
  * - Seamless fallback with alerts when modules unavailable
  */
@@ -37,9 +37,9 @@ class HostInputHandler {
 
     async init() {
         // Try to load input simulation module
-        // Prefer @nut-tree-fork/nut-js as it has better Electron compatibility
+        // Prefer @nut-tree-fork/nut-js for current native desktop support.
         try {
-            // Try nut.js fork first (better maintained, works with modern Electron)
+            // Try nut.js fork first because it is better maintained.
             const { keyboard, mouse, screen } = require('@nut-tree-fork/nut-js');
             this.inputModule = { keyboard, mouse, screen };
             this.inputType = 'nutjs';
@@ -103,12 +103,24 @@ class HostInputHandler {
             case 'mouse_move':
                 this.handleMouseMove(data);
                 break;
+            case 'mouse_click':
+                this.handleMouseMove(data);
+                this.handleMouseButton({ ...data, type: 'mouse_down' });
+                this.handleMouseButton({ ...data, type: 'mouse_up' });
+                if (data.double) {
+                    this.handleMouseButton({ ...data, type: 'mouse_down' });
+                    this.handleMouseButton({ ...data, type: 'mouse_up' });
+                }
+                break;
             case 'mouse_down':
             case 'mouse_up':
                 this.handleMouseButton(data);
                 break;
             case 'mouse_scroll':
                 this.handleMouseScroll(data);
+                break;
+            case 'key_event':
+                this.handleKeyboard(data);
                 break;
             case 'key_down':
             case 'key_up':

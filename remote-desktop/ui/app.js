@@ -1,6 +1,6 @@
 /**
  * OpenLink Remote Desktop - Application Logic
- * Control Menu: Cmd+Opt+\ on Mac or Alt+Win+\ on Windows
+ * Control Menu: Ctrl+Alt+\
  */
 
 class OpenLinkApp {
@@ -581,7 +581,7 @@ class OpenLinkApp {
     }
 
     handleFileReceived(data) {
-        // Save file to disk (in Electron) or offer download (in browser)
+        // Offer the received file as a browser download.
         const url = URL.createObjectURL(data.blob);
         const a = document.createElement('a');
         a.href = url;

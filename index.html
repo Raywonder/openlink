@@ -472,7 +472,7 @@
                     </div>
                 </div>
                 <nav class="top-links" aria-label="Quick links">
-                    <a class="pill" href="https://raywonderis.me/uploads/website_specific/apps/openlink/clients/windows/OpenLink%20Setup%201.7.15.exe">Windows Installer</a>
+                    <a class="pill" href="downloads.php">Windows Installer</a>
                     <a class="pill" href="downloads.php">macOS Installer</a>
                     <a class="pill" href="connect.html">Web Client</a>
                 </nav>
@@ -611,6 +611,15 @@
                             </div>
                         </article>
                         <article class="domain-card">
+                            <h4>Short TappedIn aliases</h4>
+                            <code>ol.tappedin.fm</code>
+                            <p>Use ol.tappedin.fm for direct hosting and ol-session.tappedin.fm style session links when a shorter TappedIn address is easier to share.</p>
+                            <div class="domain-meta">
+                                <span>Short public front door</span>
+                                <span>ol*.tappedin.fm aliases</span>
+                            </div>
+                        </article>
+                        <article class="domain-card">
                             <h4>Additional brand domains</h4>
                             <code>openlink.raywonderis.me</code>
                             <p>Additional domains can surface the same landing page and still route to managed OpenLink sessions, support flows, and installer downloads.</p>
@@ -654,6 +663,7 @@
                 "openlink.devinecreations.com",
                 "openlink.devine-creations.com",
                 "openlink.devinecreations.net",
+                "ol.tappedin.fm",
                 "openlink.tappedin.fm",
                 "openlink.raywonderis.me"
             ];
@@ -681,6 +691,10 @@
                 });
 
                 if (!matchedBase || currentHost === matchedBase) {
+                    const shortTappedInMatch = currentHost.match(/^ol-?([a-z0-9-]+)\.tappedin\.fm$/i);
+                    if (shortTappedInMatch && shortTappedInMatch[1]) {
+                        return shortTappedInMatch[1];
+                    }
                     return null;
                 }
 
