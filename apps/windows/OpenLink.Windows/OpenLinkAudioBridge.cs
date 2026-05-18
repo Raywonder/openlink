@@ -1,5 +1,6 @@
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
+using System.Buffers.Binary;
 using System.Threading;
 
 namespace OpenLink.Windows;
@@ -22,6 +23,8 @@ public sealed class OpenLinkAudioBridge : IDisposable
     private Func<OpenLinkAudioFrame, Task>? _frameSink;
     private long _lastMicrophoneFrameTicks;
     private long _lastSystemFrameTicks;
+    private string _microphoneFormatText = "microphone format unknown";
+    private string _systemFormatText = "system audio format unknown";
     private int _framesInFlight;
     private bool _isStarted;
 
@@ -72,7 +75,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
         {
             try
             {
-            _remotePlaybackSession.Stop();
+                _remotePlaybackSession.Stop();
             }
             catch
             {
@@ -106,6 +109,8 @@ public sealed class OpenLinkAudioBridge : IDisposable
         {
             _microphoneCapture = new WasapiCapture();
             var format = _microphoneCapture.WaveFormat;
+            _microphoneFormatText = FormatDescription(format);
+            log?.Invoke($"Microphone audio capture format: {_microphoneFormatText}.");
             _microphoneCapture.DataAvailable += (_, args) =>
             {
                 ForwardCaptureFrame("microphone", format, args.Buffer, args.BytesRecorded, ref _lastMicrophoneFrameTicks);
@@ -136,6 +141,8 @@ public sealed class OpenLinkAudioBridge : IDisposable
         {
             _systemCapture = new WasapiLoopbackCapture();
             var format = _systemCapture.WaveFormat;
+            _systemFormatText = FormatDescription(format);
+            log?.Invoke($"System audio capture format: {_systemFormatText}.");
             _systemCapture.DataAvailable += (_, args) =>
             {
                 ForwardCaptureFrame("system", format, args.Buffer, args.BytesRecorded, ref _lastSystemFrameTicks);
@@ -209,13 +216,13 @@ public sealed class OpenLinkAudioBridge : IDisposable
         var microphone = _microphoneCapture is null ? "microphone muted" : "microphone capture active";
         var system = _systemCapture is null ? "system audio muted" : "system audio capture active";
         var playback = _remotePlaybackSession is null ? "remote playback inactive" : "remote playback session active";
-        return $"OpenLink audio bridge: {microphone}, {system}, {playback}, virtual endpoint {VirtualDeviceName}.";
+        return $"OpenLink audio bridge: {microphone} ({_microphoneFormatText}), {system} ({_systemFormatText}), {playback}, virtual endpoint {VirtualDeviceName}.";
     }
 
     private void ForwardCaptureFrame(string source, WaveFormat format, byte[] buffer, int byteCount, ref long lastTicks)
     {
         var sink = _frameSink;
-        if (sink is null || byteCount <= 0 || format.BitsPerSample != 16)
+        if (sink is null || byteCount <= 0)
         {
             return;
         }
@@ -233,9 +240,14 @@ public sealed class OpenLinkAudioBridge : IDisposable
             return;
         }
 
-        var payload = new byte[byteCount];
-        Buffer.BlockCopy(buffer, 0, payload, 0, byteCount);
-        var frame = new OpenLinkAudioFrame(source, format.SampleRate, format.BitsPerSample, format.Channels, "pcm_s16le", payload);
+        var payload = ConvertCaptureBufferToPcm16(format, buffer, byteCount);
+        if (payload.Length == 0)
+        {
+            Interlocked.Decrement(ref _framesInFlight);
+            return;
+        }
+
+        var frame = new OpenLinkAudioFrame(source, format.SampleRate, 16, format.Channels, "pcm_s16le", payload);
 
         _ = Task.Run(async () =>
         {
@@ -305,6 +317,77 @@ public sealed class OpenLinkAudioBridge : IDisposable
         }
 
         capture = null;
+    }
+
+    private static byte[] ConvertCaptureBufferToPcm16(WaveFormat format, byte[] buffer, int byteCount)
+    {
+        if (byteCount <= 0)
+        {
+            return [];
+        }
+
+        if (format.Encoding == WaveFormatEncoding.Pcm && format.BitsPerSample == 16)
+        {
+            var payload = new byte[byteCount];
+            Buffer.BlockCopy(buffer, 0, payload, 0, byteCount);
+            return payload;
+        }
+
+        if (format.Encoding == WaveFormatEncoding.IeeeFloat && format.BitsPerSample == 32)
+        {
+            var sampleCount = byteCount / sizeof(float);
+            var payload = new byte[sampleCount * sizeof(short)];
+            for (var sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
+            {
+                var value = BitConverter.ToSingle(buffer, sampleIndex * sizeof(float));
+                var clipped = Math.Clamp(value, -1.0f, 1.0f);
+                var pcm = (short)Math.Round(clipped * short.MaxValue);
+                BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(sampleIndex * sizeof(short), sizeof(short)), pcm);
+            }
+
+            return payload;
+        }
+
+        if (format.Encoding == WaveFormatEncoding.Pcm && format.BitsPerSample == 32)
+        {
+            var sampleCount = byteCount / sizeof(int);
+            var payload = new byte[sampleCount * sizeof(short)];
+            for (var sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
+            {
+                var value = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(sampleIndex * sizeof(int), sizeof(int)));
+                var pcm = (short)(value >> 16);
+                BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(sampleIndex * sizeof(short), sizeof(short)), pcm);
+            }
+
+            return payload;
+        }
+
+        if (format.Encoding == WaveFormatEncoding.Pcm && format.BitsPerSample == 24)
+        {
+            var sampleCount = byteCount / 3;
+            var payload = new byte[sampleCount * sizeof(short)];
+            for (var sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
+            {
+                var offset = sampleIndex * 3;
+                var value = buffer[offset] | (buffer[offset + 1] << 8) | (buffer[offset + 2] << 16);
+                if ((value & 0x800000) != 0)
+                {
+                    value |= unchecked((int)0xFF000000);
+                }
+
+                var pcm = (short)(value >> 8);
+                BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(sampleIndex * sizeof(short), sizeof(short)), pcm);
+            }
+
+            return payload;
+        }
+
+        return [];
+    }
+
+    private static string FormatDescription(WaveFormat format)
+    {
+        return $"{format.Encoding} {format.SampleRate} Hz, {format.BitsPerSample}-bit, {format.Channels} channel(s)";
     }
 
     public void Dispose()
