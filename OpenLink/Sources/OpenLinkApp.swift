@@ -1514,6 +1514,10 @@ struct AudioSettingsTab: View {
                     Text("VoiceOver audio is routed through the active remote audio path when VoiceOver is running. Remote status text is also sent as local TTS announcements on the controlling device when its local TTS helper is enabled.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                    Text("If a remote user cannot approve keyboard access locally, an admin can run /Applications/OpenLink.app/Contents/Resources/openlink-macos-permission-helper.sh --open over SSH or another approved support channel. macOS still requires user approval or an admin-managed PPPC/MDM profile for silent approval.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     Button("Open macOS Accessibility Permissions") {
                         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
                     }

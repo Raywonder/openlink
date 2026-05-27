@@ -1141,10 +1141,18 @@ class RemoteControlManager: ObservableObject {
                 "inputForwardingEnabled": inputForwardingEnabled,
                 "accessibilityTrusted": accessibilityTrusted,
                 "inputMonitoringMayBeRequired": !accessibilityTrusted,
-                "permissionAction": "Open System Settings, then Privacy and Security, then Accessibility and Input Monitoring, and enable OpenLink.",
+                "permissionAction": "Open System Settings, then Privacy and Security, then enable OpenLink in Accessibility and Input Monitoring. If screen sharing is needed, enable Screen Recording too.",
+                "permissionRecoveryCommand": "/Applications/OpenLink.app/Contents/Resources/openlink-macos-permission-helper.sh --open",
+                "permissionResetCommand": "/Applications/OpenLink.app/Contents/Resources/openlink-macos-permission-helper.sh --reset-stale",
+                "permissionAlternatives": [
+                    "If the Mac user can interact locally, ask them to approve OpenLink in Accessibility, Input Monitoring, and Screen Recording.",
+                    "If the Mac user cannot interact locally but an admin has shell access, run the OpenLink permission helper to open the right panes or reset stale prompts.",
+                    "Silent approval of these macOS permissions requires an admin-managed PPPC/MDM profile for com.raywonder.openlink; normal apps and scripts cannot grant them by themselves.",
+                    "As a fallback, use another approved remote-access path such as NVDA Remote or local SSH to complete the approval."
+                ],
                 "message": canReceiveInput
                     ? "Remote keyboard control is active. Both keyboards remain available when allowed."
-                    : "OpenLink on this Mac is not approved for keyboard control yet. A macOS permission prompt was requested. Enable OpenLink in Accessibility and Input Monitoring, then choose Start Using again."
+                    : "OpenLink on this Mac is not approved for keyboard control yet. A macOS permission prompt was requested. Enable OpenLink in Accessibility and Input Monitoring, or run the bundled OpenLink permission helper from an admin shell, then choose Start Using again."
             ]
 
         case "pause_interaction", "controller_disconnect", "disconnect_user":

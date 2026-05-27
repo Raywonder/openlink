@@ -23,6 +23,10 @@ bundle_app() {
     cp -f "$binary" "$bundle/Contents/MacOS/$name"
     chmod 755 "$bundle/Contents/MacOS/$name"
     cp -f "$plist" "$bundle/Contents/Info.plist"
+    if [[ "$name" == "OpenLink" && -f "$REPO_ROOT/scripts/macos-openlink-permission-helper.sh" ]]; then
+        cp -f "$REPO_ROOT/scripts/macos-openlink-permission-helper.sh" "$bundle/Contents/Resources/openlink-macos-permission-helper.sh"
+        chmod 755 "$bundle/Contents/Resources/openlink-macos-permission-helper.sh"
+    fi
 
     if [[ -n "$PROVISIONING_PROFILE" ]]; then
         cp -f "$PROVISIONING_PROFILE" "$bundle/Contents/embedded.provisionprofile"

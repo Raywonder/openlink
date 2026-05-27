@@ -763,14 +763,62 @@ public partial class MainWindow : Window
             var error = root.TryGetProperty("error", out var errorElement)
                 ? errorElement.GetString()
                 : message ?? "remote machine rejected keyboard control";
+            var permissionAction = root.TryGetProperty("permissionAction", out var permissionActionElement)
+                ? permissionActionElement.GetString()
+                : null;
+            var permissionRecoveryCommand = root.TryGetProperty("permissionRecoveryCommand", out var permissionRecoveryElement)
+                ? permissionRecoveryElement.GetString()
+                : null;
+            var permissionResetCommand = root.TryGetProperty("permissionResetCommand", out var permissionResetElement)
+                ? permissionResetElement.GetString()
+                : null;
+            var permissionAlternatives = ReadStringArray(root, "permissionAlternatives");
             StopRemoteInputForwarding(error);
-            SetStatus($"Remote keyboard control did not start: {error}. Keyboard remains on this computer.");
+            var status = new StringBuilder();
+            status.Append($"Remote keyboard control did not start: {error}. Keyboard remains on this computer.");
+            if (!string.IsNullOrWhiteSpace(permissionAction))
+            {
+                status.Append(' ').Append(permissionAction);
+            }
+            if (!string.IsNullOrWhiteSpace(permissionRecoveryCommand))
+            {
+                status.Append(" Admin shell recovery command: ").Append(permissionRecoveryCommand);
+            }
+            if (!string.IsNullOrWhiteSpace(permissionResetCommand))
+            {
+                status.Append(" Reset stale macOS prompts with: ").Append(permissionResetCommand);
+            }
+            SetStatus(status.ToString());
+            if (permissionAlternatives.Count > 0)
+            {
+                AddLog("Mac permission alternatives: " + string.Join(" ", permissionAlternatives));
+            }
             PlaySound(SoundAction.Error);
             return;
         }
 
         ActivateRemoteInputForwarding(requestId, message);
         _ = SendDiagnosticEventAsync("start_interaction_ack", _remoteInputMachine, "success");
+    }
+
+    private static List<string> ReadStringArray(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var element) || element.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var values = new List<string>();
+        foreach (var item in element.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(item.GetString()))
+            {
+                values.Add(item.GetString()!);
+            }
+        }
+
+        return values;
     }
 
     private void HandleRemoteTtsAnnouncement(JsonElement root)
