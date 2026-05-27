@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_NAME="OpenLink"
-BUNDLE_ID="com.raywonder.openlink"
+BUNDLE_ID="com.openlink.app"
 
 usage() {
     cat <<'EOF'

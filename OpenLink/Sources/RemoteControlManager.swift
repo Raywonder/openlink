@@ -1130,6 +1130,11 @@ class RemoteControlManager: ObservableObject {
         case "start_interaction":
             let accessibilityTrusted = requestAccessibilityTrustPromptIfNeeded()
             let canReceiveInput = inputForwardingEnabled && accessibilityTrusted
+            let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.openlink.app"
+            let blockedMessage = remoteInputBlockedMessage(accessibilityTrusted: accessibilityTrusted)
+            let permissionAction = accessibilityTrusted
+                ? "Open OpenLink settings and enable remote input forwarding for trusted sessions."
+                : "Open System Settings, then Privacy and Security, then enable OpenLink in Accessibility and Input Monitoring. If screen sharing is needed, enable Screen Recording too."
             isRemoteControlActive = canReceiveInput
             isReceivingControl = canReceiveInput
             screenSharingEnabled = (json["screenSharingAllowed"] as? Bool) ?? screenSharingEnabled
@@ -1140,19 +1145,19 @@ class RemoteControlManager: ObservableObject {
                 "receivingControl": canReceiveInput,
                 "inputForwardingEnabled": inputForwardingEnabled,
                 "accessibilityTrusted": accessibilityTrusted,
-                "inputMonitoringMayBeRequired": !accessibilityTrusted,
-                "permissionAction": "Open System Settings, then Privacy and Security, then enable OpenLink in Accessibility and Input Monitoring. If screen sharing is needed, enable Screen Recording too.",
+                "inputMonitoringMayBeRequired": inputForwardingEnabled && !accessibilityTrusted,
+                "permissionAction": permissionAction,
                 "permissionRecoveryCommand": "/Applications/OpenLink.app/Contents/Resources/openlink-macos-permission-helper.sh --open",
                 "permissionResetCommand": "/Applications/OpenLink.app/Contents/Resources/openlink-macos-permission-helper.sh --reset-stale",
                 "permissionAlternatives": [
                     "If the Mac user can interact locally, ask them to approve OpenLink in Accessibility, Input Monitoring, and Screen Recording.",
                     "If the Mac user cannot interact locally but an admin has shell access, run the OpenLink permission helper to open the right panes or reset stale prompts.",
-                    "Silent approval of these macOS permissions requires an admin-managed PPPC/MDM profile for com.raywonder.openlink; normal apps and scripts cannot grant them by themselves.",
+                    "Silent approval of these macOS permissions requires an admin-managed PPPC/MDM profile for \(bundleIdentifier); normal apps and scripts cannot grant them by themselves.",
                     "As a fallback, use another approved remote-access path such as NVDA Remote or local SSH to complete the approval."
                 ],
                 "message": canReceiveInput
                     ? "Remote keyboard control is active. Both keyboards remain available when allowed."
-                    : "OpenLink on this Mac is not approved for keyboard control yet. A macOS permission prompt was requested. Enable OpenLink in Accessibility and Input Monitoring, or run the bundled OpenLink permission helper from an admin shell, then choose Start Using again."
+                    : blockedMessage
             ]
 
         case "pause_interaction", "controller_disconnect", "disconnect_user":
@@ -1198,6 +1203,18 @@ class RemoteControlManager: ObservableObject {
 
     private func canReceiveRemoteInput() -> Bool {
         inputForwardingEnabled && AXIsProcessTrusted()
+    }
+
+    private func remoteInputBlockedMessage(accessibilityTrusted: Bool) -> String {
+        if !inputForwardingEnabled {
+            return "OpenLink on this Mac has remote input forwarding disabled. Accessibility can be approved and control will still be blocked until OpenLink remote input forwarding is enabled for trusted sessions."
+        }
+
+        if !accessibilityTrusted {
+            return "OpenLink on this Mac is not trusted for Accessibility yet. A macOS permission prompt was requested. Enable the same OpenLink app in Accessibility and Input Monitoring, or run the bundled OpenLink permission helper from an admin shell, then choose Start Using again."
+        }
+
+        return "OpenLink on this Mac cannot receive remote input yet. Check OpenLink remote input settings and macOS privacy approvals, then choose Start Using again."
     }
 
     private func requestAccessibilityTrustPromptIfNeeded() -> Bool {

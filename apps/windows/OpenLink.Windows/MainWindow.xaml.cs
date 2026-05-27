@@ -399,6 +399,13 @@ public partial class MainWindow : Window
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
+        if (!CanOpenLocalSettings())
+        {
+            SetStatus("Local settings are locked while an owner remote session is active.");
+            PlaySound(SoundAction.Error);
+            return;
+        }
+
         var dialog = new SettingsWindow(_settings)
         {
             Owner = this
@@ -423,6 +430,11 @@ public partial class MainWindow : Window
         ConfigureLaunchAtLogin();
         SetStatus("Settings saved.");
         SettingsButton.Focus();
+    }
+
+    private bool CanOpenLocalSettings()
+    {
+        return !_settings.LockLocalSettingsDuringRemoteOwnerSession || !_sessionActive;
     }
 
     private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -685,6 +697,9 @@ public partial class MainWindow : Window
             case "machine_management_action":
                 HandleMachineManagementAction(root);
                 break;
+            case "machine_management_action_ack":
+                HandleMachineManagementActionAck(root);
+                break;
             case "application_list":
             case "applications_list":
             case "running_applications":
@@ -851,6 +866,40 @@ public partial class MainWindow : Window
         }
 
         var action = root.TryGetProperty("action", out var actionElement) ? actionElement.GetString() : null;
+        if (string.Equals(action, "open_settings", StringComparison.OrdinalIgnoreCase))
+        {
+            var trustedOwner = root.TryGetProperty("trustedOwner", out var trustedOwnerElement) &&
+                trustedOwnerElement.ValueKind == JsonValueKind.True;
+            var accepted = _settings.AllowRemoteSettingsManagement &&
+                ((trustedOwner && _settings.AllowTrustedOwnerRemoteSettingsChanges) ||
+                 !_settings.RequireApprovalForGuestRemoteSettingsChanges);
+            var message = accepted
+                ? $"OpenLink settings opened on {Environment.MachineName}."
+                : $"OpenLink settings request needs local approval on {Environment.MachineName}.";
+            _ = SendPeerAsync(new
+            {
+                type = "machine_management_action_ack",
+                action = "open_settings",
+                targetMachineId = GetSourceMachineId(root),
+                sourceMachineId = Environment.MachineName,
+                success = accepted,
+                message,
+                requiresLocalApproval = !accepted && _settings.RequireApprovalForGuestRemoteSettingsChanges,
+                trustedOwner
+            });
+
+            if (accepted)
+            {
+                Dispatcher.Invoke(() => SettingsButton_Click(this, new RoutedEventArgs()));
+            }
+            else
+            {
+                SetStatus("A remote device requested settings access. Approve the device as trusted or disable guest approval before allowing remote settings changes.");
+                PlaySound(SoundAction.MessageReceived);
+            }
+            return;
+        }
+
         if (!string.Equals(action, "list_applications", StringComparison.OrdinalIgnoreCase))
         {
             return;
@@ -867,6 +916,26 @@ public partial class MainWindow : Window
             applications
         });
         SetStatus($"Sent {applications.Count} running applications to the controlling OpenLink machine.");
+    }
+
+    private void HandleMachineManagementActionAck(JsonElement root)
+    {
+        if (!IsMessageTargetedToThisMachine(root))
+        {
+            return;
+        }
+
+        var action = root.TryGetProperty("action", out var actionElement) ? actionElement.GetString() : "machine action";
+        var success = !root.TryGetProperty("success", out var successElement) || successElement.ValueKind != JsonValueKind.False;
+        var message = root.TryGetProperty("message", out var messageElement) ? messageElement.GetString() : null;
+        if (success)
+        {
+            SetStatus(message ?? $"{action?.Replace('_', ' ')} accepted by remote machine.");
+            return;
+        }
+
+        SetStatus(message ?? $"{action?.Replace('_', ' ')} needs local approval on the remote machine.");
+        PlaySound(SoundAction.MessageReceived);
     }
 
     private void HandleRemoteApplicationList(JsonElement root)
@@ -2492,6 +2561,20 @@ public partial class MainWindow : Window
                 ShowMachineDetails(machine);
             }
         });
+        AddTrayMenuItem(menu, "Open Remote Settings", "Open settings on the selected trusted remote machine", (_, _) =>
+        {
+            var machine = SelectedMachine is { } selected && IsConnectableMachine(selected)
+                ? selected
+                : _machines.FirstOrDefault(item => item.IsOnline && IsConnectableMachine(item));
+            if (machine is not null)
+            {
+                _ = SendRemoteMachineActionAsync(machine, "open_settings", null);
+            }
+            else
+            {
+                SetStatus("No trusted remote machine is available for remote settings.");
+            }
+        }, enabled: activeMachine is not null);
         AddTrayMenuItem(menu, "Quit", "Quit OpenLink", (_, _) =>
         {
             if (TryBlockQuitForTamperProtection())
@@ -2548,6 +2631,7 @@ public partial class MainWindow : Window
             AddRecentConnectionsMenu(menu, lastMachine);
         }
         AddTrayMenuItem(menu, $"Machine Details for {lastMachine.DisplayName}", "Show device, connection, network, and application details", (_, _) => ShowMachineDetails(lastMachine));
+        AddTrayMenuItem(menu, $"Open Settings on {lastMachine.DisplayName}", $"Open OpenLink settings on {lastMachine.DisplayName} if this device is trusted or owned", (_, _) => _ = SendRemoteMachineActionAsync(lastMachine, "open_settings", null));
         if (hasRemoteSession)
         {
             menu.Items.Add(new Forms.ToolStripSeparator());
@@ -2780,6 +2864,9 @@ public partial class MainWindow : Window
                     path = application.Path,
                     windowTitle = application.WindowTitle
                 },
+            trustedOwner = machine.IsTrusted || machine.AllowDropIn || machine.AutoConnect,
+            settingsScope = action == "open_settings" ? "full" : null,
+            requiresApprovalIfGuest = _settings.RequireApprovalForGuestRemoteSettingsChanges,
             machineInfo = CreateLocalMachineInfo(_activeServerUrl ?? GetServerUrl()),
             connectionPolicy = CreateConnectionPolicy()
         });

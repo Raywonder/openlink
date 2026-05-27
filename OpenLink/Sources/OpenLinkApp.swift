@@ -20,11 +20,13 @@ struct OpenLinkApp: App {
     }
 }
 
+extension Notification.Name {
+    static let openOpenLinkSettingsWindow = Notification.Name("openOpenLinkSettingsWindow")
+}
+
 private func openOpenLinkSettings() {
     NSApplication.shared.activate(ignoringOtherApps: true)
-    if !NSApplication.shared.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) {
-        NSApplication.shared.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-    }
+    NotificationCenter.default.post(name: .openOpenLinkSettingsWindow, object: nil)
 }
 
 private func minimizeOpenLinkMainWindow() {
@@ -40,9 +42,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     private var statusMenu: NSMenu?
     private var escapeMonitor: Any?
     private var mainWindow: NSWindow?
+    private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)
+        NotificationCenter.default.addObserver(self, selector: #selector(openSettingsWindowFromNotification(_:)), name: .openOpenLinkSettingsWindow, object: nil)
         setupMenuBar()
         OpenLinkService.shared.start()
         configureMacLaunchAtLogin(UserDefaults.standard.bool(forKey: "launchAtLogin"))
@@ -53,6 +57,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        NotificationCenter.default.removeObserver(self)
         OpenLinkService.shared.stop()
     }
 
@@ -217,6 +222,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         submenu.addItem(.separator())
         addMachineActionItem("Disconnect Remote User from This Device", machine: machine, action: #selector(disconnectMachineFromMenu(_:)), to: submenu, enabled: true, help: "On the controlled computer, disconnects the remote user.")
         addMachineActionItem("Swap Control", machine: machine, action: #selector(swapControlFromMenu(_:)), to: submenu, enabled: service.isConnectableMachine(machine), help: "Allows bidirectional control while both keyboards remain available.")
+        addMachineActionItem("Open Remote Settings", machine: machine, action: #selector(openRemoteSettingsFromMenu(_:)), to: submenu, enabled: service.isConnectableMachine(machine), help: "Opens OpenLink settings on \(machine.displayName) when this computer is trusted or owned.")
 
         if hasRemoteSession {
             submenu.addItem(.separator())
@@ -267,6 +273,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
 
     private func showMainWindow() {
         if let mainWindow {
+            if mainWindow.isMiniaturized {
+                mainWindow.deminiaturize(nil)
+            }
+            mainWindow.orderFrontRegardless()
             mainWindow.makeKeyAndOrderFront(nil)
             NSApplication.shared.activate(ignoringOtherApps: true)
             return
@@ -282,17 +292,58 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         window.contentMinSize = NSSize(width: 720, height: 520)
         window.contentViewController = NSHostingController(rootView: OpenLinkMainWindowView())
         window.center()
+        window.collectionBehavior.insert(.moveToActiveSpace)
         window.isReleasedWhenClosed = false
         window.delegate = self
         mainWindow = window
+        window.orderFrontRegardless()
+        window.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    private func showSettingsWindow() {
+        if let settingsWindow {
+            if settingsWindow.isMiniaturized {
+                settingsWindow.deminiaturize(nil)
+            }
+            settingsWindow.orderFrontRegardless()
+            settingsWindow.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 820, height: 680),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "OpenLink Settings"
+        window.contentMinSize = NSSize(width: 720, height: 560)
+        window.contentViewController = NSHostingController(rootView: SettingsView())
+        window.center()
+        window.collectionBehavior.insert(.moveToActiveSpace)
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        settingsWindow = window
+        window.orderFrontRegardless()
         window.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.orderOut(nil)
-        NSApplication.shared.hide(nil)
+        if sender == mainWindow {
+            NSApplication.shared.hide(nil)
+        }
         return false
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            showMainWindow()
+        }
+        return true
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -371,6 +422,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         OpenLinkService.shared.swapControl(with: machine)
     }
 
+    @objc private func openRemoteSettingsFromMenu(_ sender: NSMenuItem) {
+        guard let machine = machine(from: sender) else { return }
+        OpenLinkService.shared.openRemoteSettings(for: machine)
+    }
+
     @objc private func toggleMicrophoneAudioFromMenu(_ sender: NSMenuItem) {
         guard let machine = machine(from: sender) else { return }
         OpenLinkService.shared.setMicrophoneAudio(for: machine, enabled: sender.state != .on)
@@ -383,6 +439,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
 
     @objc private func openSettingsFromMenu(_ sender: NSMenuItem) {
         openOpenLinkSettings()
+    }
+
+    @objc private func openSettingsWindowFromNotification(_ notification: Notification) {
+        showSettingsWindow()
     }
 
     @objc private func quitFromMenu(_ sender: NSMenuItem) {
@@ -591,6 +651,7 @@ struct MachineActionsMenu: View {
                     Button("Disconnect from \(machine.displayName)") { service.disconnectFromMachine(machine) }
                 }
                 Button("Swap Control") { service.swapControl(with: machine) }
+                Button("Open Remote Settings") { service.openRemoteSettings(for: machine) }
             } else {
                 Button("Open Local Machine Settings") { openOpenLinkSettings() }
                 Button("Disconnect Remote User from This Device") { service.disconnectMachine(machine) }
@@ -1053,6 +1114,17 @@ struct SettingsView: View {
                 .frame(width: 500, height: 320)
         } else {
             VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Settings")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("Configure OpenLink connections, devices, audio, accessibility, and owner controls.")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding([.top, .horizontal])
+
                 Picker("Settings section", selection: $selectedSection) {
                     ForEach(OpenLinkSettingsSection.allCases) { section in
                         Label(section.rawValue, systemImage: section.systemImage)
@@ -1618,6 +1690,10 @@ struct AddServerSheet: View {
 struct SecuritySettingsTab: View {
     @StateObject private var service = OpenLinkService.shared
     @AppStorage("tamperProtectionEnabled") private var tamperProtectionEnabled = false
+    @AppStorage("allowRemoteSettingsManagement") private var allowRemoteSettingsManagement = true
+    @AppStorage("allowTrustedOwnerRemoteSettingsChanges") private var allowTrustedOwnerRemoteSettingsChanges = true
+    @AppStorage("requireApprovalForGuestRemoteSettingsChanges") private var requireApprovalForGuestRemoteSettingsChanges = true
+    @AppStorage("lockLocalSettingsDuringRemoteOwnerSession") private var lockLocalSettingsDuringRemoteOwnerSession = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -1627,6 +1703,20 @@ struct SecuritySettingsTab: View {
                     Toggle("Require authentication", isOn: .constant(true))
                     Toggle("Allow remote control", isOn: $service.allowRemoteControl)
                     Toggle("Trusted devices only", isOn: $service.trustedDevicesOnly)
+                }
+                .padding(.vertical, 8)
+            }
+
+            GroupBox("Remote Settings") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Allow remote settings management", isOn: $allowRemoteSettingsManagement)
+                    Toggle("Trusted or owned devices can open settings quietly", isOn: $allowTrustedOwnerRemoteSettingsChanges)
+                    Toggle("Guest settings requests require local approval", isOn: $requireApprovalForGuestRemoteSettingsChanges)
+                    Toggle("Lock local settings while an owner is connected", isOn: $lockLocalSettingsDuringRemoteOwnerSession)
+                    Text("Trusted owner requests can manage this machine from the remote connection menu. Guest requests are announced locally and must be approved before secure settings are changed.")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, 8)
             }

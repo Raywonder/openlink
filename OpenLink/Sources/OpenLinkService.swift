@@ -671,6 +671,22 @@ class OpenLinkService: ObservableObject {
         ])
     }
 
+    func openRemoteSettings(for machine: OpenLinkMachine) {
+        guard ensureConnectableMachine(machine, action: "open remote settings on") else { return }
+
+        let trustedOwner = machine.isTrusted || machine.allowDropIn || machine.autoConnect
+        sendMachineAction(machine, type: "machine_management_action", extras: [
+            "action": "open_settings",
+            "trustedOwner": trustedOwner,
+            "settingsScope": "full",
+            "requiresApprovalIfGuest": UserDefaults.standard.bool(forKey: "requireApprovalForGuestRemoteSettingsChanges")
+        ])
+        sendDiagnosticEvent("remote_settings_open", machine: machine, outcome: "sent", metadata: [
+            "trustedOwner": trustedOwner
+        ])
+        postStatusNotification(title: "OpenLink", body: "Requested OpenLink settings on \(machine.displayName). Trusted owner devices can open settings directly; guest requests require local approval.")
+    }
+
     func isConnectableMachine(_ machine: OpenLinkMachine) -> Bool {
         !isLocalMachine(machine)
     }
@@ -1037,6 +1053,34 @@ class OpenLinkService: ObservableObject {
             ]
             sendWebSocketResponse(response, serverId: serverId, broadcast: true)
             runtimeLog("sent application_list count=\(applications.count) target=\(controllerMachineId(from: json) ?? "unknown-controller")")
+        case "open_settings":
+            let trustedOwner = json["trustedOwner"] as? Bool ?? false
+            let allowRemoteSettings = UserDefaults.standard.object(forKey: "allowRemoteSettingsManagement") as? Bool ?? true
+            let allowTrustedOwner = UserDefaults.standard.object(forKey: "allowTrustedOwnerRemoteSettingsChanges") as? Bool ?? true
+            let requireGuestApproval = UserDefaults.standard.object(forKey: "requireApprovalForGuestRemoteSettingsChanges") as? Bool ?? true
+            let accepted = allowRemoteSettings && ((trustedOwner && allowTrustedOwner) || !requireGuestApproval)
+            let message = accepted
+                ? "OpenLink settings opened on \(localStableMachineName())."
+                : "OpenLink settings request needs local approval on \(localStableMachineName())."
+
+            let response = responseForController([
+                "type": "machine_management_action_ack",
+                "action": "open_settings",
+                "success": accepted,
+                "message": message,
+                "requiresLocalApproval": !accepted && requireGuestApproval,
+                "trustedOwner": trustedOwner
+            ], originalMessage: json, serverId: serverId)
+            sendWebSocketResponse(response, serverId: serverId, broadcast: true)
+            runtimeLog("remote settings request accepted=\(accepted) trustedOwner=\(trustedOwner) target=\(response["targetMachineId"] as? String ?? "unknown-controller")")
+
+            if accepted {
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .openOpenLinkSettingsWindow, object: nil)
+                }
+            } else {
+                postStatusNotification(title: "OpenLink settings request", body: "A remote device requested settings access. Approve the device as trusted or disable guest approval before allowing remote settings changes.")
+            }
         default:
             break
         }

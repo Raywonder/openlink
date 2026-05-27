@@ -51,6 +51,10 @@ public partial class SettingsWindow : Window
         UseVoiceLinkAudioFallbackBox.IsChecked = Settings.UseVoiceLinkAudioFallback;
         AutoConnectTrustedMachinesBox.IsChecked = Settings.AutoConnectTrustedMachines;
         AllowRemoteApplicationLaunchBox.IsChecked = Settings.AllowRemoteApplicationLaunch;
+        AllowRemoteSettingsManagementBox.IsChecked = Settings.AllowRemoteSettingsManagement;
+        AllowTrustedOwnerRemoteSettingsChangesBox.IsChecked = Settings.AllowTrustedOwnerRemoteSettingsChanges;
+        RequireApprovalForGuestRemoteSettingsChangesBox.IsChecked = Settings.RequireApprovalForGuestRemoteSettingsChanges;
+        LockLocalSettingsDuringRemoteOwnerSessionBox.IsChecked = Settings.LockLocalSettingsDuringRemoteOwnerSession;
         RequireApprovalForNewDevicesBox.IsChecked = Settings.RequireApprovalForNewDevices;
         TamperProtectionEnabledBox.IsChecked = Settings.TamperProtectionEnabled;
 
@@ -118,6 +122,10 @@ public partial class SettingsWindow : Window
         Settings.UseVoiceLinkAudioFallback = UseVoiceLinkAudioFallbackBox.IsChecked == true;
         Settings.AutoConnectTrustedMachines = AutoConnectTrustedMachinesBox.IsChecked == true;
         Settings.AllowRemoteApplicationLaunch = AllowRemoteApplicationLaunchBox.IsChecked == true;
+        Settings.AllowRemoteSettingsManagement = AllowRemoteSettingsManagementBox.IsChecked == true;
+        Settings.AllowTrustedOwnerRemoteSettingsChanges = AllowTrustedOwnerRemoteSettingsChangesBox.IsChecked == true;
+        Settings.RequireApprovalForGuestRemoteSettingsChanges = RequireApprovalForGuestRemoteSettingsChangesBox.IsChecked == true;
+        Settings.LockLocalSettingsDuringRemoteOwnerSession = LockLocalSettingsDuringRemoteOwnerSessionBox.IsChecked == true;
         Settings.RequireApprovalForNewDevices = RequireApprovalForNewDevicesBox.IsChecked == true;
         Settings.TamperProtectionEnabled = TamperProtectionEnabledBox.IsChecked == true;
 

@@ -44,6 +44,10 @@ public sealed class OpenLinkSettings
     public string VoiceLinkAudioFallbackUrl { get; set; } = "wss://voicelink.tappedin.fm/openlink/audio";
     public bool AutoConnectTrustedMachines { get; set; } = true;
     public bool AllowRemoteApplicationLaunch { get; set; } = true;
+    public bool AllowRemoteSettingsManagement { get; set; } = true;
+    public bool AllowTrustedOwnerRemoteSettingsChanges { get; set; } = true;
+    public bool RequireApprovalForGuestRemoteSettingsChanges { get; set; } = true;
+    public bool LockLocalSettingsDuringRemoteOwnerSession { get; set; }
     public bool RequireApprovalForNewDevices { get; set; } = true;
     public bool TamperProtectionEnabled { get; set; }
 
@@ -106,6 +110,10 @@ public sealed class OpenLinkSettings
             VoiceLinkAudioFallbackUrl = VoiceLinkAudioFallbackUrl,
             AutoConnectTrustedMachines = AutoConnectTrustedMachines,
             AllowRemoteApplicationLaunch = AllowRemoteApplicationLaunch,
+            AllowRemoteSettingsManagement = AllowRemoteSettingsManagement,
+            AllowTrustedOwnerRemoteSettingsChanges = AllowTrustedOwnerRemoteSettingsChanges,
+            RequireApprovalForGuestRemoteSettingsChanges = RequireApprovalForGuestRemoteSettingsChanges,
+            LockLocalSettingsDuringRemoteOwnerSession = LockLocalSettingsDuringRemoteOwnerSession,
             RequireApprovalForNewDevices = RequireApprovalForNewDevices,
             TamperProtectionEnabled = TamperProtectionEnabled,
             AnnounceStatusChanges = AnnounceStatusChanges,
