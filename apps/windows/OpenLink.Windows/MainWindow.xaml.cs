@@ -1494,9 +1494,17 @@ public partial class MainWindow : Window
 
     private void SetStatus(string status)
     {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(() => SetStatus(status));
+            return;
+        }
+
+        var previousAccessibleName = System.Windows.Automation.AutomationProperties.GetName(StatusTextBlock);
+        var nextAccessibleName = $"Status: {status}";
         StatusTextBlock.Text = status;
-        System.Windows.Automation.AutomationProperties.SetName(StatusTextBlock, $"Status: {status}");
-        AnnounceStatusToScreenReader(status);
+        System.Windows.Automation.AutomationProperties.SetName(StatusTextBlock, nextAccessibleName);
+        AnnounceStatusToScreenReader(status, previousAccessibleName, nextAccessibleName);
         if (_settings.AnnounceStatusChanges)
         {
             AddLog(status);
@@ -1504,13 +1512,23 @@ public partial class MainWindow : Window
         }
     }
 
-    private void AnnounceStatusToScreenReader(string status)
+    private void AnnounceStatusToScreenReader(string status, string? previousAccessibleName, string nextAccessibleName)
     {
         try
         {
             var peer = System.Windows.Automation.Peers.UIElementAutomationPeer.FromElement(StatusTextBlock)
                 ?? System.Windows.Automation.Peers.UIElementAutomationPeer.CreatePeerForElement(StatusTextBlock);
-            peer?.RaiseNotificationEvent(
+            if (peer is null)
+            {
+                return;
+            }
+
+            peer.RaisePropertyChangedEvent(
+                System.Windows.Automation.AutomationElementIdentifiers.NameProperty,
+                previousAccessibleName ?? string.Empty,
+                nextAccessibleName);
+            peer.RaiseAutomationEvent(System.Windows.Automation.Peers.AutomationEvents.LiveRegionChanged);
+            peer.RaiseNotificationEvent(
                 System.Windows.Automation.AutomationNotificationKind.ActionCompleted,
                 System.Windows.Automation.AutomationNotificationProcessing.ImportantMostRecent,
                 status,

@@ -1814,6 +1814,8 @@ class OpenLinkService: ObservableObject {
     }
 
     private func postStatusNotification(title: String, body: String) {
+        postAccessibilityAnnouncement(title: title, body: body)
+
         guard Bundle.main.bundleIdentifier != nil,
               Bundle.main.bundleURL.pathExtension.caseInsensitiveCompare("app") == .orderedSame else {
             runtimeLog("skipped notification outside app bundle: \(title)")
@@ -1828,6 +1830,29 @@ class OpenLinkService: ObservableObject {
             content.body = body
             let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
             center.add(request)
+        }
+    }
+
+    private func postAccessibilityAnnouncement(title: String, body: String) {
+        guard UserDefaults.standard.object(forKey: "announceStatusChanges") as? Bool ?? true else { return }
+        let announcement = title.isEmpty ? body : "\(title). \(body)"
+        guard !announcement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        DispatchQueue.main.async {
+            let element: Any
+            if let mainWindow = NSApp.mainWindow {
+                element = mainWindow
+            } else {
+                element = NSApplication.shared
+            }
+            NSAccessibility.post(
+                element: element,
+                notification: .announcementRequested,
+                userInfo: [
+                    .announcement: announcement,
+                    .priority: NSAccessibilityPriorityLevel.high.rawValue
+                ]
+            )
         }
     }
 
