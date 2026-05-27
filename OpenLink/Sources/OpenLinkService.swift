@@ -939,7 +939,13 @@ class OpenLinkService: ObservableObject {
             sendWebSocketResponse(["type": "pong"], serverId: serverId)
         case "broadcast":
             if let data = json["data"] as? [String: Any] {
-                handleWebSocketControlMessage(data, serverId: serverId, respondWithBroadcast: true)
+                var payload = data
+                for key in ["fromId", "fromConnectionId", "sourceMachineId", "sourceMachineName", "sourcePlatform"] {
+                    if payload[key] == nil, let value = json[key] {
+                        payload[key] = value
+                    }
+                }
+                handleWebSocketControlMessage(payload, serverId: serverId, respondWithBroadcast: true)
             }
         case "diagnostic_event_ack":
             break
@@ -979,7 +985,7 @@ class OpenLinkService: ObservableObject {
         }
 
         if let response = RemoteControlManager.shared.handleSignalingMessage(json) {
-            let routedResponse = responseForController(response, originalMessage: json)
+            let routedResponse = responseForController(response, originalMessage: json, serverId: serverId)
             if let type = json["type"] as? String, type == "start_interaction" {
                 startAudioBridgeForController(from: json, serverId: serverId, respondWithBroadcast: respondWithBroadcast)
                 sendWebSocketResponse(routedResponse, serverId: serverId, broadcast: respondWithBroadcast)
@@ -1036,13 +1042,13 @@ class OpenLinkService: ObservableObject {
         }
     }
 
-    private func responseForController(_ response: [String: Any], originalMessage json: [String: Any]) -> [String: Any] {
+    private func responseForController(_ response: [String: Any], originalMessage json: [String: Any], serverId: String) -> [String: Any] {
         var routed = response
         if routed["requestId"] == nil, let requestId = json["requestId"] {
             routed["requestId"] = requestId
         }
-        if routed["targetMachineId"] == nil, let controllerId = controllerMachineId(from: json) {
-            routed["targetMachineId"] = controllerId
+        if routed["targetMachineId"] == nil {
+            routed["targetMachineId"] = controllerMachineId(from: json) ?? serverId
         }
         if routed["sourceMachineId"] == nil {
             routed["sourceMachineId"] = localStableMachineId()
@@ -1057,7 +1063,7 @@ class OpenLinkService: ObservableObject {
     }
 
     private func startAudioBridgeForController(from json: [String: Any], serverId: String, respondWithBroadcast: Bool) {
-        guard let controllerMachineId = controllerMachineId(from: json) else { return }
+        let controllerMachineId = controllerMachineId(from: json) ?? serverId
 
         runtimeLog("starting audio bridge for controller \(controllerMachineId) broadcast=\(respondWithBroadcast)")
         OpenLinkAudioBridge.shared.startCapture(targetMachineId: controllerMachineId) { [weak self] frame in
@@ -1066,7 +1072,8 @@ class OpenLinkService: ObservableObject {
     }
 
     private func sendControllerAnnouncement(_ text: String, originalMessage: [String: Any], serverId: String, broadcast: Bool) {
-        guard let controllerMachineId = controllerMachineId(from: originalMessage), !text.isEmpty else { return }
+        guard !text.isEmpty else { return }
+        let controllerMachineId = controllerMachineId(from: originalMessage) ?? serverId
         let payload: [String: Any] = [
             "type": "tts_announcement",
             "targetMachineId": controllerMachineId,
@@ -1082,6 +1089,15 @@ class OpenLinkService: ObservableObject {
     private func controllerMachineId(from json: [String: Any]) -> String? {
         if let sourceMachineId = json["sourceMachineId"] as? String, !sourceMachineId.isEmpty {
             return sourceMachineId
+        }
+        if let fromMachineId = json["fromMachineId"] as? String, !fromMachineId.isEmpty {
+            return fromMachineId
+        }
+        if let fromId = json["fromId"] as? String, !fromId.isEmpty {
+            return fromId
+        }
+        if let fromConnectionId = json["fromConnectionId"] as? String, !fromConnectionId.isEmpty {
+            return fromConnectionId
         }
         if let machineInfo = json["machineInfo"] as? [String: Any],
            let machineId = machineInfo["id"] as? String,
