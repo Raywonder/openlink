@@ -16,10 +16,10 @@
     <string>OpenLink</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.7.21</string>
+	<key>CFBundleVersion</key>
+	<string>1.7.21</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.utilities</string>
     <key>LSMinimumSystemVersion</key>
@@ -32,9 +32,12 @@
     <string>Copyright 2026 OpenLink by Devine Creations. All rights reserved.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>OpenLink needs access to your local network to discover and connect to OpenLink devices.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>OpenLink uses microphone audio only when you allow remote audio or audio monitoring for a trusted connection.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>OpenLink uses Apple Events to coordinate approved local accessibility and status actions for trusted remote sessions.</string>
     <key>NSBonjourServices</key>
     <array>
-        <string>_openlink._tcp</string>
         <string>_openlink._tcp</string>
     </array>
 </dict>

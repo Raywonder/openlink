@@ -7,7 +7,7 @@
 class OpenLinkRemoteDesktop {
     constructor(options = {}) {
         this.options = {
-            signalingServer: options.signalingServer || 'wss://api.devine-creations.com/ws/remote',
+            signalingServer: options.signalingServer || 'wss://openlink.tappedin.fm/ws',
             stunServers: options.stunServers || [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' }
@@ -79,6 +79,7 @@ class OpenLinkRemoteDesktop {
         this.handleSignalingMessage = this.handleSignalingMessage.bind(this);
         this.handleDataChannelMessage = this.handleDataChannelMessage.bind(this);
         this.handleKeyDown = this.handleKeyDown.bind(this);
+        this.handleKeyUp = this.handleKeyUp.bind(this);
 
         // Initialize local TTS if enabled
         if (this.options.useLocalTTS) {
@@ -163,6 +164,26 @@ class OpenLinkRemoteDesktop {
                 meta: e.metaKey
             },
             true
+        );
+
+        e.preventDefault();
+        return false;
+    }
+
+    handleKeyUp(e) {
+        if (this.menuOpen || !this.isConnected) return true;
+        if (this.options.keyboardMode === 'local') return true;
+
+        this.sendKeyEvent(
+            e.key,
+            e.code,
+            {
+                ctrl: e.ctrlKey,
+                alt: e.altKey,
+                shift: e.shiftKey,
+                meta: e.metaKey
+            },
+            false
         );
 
         e.preventDefault();
@@ -620,28 +641,14 @@ class OpenLinkRemoteDesktop {
 
             // Set up keyboard handler
             document.addEventListener('keydown', this.handleKeyDown, true);
-            document.addEventListener('keyup', (e) => {
-                if (this.menuOpen || !this.isConnected) return;
-                if (this.options.keyboardMode === 'local') return;
-
-                this.sendKeyEvent(
-                    e.key,
-                    e.code,
-                    {
-                        ctrl: e.ctrlKey,
-                        alt: e.altKey,
-                        shift: e.shiftKey,
-                        meta: e.metaKey
-                    },
-                    false
-                );
-            }, true);
+            document.addEventListener('keyup', this.handleKeyUp, true);
 
             // Join the session
             this.sendSignaling({
                 type: 'join',
                 sessionId: this.sessionId,
-                isHost: this.isHost
+                isHost: this.isHost,
+                machineInfo: this.options.machineInfo || {}
             });
 
             this.announce('Connecting to remote session. Press Control plus Alt plus backslash to open the control menu.');
@@ -659,6 +666,7 @@ class OpenLinkRemoteDesktop {
 
         // Remove keyboard handler
         document.removeEventListener('keydown', this.handleKeyDown, true);
+        document.removeEventListener('keyup', this.handleKeyUp, true);
 
         // Stop all streams
         if (this.localStream) {
@@ -739,6 +747,9 @@ class OpenLinkRemoteDesktop {
 
         switch (message.type) {
             case 'joined':
+                if (message.linking) {
+                    this.emit('linking_ready', message.linking);
+                }
                 this.announce('Joined session. Waiting for peer...');
                 break;
 

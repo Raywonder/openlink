@@ -67,6 +67,31 @@
                             Enter the code provided by the host
                         </p>
                     </div>
+
+                    <div class="installer-panel" role="region" aria-labelledby="installer-heading">
+                        <h3 id="installer-heading">Need OpenLink on this device?</h3>
+                        <p>Download the latest OpenLink installer before or after connecting.</p>
+                        <div class="installer-actions">
+                            <a
+                                id="download-latest-openlink"
+                                class="btn btn-primary"
+                                href="https://cloud.raywonderis.me/s/openlink-releases/download?path=%2Fwindows&files=OpenLink-Inno-Setup.exe"
+                                target="_blank"
+                                rel="noopener"
+                            >
+                                Download Latest OpenLink
+                            </a>
+                            <a
+                                id="download-all-openlink"
+                                class="btn btn-secondary"
+                                href="https://cloud.raywonderis.me/s/openlink-releases"
+                                target="_blank"
+                                rel="noopener"
+                            >
+                                All Downloads
+                            </a>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Settings Panel -->
@@ -133,7 +158,7 @@
                             <div class="setting-row">
                                 <label for="signaling-server">Signaling Server</label>
                                 <input type="url" id="signaling-server"
-                                    value="wss://api.devine-creations.com/ws/remote"
+                                    value="wss://openlink.tappedin.fm/ws"
                                     placeholder="wss://...">
                             </div>
                         </fieldset>
@@ -186,6 +211,9 @@
                             <span class="dot"></span>
                             <span class="text">Connected</span>
                         </span>
+                        <span id="controlled-machine-status" class="machine-status-text">
+                            Remote machine status unavailable
+                        </span>
                     </div>
 
                     <div class="toolbar-center">
@@ -201,6 +229,16 @@
                     </div>
 
                     <div class="toolbar-right">
+                        <a
+                            id="remote-download-latest-openlink"
+                            class="btn-toolbar remote-download-link"
+                            href="https://cloud.raywonderis.me/s/openlink-releases/download?path=%2Fwindows&files=OpenLink-Inno-Setup.exe"
+                            target="_blank"
+                            rel="noopener"
+                            aria-label="Download latest OpenLink installer"
+                        >
+                            Download OpenLink
+                        </a>
                         <button id="btn-toggle-mic" class="btn-toolbar" aria-label="Toggle microphone" aria-pressed="true">
                             <span aria-hidden="true">&#127908;</span>
                         </button>
@@ -214,7 +252,7 @@
                 </header>
 
                 <!-- Video Display -->
-                <div id="video-container" class="video-container" role="img" aria-label="Remote desktop display">
+                <div id="video-container" class="video-container" role="img" aria-label="Remote desktop display" tabindex="-1">
                     <video id="remote-video" autoplay playsinline></video>
                     <div id="video-overlay" class="video-overlay" hidden>
                         <p id="overlay-message">Connecting...</p>

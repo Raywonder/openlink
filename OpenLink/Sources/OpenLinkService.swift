@@ -138,6 +138,14 @@ struct OpenLinkMachine: Identifiable, Codable {
 class OpenLinkService: ObservableObject {
     static let shared = OpenLinkService()
     private static let interactionShortcutHelp = "To interact with the connected device, choose Start Using the device. Use the OpenLink status menu for controller actions, disconnect, swap control, and audio. Choose Minimize Remote Connection to Use Local Machine to return to this Mac."
+    static let canonicalWebSocketURL = "wss://openlink.tappedin.fm/ws"
+    static let canonicalShareHost = "openlink.tappedin.fm"
+    static let approvedWebSocketURLs = [
+        "wss://openlink.tappedin.fm/ws",
+        "wss://openlink.raywonderis.me/ws",
+        "wss://openlink.devinecreations.net/ws",
+        "wss://openlink.devine-creations.com/ws"
+    ]
 
     // State
     @Published var isRunning = false
@@ -163,6 +171,33 @@ class OpenLinkService: ObservableObject {
         connectedDevices > 0 || machines.contains(where: { $0.isOnline })
     }
 
+    func hasConnectedRemoteSession(with machine: OpenLinkMachine) -> Bool {
+        guard isConnectableMachine(machine), machine.isOnline else { return false }
+        guard let activeMachineName, !activeMachineName.isEmpty else { return false }
+        return activeMachineName.caseInsensitiveCompare(machine.displayName) == .orderedSame ||
+               activeMachineName.caseInsensitiveCompare(machine.id) == .orderedSame ||
+               activeMachineName.caseInsensitiveCompare(machine.machineHostname) == .orderedSame
+    }
+
+    func recentConnectableMachines(limit: Int = 6) -> [OpenLinkMachine] {
+        Array(machines
+            .filter(isConnectableMachine)
+            .sorted { first, second in
+                if first.isOnline != second.isOnline {
+                    return first.isOnline && !second.isOnline
+                }
+
+                let firstDate = first.lastConnectedAt ?? first.lastDisconnectedAt ?? .distantPast
+                let secondDate = second.lastConnectedAt ?? second.lastDisconnectedAt ?? .distantPast
+                if firstDate != secondDate {
+                    return firstDate > secondDate
+                }
+
+                return first.displayName.localizedCaseInsensitiveCompare(second.displayName) == .orderedAscending
+            }
+            .prefix(limit))
+    }
+
     var elapsedConnectionText: String {
         guard let connectionStartedAt else { return "Connected time unknown" }
         let elapsed = max(0, Int(Date().timeIntervalSince(connectionStartedAt)))
@@ -185,6 +220,8 @@ class OpenLinkService: ObservableObject {
     private let configPath = NSHomeDirectory() + "/.openlink/config.json"
     private let serversPath = NSHomeDirectory() + "/.openlink/servers.json"
     private let machinesPath = NSHomeDirectory() + "/.openlink/machines.json"
+    private let runtimeLogPath = NSHomeDirectory() + "/.openlink/logs/openlink-macos.log"
+    private let runtimeLogMaxBytes: UInt64 = 1024 * 1024
 
     init() {
         UserDefaults.standard.register(defaults: [
@@ -192,20 +229,39 @@ class OpenLinkService: ObservableObject {
             "showConnectionNotifications": true,
             "showElapsedConnectionTime": true,
             "announceConnectionStrength": true,
+            "enableDiagnosticSending": true,
+            "customSignalingServerAccessEnabled": false,
+            "openLinkBackendUrl": Self.canonicalWebSocketURL,
+            "checkForUpdatesAutomatically": true,
+            "installUpdatesAutomatically": true,
+            "updateManifestUrl": OpenLinkUpdater.cloudUpdateManifestURL,
+            "launchAtLogin": true,
+            "startMinimizedStatusMenu": true,
+            "tamperProtectionEnabled": false,
             "autoReconnectOnLaunch": true,
             "autoStartInteractionOnConnect": true,
             "autoMuteRemoteAudio": false,
             "muteRemoteAudioWhenInactive": true,
             "autoMutedProcesses": "VoiceOver, Music"
         ])
+        enforceDefaultSignalingEndpoint()
         loadConfiguration()
         loadServers()
         loadMachines()
         migratePairedServersToMachines()
         seedTrustedMachinePair()
+        normalizeManagedMachineRouting()
     }
 
     // MARK: - Service Control
+
+    private func enforceDefaultSignalingEndpoint() {
+        let defaults = UserDefaults.standard
+        let allowCustomServer = defaults.bool(forKey: "customSignalingServerAccessEnabled")
+        let current = defaults.string(forKey: "openLinkBackendUrl") ?? Self.canonicalWebSocketURL
+        let normalized = normalizeEndpoint(current, allowCustomServer: allowCustomServer)
+        defaults.set(normalized, forKey: "openLinkBackendUrl")
+    }
 
     func start() {
         guard !isRunning else { return }
@@ -530,6 +586,11 @@ class OpenLinkService: ObservableObject {
         connectToServer(server)
         markMachineConnected(id: machine.id, sessionId: machine.lastSessionId)
         sendMachinePolicy(machine, type: "machine_connect_request", dropIn: dropIn ?? machine.allowDropIn)
+        sendDiagnosticEvent("machine_connect_request", machine: machine, outcome: "sent", metadata: [
+            "dropIn": dropIn ?? machine.allowDropIn,
+            "endpoint": normalized,
+            "autoStartInteraction": startInteraction ?? UserDefaults.standard.bool(forKey: "autoStartInteractionOnConnect")
+        ])
         let shouldStartInteraction = startInteraction ?? UserDefaults.standard.bool(forKey: "autoStartInteractionOnConnect")
         postStatusNotification(title: "OpenLink", body: shouldStartInteraction
             ? "Connect requested for \(machine.displayName). Starting keyboard and audio interaction now. \(Self.interactionShortcutHelp) Press Escape to close the status menu silently."
@@ -546,11 +607,13 @@ class OpenLinkService: ObservableObject {
         connections[machine.id]?.cancel()
         connections.removeValue(forKey: machine.id)
         sendMachinePolicy(machine, type: "disconnect_user", dropIn: false)
+        sendDiagnosticEvent("disconnect_user", machine: machine, outcome: "sent")
         markMachineDisconnected(id: machine.id)
     }
 
     func disconnectFromMachine(_ machine: OpenLinkMachine) {
         sendMachinePolicy(machine, type: "controller_disconnect", dropIn: false)
+        sendDiagnosticEvent("controller_disconnect", machine: machine, outcome: "sent")
         markMachineDisconnected(id: machine.id)
     }
 
@@ -575,6 +638,11 @@ class OpenLinkService: ObservableObject {
             "audioDirection": "bidirectional",
             "interactionMode": "full-keyboard-and-audio"
         ])
+        sendDiagnosticEvent("start_interaction", machine: machine, outcome: "sent", metadata: [
+            "audioDirection": "bidirectional",
+            "audioTransport": "native-coreaudio",
+            "keyboardControl": true
+        ])
         NSApplication.shared.hide(nil)
         postStatusNotification(title: "OpenLink", body: "Start using \(machine.displayName). Full keyboard control and remote audio requested. \(Self.interactionShortcutHelp) Press Escape to close the status menu silently.")
     }
@@ -585,6 +653,9 @@ class OpenLinkService: ObservableObject {
             "muteRemoteAudio": UserDefaults.standard.bool(forKey: "muteRemoteAudioWhenInactive"),
             "reason": "controller-returned-to-local-machine"
         ])
+        sendDiagnosticEvent("pause_interaction", machine: machine, outcome: "sent", metadata: [
+            "muteRemoteAudio": UserDefaults.standard.bool(forKey: "muteRemoteAudioWhenInactive")
+        ])
         NSApplication.shared.activate(ignoringOtherApps: true)
         postStatusNotification(title: "OpenLink", body: "Remote control for \(machine.displayName) minimized for local use.")
     }
@@ -593,6 +664,11 @@ class OpenLinkService: ObservableObject {
         guard ensureConnectableMachine(machine, action: "swap control with") else { return }
 
         sendMachinePolicy(machine, type: "swap_control_request", dropIn: machine.allowDropIn)
+        sendDiagnosticEvent("swap_control_request", machine: machine, outcome: "sent", metadata: [
+            "keyboardCoUse": machine.allowKeyboardCoUse,
+            "microphoneAudio": machine.allowMicrophoneAudio,
+            "systemAudio": machine.allowSystemAudio
+        ])
     }
 
     func isConnectableMachine(_ machine: OpenLinkMachine) -> Bool {
@@ -623,11 +699,20 @@ class OpenLinkService: ObservableObject {
     }
 
     private func localMachineIdentityTokens() -> Set<String> {
-        let rawNames = [
+        var rawNames = [
+            localStableMachineId(),
             getClientId(),
             Host.current().localizedName ?? "",
             ProcessInfo.processInfo.hostName
         ]
+
+        #if os(macOS)
+        rawNames.append(contentsOf: [
+            "admin-s-mac-mini",
+            "admins-mac-mini",
+            "Admin's Mac mini"
+        ])
+        #endif
 
         var tokens = Set<String>()
         for name in rawNames {
@@ -652,6 +737,22 @@ class OpenLinkService: ObservableObject {
         }
 
         return tokens
+    }
+
+    private func localStableMachineId() -> String {
+        #if os(macOS)
+        return "admin-s-mac-mini"
+        #else
+        return ProcessInfo.processInfo.hostName
+        #endif
+    }
+
+    private func localStableMachineName() -> String {
+        #if os(macOS)
+        return "Admin's Mac mini"
+        #else
+        return Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+        #endif
     }
 
     private static func canonicalMachineToken(_ value: String) -> String {
@@ -722,11 +823,13 @@ class OpenLinkService: ObservableObject {
 
         // Native signaling uses /ws; keep health checks backward-compatible below.
         guard let url = URL(string: wsURL.hasSuffix("/ws") ? wsURL : "\(wsURL)/ws") else {
+            runtimeLog("invalid signaling URL for \(server.id): \(server.url)")
             return
         }
 
         var request = URLRequest(url: url)
         request.setValue(server.accessToken, forHTTPHeaderField: "Authorization")
+        runtimeLog("connecting websocket for \(server.id) to \(url.host ?? "unknown-host")")
 
         let task = URLSession.shared.webSocketTask(with: request)
         webSocketTasks[server.id] = task
@@ -741,7 +844,7 @@ class OpenLinkService: ObservableObject {
             "type": "handshake",
             "clientId": getClientId(),
             "clientName": Host.current().localizedName ?? "Unknown",
-            "machineInfo": localMachineInfo(domainUsed: url.host ?? "openlink.raywonderis.me"),
+            "machineInfo": localMachineInfo(domainUsed: url.host ?? "openlink.tappedin.fm"),
             "connectionPolicy": globalConnectionPolicy()
         ]
 
@@ -749,6 +852,11 @@ class OpenLinkService: ObservableObject {
            let string = String(data: data, encoding: .utf8) {
             task.send(.string(string)) { _ in }
         }
+        runtimeLog("sent handshake for \(server.id) aliases=\(Array(localMachineIdentityTokens()).joined(separator: ","))")
+        sendDiagnosticEvent("signaling_connected", serverId: server.id, outcome: "success", metadata: [
+            "endpoint": url.host ?? "openlink.tappedin.fm",
+            "transport": "websocket"
+        ])
 
         updateServerOnlineStatus(serverId: server.id, isOnline: true)
         markMachineConnected(id: server.id, sessionId: nil)
@@ -806,9 +914,13 @@ class OpenLinkService: ObservableObject {
                 // Continue receiving
                 self?.receiveWebSocketMessages(serverId: serverId)
 
-            case .failure:
+            case .failure(let error):
+                self?.runtimeLog("websocket receive failed for \(serverId): \(error.localizedDescription)")
                 self?.updateServerOnlineStatus(serverId: serverId, isOnline: false)
                 self?.webSocketTasks.removeValue(forKey: serverId)
+                self?.sendDiagnosticEvent("signaling_receive_failed", serverId: serverId, outcome: "error", metadata: [
+                    "error": error.localizedDescription
+                ])
             }
         }
     }
@@ -829,14 +941,22 @@ class OpenLinkService: ObservableObject {
             if let data = json["data"] as? [String: Any] {
                 handleWebSocketControlMessage(data, serverId: serverId, respondWithBroadcast: true)
             }
+        case "diagnostic_event_ack":
+            break
         case "machine_connect_request":
             if messageTargetsLocalMachine(json) {
+                runtimeLog("received machine_connect_request from \(controllerMachineId(from: json) ?? "unknown-controller")")
                 RemoteControlManager.shared.isRemoteControlActive = true
                 RemoteControlManager.shared.isReceivingControl = false
-                sendWebSocketResponse(["type": "machine_connect_ack", "success": true, "targetMachineId": getClientId()], serverId: serverId)
+                sendWebSocketResponse(["type": "machine_connect_ack", "success": true, "targetMachineId": controllerMachineId(from: json) ?? getClientId(), "sourceMachineId": localStableMachineId()], serverId: serverId)
+                runtimeLog("sent machine_connect_ack to \(controllerMachineId(from: json) ?? "unknown-controller")")
+                sendDiagnosticEvent("machine_connect_ack", serverId: serverId, outcome: "success")
                 postStatusNotification(title: "OpenLink", body: "Trusted machine connected. Keyboard and audio interaction can start from the controlling computer.")
             }
+        case "machine_management_action":
+            handleMachineManagementAction(json, serverId: serverId)
         case "start_interaction", "pause_interaction", "controller_disconnect", "disconnect_user", "input_event", "key_event":
+            runtimeLog("received \(type) target=\(json["targetMachineId"] as? String ?? "none") controller=\(controllerMachineId(from: json) ?? "unknown-controller")")
             handleWebSocketControlMessage(json, serverId: serverId)
             if type == "disconnect_user" {
                 disconnectMachineById(serverId)
@@ -859,26 +979,104 @@ class OpenLinkService: ObservableObject {
         }
 
         if let response = RemoteControlManager.shared.handleSignalingMessage(json) {
+            let routedResponse = responseForController(response, originalMessage: json)
             if let type = json["type"] as? String, type == "start_interaction" {
                 startAudioBridgeForController(from: json, serverId: serverId, respondWithBroadcast: respondWithBroadcast)
-                sendWebSocketResponse(response, serverId: serverId, broadcast: respondWithBroadcast)
-                postStatusNotification(title: "OpenLink", body: "Remote keyboard control is active. Press Escape to close the status menu silently; both keyboards remain available when allowed.")
+                sendWebSocketResponse(routedResponse, serverId: serverId, broadcast: respondWithBroadcast)
+                let success = routedResponse["success"] as? Bool ?? true
+                let message = routedResponse["message"] as? String ?? (success
+                    ? "Remote keyboard control is active. Press Escape to close the status menu silently; both keyboards remain available when allowed."
+                    : "OpenLink needs macOS Accessibility and Input Monitoring permissions before keyboard control can start.")
+                runtimeLog("sent start_interaction_ack success=\(success) target=\(routedResponse["targetMachineId"] as? String ?? "unknown-controller") accessibilityTrusted=\(routedResponse["accessibilityTrusted"] as? Bool ?? false)")
+                postStatusNotification(title: "OpenLink", body: message)
+                sendControllerAnnouncement(message, originalMessage: json, serverId: serverId, broadcast: respondWithBroadcast)
             } else {
                 if let type = json["type"] as? String,
                    type == "pause_interaction" || type == "controller_disconnect" || type == "disconnect_user" {
                     OpenLinkAudioBridge.shared.stopCapture()
+                    runtimeLog("stopped audio capture after \(type)")
                 }
-                sendWebSocketResponse(response, serverId: serverId, broadcast: respondWithBroadcast)
+                sendWebSocketResponse(routedResponse, serverId: serverId, broadcast: respondWithBroadcast)
+                runtimeLog("sent \(routedResponse["type"] as? String ?? "control_ack") target=\(routedResponse["targetMachineId"] as? String ?? "unknown-controller")")
             }
         }
+    }
+
+    private func handleMachineManagementAction(_ json: [String: Any], serverId: String) {
+        guard messageTargetsLocalMachine(json),
+              let action = json["action"] as? String else { return }
+
+        switch action {
+        case "list_applications":
+            let applications = NSWorkspace.shared.runningApplications.compactMap { app -> [String: Any]? in
+                guard let name = app.localizedName else { return nil }
+                return [
+                    "processId": Int(app.processIdentifier),
+                    "pid": Int(app.processIdentifier),
+                    "name": name,
+                    "path": app.bundleURL?.path ?? app.bundleIdentifier ?? "",
+                    "bundleId": app.bundleIdentifier ?? "",
+                    "windowTitle": "",
+                    "memoryMb": 0,
+                    "status": app.isActive ? "active" : (app.isHidden ? "hidden" : "running"),
+                    "isActive": app.isActive,
+                    "isHidden": app.isHidden
+                ]
+            }
+            let response: [String: Any] = [
+                "type": "application_list",
+                "targetMachineId": controllerMachineId(from: json) ?? getClientId(),
+                "sourceMachineId": localStableMachineId(),
+                "applications": applications
+            ]
+            sendWebSocketResponse(response, serverId: serverId, broadcast: true)
+            runtimeLog("sent application_list count=\(applications.count) target=\(controllerMachineId(from: json) ?? "unknown-controller")")
+        default:
+            break
+        }
+    }
+
+    private func responseForController(_ response: [String: Any], originalMessage json: [String: Any]) -> [String: Any] {
+        var routed = response
+        if routed["requestId"] == nil, let requestId = json["requestId"] {
+            routed["requestId"] = requestId
+        }
+        if routed["targetMachineId"] == nil, let controllerId = controllerMachineId(from: json) {
+            routed["targetMachineId"] = controllerId
+        }
+        if routed["sourceMachineId"] == nil {
+            routed["sourceMachineId"] = localStableMachineId()
+        }
+        if routed["sourceMachineName"] == nil {
+            routed["sourceMachineName"] = localStableMachineName()
+        }
+        if routed["sourcePlatform"] == nil {
+            routed["sourcePlatform"] = "macOS"
+        }
+        return routed
     }
 
     private func startAudioBridgeForController(from json: [String: Any], serverId: String, respondWithBroadcast: Bool) {
         guard let controllerMachineId = controllerMachineId(from: json) else { return }
 
+        runtimeLog("starting audio bridge for controller \(controllerMachineId) broadcast=\(respondWithBroadcast)")
         OpenLinkAudioBridge.shared.startCapture(targetMachineId: controllerMachineId) { [weak self] frame in
             self?.sendWebSocketResponse(frame, serverId: serverId, broadcast: respondWithBroadcast)
         }
+    }
+
+    private func sendControllerAnnouncement(_ text: String, originalMessage: [String: Any], serverId: String, broadcast: Bool) {
+        guard let controllerMachineId = controllerMachineId(from: originalMessage), !text.isEmpty else { return }
+        let payload: [String: Any] = [
+            "type": "tts_announcement",
+            "targetMachineId": controllerMachineId,
+            "sourceMachineId": localStableMachineId(),
+            "sourcePlatform": "macOS",
+            "priority": "assertive",
+            "interrupt": true,
+            "text": text
+        ]
+        sendWebSocketResponse(payload, serverId: serverId, broadcast: broadcast)
     }
 
     private func controllerMachineId(from json: [String: Any]) -> String? {
@@ -907,6 +1105,48 @@ class OpenLinkService: ObservableObject {
     private func sendWebSocketResponse(_ response: [String: Any], serverId: String, broadcast: Bool = false) {
         guard let task = webSocketTasks[serverId],
               let data = try? JSONSerialization.data(withJSONObject: broadcast ? ["type": "broadcast", "data": response] : response),
+              let string = String(data: data, encoding: .utf8) else {
+            return
+        }
+
+        task.send(.string(string)) { _ in }
+    }
+
+    private func sendDiagnosticEvent(_ eventName: String, machine: OpenLinkMachine? = nil, serverId: String? = nil, outcome: String = "info", metadata: [String: Any] = [:]) {
+        guard UserDefaults.standard.bool(forKey: "enableDiagnosticSending") else { return }
+
+        let targetServerId = serverId ?? machine?.id
+        guard let targetServerId,
+              let task = webSocketTasks[targetServerId] else {
+            return
+        }
+
+        var safeMetadata: [String: Any] = [:]
+        for (key, value) in metadata {
+            if let string = value as? String {
+                safeMetadata[key] = String(string.prefix(240))
+            } else if let number = value as? NSNumber {
+                safeMetadata[key] = number
+            } else if let bool = value as? Bool {
+                safeMetadata[key] = bool
+            }
+        }
+
+        let payload: [String: Any] = [
+            "type": "diagnostic_event",
+            "eventName": eventName,
+            "sessionId": machine?.lastSessionId ?? targetServerId,
+            "sourceMachineId": localStableMachineId(),
+            "sourceMachineName": localStableMachineName(),
+            "sourcePlatform": "macOS",
+            "targetMachineId": machine?.id ?? targetServerId,
+            "targetMachineName": machine?.displayName ?? targetServerId,
+            "targetPlatform": machine?.platform ?? "Unknown",
+            "outcome": outcome,
+            "metadata": safeMetadata
+        ]
+
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let string = String(data: data, encoding: .utf8) else {
             return
         }
@@ -1029,7 +1269,7 @@ class OpenLinkService: ObservableObject {
     }
 
     func refreshServiceHealth() {
-        let healthUrl = URL(string: "https://openlink.raywonderis.me/health")!
+        let healthUrl = URL(string: "https://openlink.tappedin.fm/health")!
         let started = Date()
         URLSession.shared.dataTask(with: healthUrl) { [weak self] _, response, error in
             let latency = Int(Date().timeIntervalSince(started) * 1000)
@@ -1125,6 +1365,7 @@ class OpenLinkService: ObservableObject {
         }
 
         machines = savedMachines
+        runtimeLog("loaded \(machines.count) machine records")
     }
 
     func saveMachines() {
@@ -1133,11 +1374,87 @@ class OpenLinkService: ObservableObject {
         try? data.write(to: URL(fileURLWithPath: machinesPath))
     }
 
+    private func runtimeLog(_ message: String) {
+        let safeMessage = message
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+        let redacted = Self.redactLogSecrets(safeMessage)
+        let logURL = URL(fileURLWithPath: runtimeLogPath)
+        do {
+            try FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let size = try? FileManager.default.attributesOfItem(atPath: runtimeLogPath)[.size] as? UInt64,
+               size > runtimeLogMaxBytes {
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyyMMdd-HHmmss"
+                let rotated = logURL.deletingLastPathComponent().appendingPathComponent("openlink-macos-\(formatter.string(from: Date())).log")
+                try? FileManager.default.moveItem(at: logURL, to: rotated)
+            }
+
+            let line = "\(ISO8601DateFormatter().string(from: Date())) \(redacted.prefix(4000))\n"
+            if let data = line.data(using: .utf8) {
+                if FileManager.default.fileExists(atPath: runtimeLogPath),
+                   let handle = try? FileHandle(forWritingTo: logURL) {
+                    try? handle.seekToEnd()
+                    handle.write(data)
+                    try? handle.close()
+                } else {
+                    try data.write(to: logURL)
+                }
+            }
+        } catch {
+            // Runtime logging must never interrupt remote control.
+        }
+    }
+
+    private static func redactLogSecrets(_ value: String) -> String {
+        var output = value
+        for key in ["token", "accessToken", "authorization", "password", "secret"] {
+            output = output.replacingOccurrences(
+                of: "(\"\(key)\"\\s*:\\s*\")[^\"]+(\")",
+                with: "$1[redacted]$2",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+        return output
+    }
+
     private func migratePairedServersToMachines() {
         for server in pairedServers {
             migrateServerToMachine(server)
         }
         saveMachines()
+    }
+
+    private func normalizeManagedMachineRouting() {
+        let allowCustomServer = UserDefaults.standard.bool(forKey: "customSignalingServerAccessEnabled")
+        guard !allowCustomServer else { return }
+
+        var changed = false
+        for index in machines.indices {
+            if shouldUseCanonicalRouting(machines[index].domainUsed) {
+                runtimeLog("normalized machine routing for \(machines[index].id) from \(machines[index].domainUsed) to \(Self.canonicalWebSocketURL)")
+                machines[index].domainUsed = Self.canonicalShareHost
+                machines[index].isOnline = false
+                changed = true
+            }
+        }
+
+        if changed {
+            saveMachines()
+        }
+    }
+
+    private func shouldUseCanonicalRouting(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        if trimmed.hasPrefix("100.64.") || trimmed.hasPrefix("192.168.") || trimmed.hasPrefix("10.") || trimmed == "127.0.0.1" || trimmed == "localhost" {
+            return true
+        }
+        if let host = URL(string: trimmed.contains("://") ? trimmed : "wss://\(trimmed)")?.host,
+           host.hasPrefix("100.64.") || host.hasPrefix("192.168.") || host.hasPrefix("10.") || host == "127.0.0.1" || host == "localhost" {
+            return true
+        }
+        return false
     }
 
     private func migrateServerToMachine(_ server: PairedServer) {
@@ -1162,7 +1479,7 @@ class OpenLinkService: ObservableObject {
             id: "dom-pc-laptop",
             displayName: "Dom PC Laptop",
             machineHostname: "dom-pc-laptop",
-            domainUsed: "100.64.0.5",
+            domainUsed: Self.canonicalShareHost,
             platform: "Windows",
             isTrusted: true,
             allowDropIn: true,
@@ -1172,7 +1489,7 @@ class OpenLinkService: ObservableObject {
             id: "admin-s-mac-mini",
             displayName: "Admin's Mac mini",
             machineHostname: "admin-s-mac-mini",
-            domainUsed: "100.64.0.6",
+            domainUsed: Self.canonicalShareHost,
             platform: "macOS",
             isTrusted: true,
             allowDropIn: true,
@@ -1264,6 +1581,7 @@ class OpenLinkService: ObservableObject {
                 "systemAudioAllowed": machine.allowSystemAudio,
                 "clipboardAllowed": machine.allowClipboardSync,
                 "fileTransferAllowed": machine.allowFileTransfer,
+                "diagnosticsEnabled": UserDefaults.standard.bool(forKey: "enableDiagnosticSending"),
                 "managedMachineConfirmation": "desktop-built-in",
                 "companionConfirmationSupported": true,
                 "companionPlatform": "iOS",
@@ -1290,9 +1608,11 @@ class OpenLinkService: ObservableObject {
 
     private func localMachineInfo(domainUsed: String) -> [String: Any] {
         [
-            "id": getClientId(),
-            "displayName": Host.current().localizedName ?? "Mac",
-            "hostname": Host.current().localizedName ?? "mac",
+            "id": localStableMachineId(),
+            "clientId": getClientId(),
+            "displayName": localStableMachineName(),
+            "hostname": localStableMachineId(),
+            "aliases": Array(localMachineIdentityTokens()),
             "domainUsed": domainUsed,
             "platform": "macOS"
         ]
@@ -1307,6 +1627,7 @@ class OpenLinkService: ObservableObject {
             "keyboardCoUseAllowed": true,
             "microphoneAudioAllowed": true,
             "systemAudioAllowed": true,
+            "diagnosticsEnabled": UserDefaults.standard.bool(forKey: "enableDiagnosticSending"),
             "autoMuteControlledComputerAudio": UserDefaults.standard.bool(forKey: "autoMuteRemoteAudio"),
             "autoMuteProcessesOnConnect": autoMuteProcessList(),
             "managedMachineConfirmation": "desktop-built-in",
@@ -1315,19 +1636,19 @@ class OpenLinkService: ObservableObject {
         ]
     }
 
-    func normalizeEndpoint(_ rawValue: String) -> String {
+    func normalizeEndpoint(_ rawValue: String, allowCustomServer: Bool = false) -> String {
         var value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.isEmpty {
-            return "wss://openlink.raywonderis.me/ws"
+            return Self.canonicalWebSocketURL
         }
         if !value.contains("://") {
             value = "wss://\(value)"
         }
         guard var components = URLComponents(string: value) else {
-            return "wss://openlink.raywonderis.me/ws"
+            return Self.canonicalWebSocketURL
         }
         if components.host?.lowercased().hasPrefix("dvc.") == true {
-            return "wss://openlink.raywonderis.me/ws"
+            return Self.canonicalWebSocketURL
         }
         if components.scheme == "http" {
             components.scheme = "ws"
@@ -1337,18 +1658,49 @@ class OpenLinkService: ObservableObject {
         if components.path.isEmpty || components.path == "/" {
             components.path = "/ws"
         }
-        return components.string ?? "wss://openlink.raywonderis.me/ws"
+        let normalized = components.string ?? Self.canonicalWebSocketURL
+        return allowCustomServer || Self.isApprovedDefaultWebSocketURL(normalized)
+            ? normalized
+            : Self.canonicalWebSocketURL
     }
 
     private func signalingEndpoint(for machine: OpenLinkMachine) -> String {
-        if isOpenLinkBackendHost(machine.domainUsed) {
-            return normalizeEndpoint(machine.domainUsed)
+        let allowCustomServer = UserDefaults.standard.bool(forKey: "customSignalingServerAccessEnabled")
+        if isOpenLinkBackendHost(machine.domainUsed, allowCustomServer: allowCustomServer) {
+            return normalizeEndpoint(machine.domainUsed, allowCustomServer: allowCustomServer)
         }
 
-        return normalizeEndpoint(UserDefaults.standard.string(forKey: "openLinkBackendUrl") ?? "wss://openlink.raywonderis.me/ws")
+        return normalizeEndpoint(UserDefaults.standard.string(forKey: "openLinkBackendUrl") ?? Self.canonicalWebSocketURL, allowCustomServer: allowCustomServer)
     }
 
-    private func isOpenLinkBackendHost(_ value: String) -> Bool {
+    static func isApprovedDefaultWebSocketURL(_ value: String) -> Bool {
+        let normalized = normalizedEndpointForComparison(value)
+        return approvedWebSocketURLs.contains { $0.caseInsensitiveCompare(normalized) == .orderedSame }
+    }
+
+    private static func normalizedEndpointForComparison(_ value: String) -> String {
+        var text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty {
+            return canonicalWebSocketURL
+        }
+        if !text.contains("://") {
+            text = "wss://\(text)"
+        }
+        guard var components = URLComponents(string: text) else {
+            return canonicalWebSocketURL
+        }
+        if components.scheme == "http" {
+            components.scheme = "ws"
+        } else if components.scheme == "https" {
+            components.scheme = "wss"
+        }
+        if components.path.isEmpty || components.path == "/" {
+            components.path = "/ws"
+        }
+        return components.string ?? canonicalWebSocketURL
+    }
+
+    private func isOpenLinkBackendHost(_ value: String, allowCustomServer: Bool = false) -> Bool {
         var text = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
             return false
@@ -1360,9 +1712,11 @@ class OpenLinkService: ObservableObject {
             return false
         }
         if host.split(separator: ".").allSatisfy({ Int($0) != nil }) {
-            return false
+            return allowCustomServer
         }
-        return host.contains("openlink.") || host.hasPrefix("ol.") || host.hasPrefix("link.")
+        return allowCustomServer || Self.approvedWebSocketURLs.contains {
+            URL(string: $0)?.host?.caseInsensitiveCompare(host) == .orderedSame
+        }
     }
 
     private func getClientId() -> String {
@@ -1400,6 +1754,12 @@ class OpenLinkService: ObservableObject {
     }
 
     private func postStatusNotification(title: String, body: String) {
+        guard Bundle.main.bundleIdentifier != nil,
+              Bundle.main.bundleURL.pathExtension.caseInsensitiveCompare("app") == .orderedSame else {
+            runtimeLog("skipped notification outside app bundle: \(title)")
+            return
+        }
+
         let center = UNUserNotificationCenter.current()
         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
             guard granted else { return }

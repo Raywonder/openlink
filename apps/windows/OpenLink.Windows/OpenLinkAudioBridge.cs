@@ -15,11 +15,13 @@ public sealed record OpenLinkAudioFrame(
 
 public sealed class OpenLinkAudioBridge : IDisposable
 {
+    private const int TransportChannels = 2;
     private WasapiCapture? _microphoneCapture;
     private WasapiLoopbackCapture? _systemCapture;
-    private WaveOutEvent? _remotePlaybackSession;
+    private IWavePlayer? _remotePlaybackSession;
     private BufferedWaveProvider? _remotePlaybackBuffer;
     private WaveFormat? _remotePlaybackFormat;
+    private string _remotePlaybackDriverKey = "waveout";
     private Func<OpenLinkAudioFrame, Task>? _frameSink;
     private long _lastMicrophoneFrameTicks;
     private long _lastSystemFrameTicks;
@@ -29,6 +31,9 @@ public sealed class OpenLinkAudioBridge : IDisposable
     private string _systemFormatText = "system audio format unknown";
     private int _framesInFlight;
     private bool _isStarted;
+    private bool _useAsioPlayback;
+    private string _asioDriverName = "";
+    private int _asioLatencyMilliseconds = 20;
 
     public string StatusText { get; private set; } = "OpenLink audio bridge is stopped.";
     public string VirtualDeviceName { get; } = "OpenLink VoiceLink Virtual Audio";
@@ -64,6 +69,23 @@ public sealed class OpenLinkAudioBridge : IDisposable
     {
         _localCaptureGain = PercentToGain(settings.LocalAudioCaptureVolumePercent);
         _remotePlaybackVolume = PercentToGain(settings.RemoteAudioVolumePercent);
+        var playbackDriverChanged =
+            _useAsioPlayback != settings.EnableAsioAudioDriver ||
+            !string.Equals(_asioDriverName, settings.AsioDriverName, StringComparison.OrdinalIgnoreCase) ||
+            _asioLatencyMilliseconds != settings.AsioLatencyMilliseconds;
+        _useAsioPlayback = settings.EnableAsioAudioDriver;
+        _asioDriverName = settings.AsioDriverName.Trim();
+        _asioLatencyMilliseconds = Math.Clamp(settings.AsioLatencyMilliseconds, 5, 200);
+
+        if (playbackDriverChanged && _remotePlaybackSession is not null)
+        {
+            _remotePlaybackSession.Stop();
+            _remotePlaybackSession.Dispose();
+            _remotePlaybackSession = null;
+            _remotePlaybackBuffer = null;
+            _remotePlaybackFormat = null;
+        }
+
         if (_remotePlaybackSession is not null)
         {
             _remotePlaybackSession.Volume = _remotePlaybackVolume;
@@ -210,8 +232,11 @@ public sealed class OpenLinkAudioBridge : IDisposable
 
         try
         {
-            EnsureRemotePlayback(new WaveFormat(frame.SampleRate, frame.BitsPerSample, frame.Channels));
-            _remotePlaybackBuffer?.AddSamples(frame.Payload, 0, frame.Payload.Length);
+            var payload = frame.Channels == TransportChannels
+                ? frame.Payload
+                : ConvertPcm16ToStereo(frame.Payload, frame.Channels);
+            EnsureRemotePlayback(new WaveFormat(frame.SampleRate, frame.BitsPerSample, TransportChannels));
+            _remotePlaybackBuffer?.AddSamples(payload, 0, payload.Length);
             StatusText = BuildStatus();
         }
         catch (Exception ex)
@@ -224,7 +249,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
     {
         var microphone = _microphoneCapture is null ? "microphone muted" : "microphone capture active";
         var system = _systemCapture is null ? "system audio muted" : "system audio capture active";
-        var playback = _remotePlaybackSession is null ? "remote playback inactive" : "remote playback session active";
+        var playback = _remotePlaybackSession is null ? "remote playback inactive" : $"remote playback active via {_remotePlaybackDriverKey}";
         return $"OpenLink audio bridge: {microphone} ({_microphoneFormatText}), {system} ({_systemFormatText}), {playback}, virtual endpoint {VirtualDeviceName}.";
     }
 
@@ -249,14 +274,16 @@ public sealed class OpenLinkAudioBridge : IDisposable
             return;
         }
 
-        var payload = ConvertCaptureBufferToPcm16(format, buffer, byteCount, _localCaptureGain);
+        var payload = ConvertPcm16ToStereo(
+            ConvertCaptureBufferToPcm16(format, buffer, byteCount, _localCaptureGain),
+            format.Channels);
         if (payload.Length == 0)
         {
             Interlocked.Decrement(ref _framesInFlight);
             return;
         }
 
-        var frame = new OpenLinkAudioFrame(source, format.SampleRate, 16, format.Channels, "pcm_s16le", payload);
+        var frame = new OpenLinkAudioFrame(source, format.SampleRate, 16, TransportChannels, "pcm_s16le", payload);
 
         _ = Task.Run(async () =>
         {
@@ -298,9 +325,49 @@ public sealed class OpenLinkAudioBridge : IDisposable
             BufferDuration = TimeSpan.FromSeconds(2),
             DiscardOnBufferOverflow = true
         };
-        _remotePlaybackSession = new WaveOutEvent { DesiredLatency = 120, Volume = _remotePlaybackVolume };
+        _remotePlaybackSession = CreatePlaybackSession(format);
         _remotePlaybackSession.Init(_remotePlaybackBuffer);
+        _remotePlaybackSession.Volume = _remotePlaybackVolume;
         _remotePlaybackSession.Play();
+    }
+
+    private IWavePlayer CreatePlaybackSession(WaveFormat format)
+    {
+        if (_useAsioPlayback)
+        {
+            try
+            {
+                var driverNames = GetAsioDriverNames();
+                var driverName = string.IsNullOrWhiteSpace(_asioDriverName)
+                    ? driverNames.FirstOrDefault(name => name.Contains("ASIO4ALL", StringComparison.OrdinalIgnoreCase)) ?? driverNames.FirstOrDefault()
+                    : _asioDriverName;
+
+                if (!string.IsNullOrWhiteSpace(driverName))
+                {
+                    _remotePlaybackDriverKey = $"ASIO ({driverName})";
+                    return new AsioOut(driverName);
+                }
+            }
+            catch
+            {
+                // Fall back to the default Windows playback path below.
+            }
+        }
+
+        _remotePlaybackDriverKey = "WaveOut/WASAPI-compatible";
+        return new WaveOutEvent { DesiredLatency = Math.Max(50, _asioLatencyMilliseconds), Volume = _remotePlaybackVolume };
+    }
+
+    public static IReadOnlyList<string> GetAsioDriverNames()
+    {
+        try
+        {
+            return AsioOut.GetDriverNames();
+        }
+        catch
+        {
+            return [];
+        }
     }
 
     private static void StopCapture<TCapture>(ref TCapture? capture)
@@ -393,6 +460,45 @@ public sealed class OpenLinkAudioBridge : IDisposable
         }
 
         return [];
+    }
+
+    private static byte[] ConvertPcm16ToStereo(byte[] monoOrMultichannelPayload, int channels)
+    {
+        if (monoOrMultichannelPayload.Length == 0 || channels <= 0)
+        {
+            return [];
+        }
+
+        if (channels == TransportChannels)
+        {
+            return monoOrMultichannelPayload;
+        }
+
+        var sampleCount = monoOrMultichannelPayload.Length / sizeof(short);
+        var frames = sampleCount / channels;
+        var stereo = new byte[frames * TransportChannels * sizeof(short)];
+        for (var frame = 0; frame < frames; frame++)
+        {
+            short left;
+            short right;
+            if (channels == 1)
+            {
+                left = right = BinaryPrimitives.ReadInt16LittleEndian(
+                    monoOrMultichannelPayload.AsSpan(frame * sizeof(short), sizeof(short)));
+            }
+            else
+            {
+                var baseOffset = frame * channels * sizeof(short);
+                left = BinaryPrimitives.ReadInt16LittleEndian(monoOrMultichannelPayload.AsSpan(baseOffset, sizeof(short)));
+                right = BinaryPrimitives.ReadInt16LittleEndian(monoOrMultichannelPayload.AsSpan(baseOffset + sizeof(short), sizeof(short)));
+            }
+
+            var outOffset = frame * TransportChannels * sizeof(short);
+            BinaryPrimitives.WriteInt16LittleEndian(stereo.AsSpan(outOffset, sizeof(short)), left);
+            BinaryPrimitives.WriteInt16LittleEndian(stereo.AsSpan(outOffset + sizeof(short), sizeof(short)), right);
+        }
+
+        return stereo;
     }
 
     private static float PercentToGain(int percent)

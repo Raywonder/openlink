@@ -19,7 +19,7 @@ public sealed class MachineRecord : INotifyPropertyChanged
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string DisplayName { get; set; } = "Remote machine";
     public string MachineHostname { get; set; } = "";
-    public string DomainUsed { get; set; } = "openlink.raywonderis.me";
+    public string DomainUsed { get; set; } = EndpointNormalizer.CanonicalShareHost;
     public string Platform { get; set; } = "Unknown";
     public DateTimeOffset? LastConnectedAt { get; set; }
     public DateTimeOffset? LastDisconnectedAt { get; set; }
@@ -82,7 +82,14 @@ public sealed class MachineRecord : INotifyPropertyChanged
     public string LastDurationText => LastDurationSeconds <= 0 ? "No duration" : FormatDuration(LastDurationSeconds);
     public string DropInText => AllowDropIn ? "Drop-in allowed" : "Approval required";
     public string AudioText => $"Mic {(AllowMicrophoneAudio ? "on" : "off")}, system {(AllowSystemAudio ? "on" : "off")}";
-    public string AccessibleSummary => $"{DisplayName}, {Platform}, host {MachineHostname}, last connected {LastConnectedText}, duration {LastDurationText}, {DropInText}, {AudioText}, {(IsOnline ? "online" : "offline")}";
+    public bool IsThisDevice =>
+        string.Equals(Id, Environment.MachineName, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(MachineHostname, Environment.MachineName, StringComparison.OrdinalIgnoreCase);
+    public string DisplayNameForList => IsThisDevice ? $"This device, {DisplayName}" : DisplayName;
+    public string ConnectionActionHelp => IsThisDevice
+        ? "This is the device you are using. Press Enter for local device details and use the context menu to change what remote users can access."
+        : "Press Enter to connect. Press Shift F10 or the context menu key for machine actions.";
+    public string AccessibleSummary => $"{DisplayNameForList}, {Platform}, host {MachineHostname}, last connected {LastConnectedText}, duration {LastDurationText}, {DropInText}, {AudioText}, {(IsOnline ? "online" : "offline")}";
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -135,6 +142,8 @@ public sealed class MachineRecord : INotifyPropertyChanged
         OnPropertyChanged(propertyName);
         OnPropertyChanged(nameof(DropInText));
         OnPropertyChanged(nameof(AudioText));
+        OnPropertyChanged(nameof(DisplayNameForList));
+        OnPropertyChanged(nameof(ConnectionActionHelp));
         OnPropertyChanged(nameof(AccessibleSummary));
     }
 
@@ -247,10 +256,17 @@ public static class MachineStore
 
 public static class EndpointNormalizer
 {
-    public const string CanonicalWebSocketUrl = "wss://openlink.raywonderis.me/ws";
-    public const string CanonicalShareHost = "openlink.raywonderis.me";
+    public const string CanonicalWebSocketUrl = "wss://openlink.tappedin.fm/ws";
+    public const string CanonicalShareHost = "openlink.tappedin.fm";
+    public static readonly string[] ApprovedWebSocketUrls =
+    [
+        "wss://openlink.tappedin.fm/ws",
+        "wss://openlink.raywonderis.me/ws",
+        "wss://openlink.devinecreations.net/ws",
+        "wss://openlink.devine-creations.com/ws"
+    ];
 
-    public static string NormalizeWebSocketUrl(string? value)
+    public static string NormalizeWebSocketUrl(string? value, bool allowCustomServer = false)
     {
         var text = string.IsNullOrWhiteSpace(value) ? CanonicalWebSocketUrl : value.Trim();
 
@@ -279,17 +295,20 @@ public static class EndpointNormalizer
             builder.Path = "ws";
         }
 
-        return builder.Uri.ToString();
+        var normalized = builder.Uri.ToString();
+        return allowCustomServer || IsApprovedDefaultWebSocketUrl(normalized)
+            ? normalized
+            : CanonicalWebSocketUrl;
     }
 
-    public static string SignalingEndpointForMachine(MachineRecord machine, string? preferredServerUrl)
+    public static string SignalingEndpointForMachine(MachineRecord machine, string? preferredServerUrl, bool allowCustomServer = false)
     {
-        if (IsBackendHost(machine.DomainUsed))
+        if (IsBackendHost(machine.DomainUsed, allowCustomServer))
         {
-            return NormalizeWebSocketUrl(machine.DomainUsed);
+            return NormalizeWebSocketUrl(machine.DomainUsed, allowCustomServer);
         }
 
-        return NormalizeWebSocketUrl(preferredServerUrl);
+        return NormalizeWebSocketUrl(preferredServerUrl, allowCustomServer);
     }
 
     public static string ShareHostFor(string websocketUrl)
@@ -304,7 +323,38 @@ public static class EndpointNormalizer
             : uri.Host;
     }
 
-    private static bool IsBackendHost(string? value)
+    public static bool IsApprovedDefaultWebSocketUrl(string? value)
+    {
+        var normalized = NormalizeWebSocketUrlForComparison(value);
+        return ApprovedWebSocketUrls.Any(url => string.Equals(url, normalized, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string NormalizeWebSocketUrlForComparison(string? value)
+    {
+        var text = string.IsNullOrWhiteSpace(value) ? CanonicalWebSocketUrl : value.Trim();
+        if (!text.Contains("://", StringComparison.Ordinal))
+        {
+            text = $"wss://{text}";
+        }
+
+        if (!Uri.TryCreate(text, UriKind.Absolute, out var uri))
+        {
+            return CanonicalWebSocketUrl;
+        }
+
+        var builder = new UriBuilder(uri)
+        {
+            Scheme = uri.Scheme is "ws" or "wss" ? uri.Scheme : uri.Scheme == "http" ? "ws" : "wss"
+        };
+        if (string.IsNullOrWhiteSpace(builder.Path) || builder.Path == "/")
+        {
+            builder.Path = "ws";
+        }
+
+        return builder.Uri.ToString();
+    }
+
+    private static bool IsBackendHost(string? value, bool allowCustomServer = false)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -324,11 +374,11 @@ public static class EndpointNormalizer
 
         if (System.Net.IPAddress.TryParse(uri.Host, out _))
         {
-            return false;
+            return allowCustomServer;
         }
 
-        return uri.Host.Contains("openlink.", StringComparison.OrdinalIgnoreCase) ||
-               uri.Host.StartsWith("ol.", StringComparison.OrdinalIgnoreCase) ||
-               uri.Host.StartsWith("link.", StringComparison.OrdinalIgnoreCase);
+        return allowCustomServer || ApprovedWebSocketUrls.Any(url =>
+            Uri.TryCreate(url, UriKind.Absolute, out var approved) &&
+            string.Equals(approved.Host, uri.Host, StringComparison.OrdinalIgnoreCase));
     }
 }

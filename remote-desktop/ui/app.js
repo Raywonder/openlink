@@ -5,12 +5,16 @@
 
 class OpenLinkApp {
     constructor() {
+        this.downloads = this.resolveDownloadLinks();
         this.remoteDesktop = null;
         this.isHost = false;
         this.sessionCode = null;
         this.menuIndex = 0;
         this.menuStack = [];
         this.currentMenu = null;
+        this.lastFocusBeforeMenu = null;
+        this.latestMachineInfo = null;
+        this.latestLinking = null;
 
         this.screens = {
             connect: document.getElementById('connect-screen'),
@@ -43,12 +47,16 @@ class OpenLinkApp {
 
             // Remote screen
             connectionStatus: document.getElementById('connection-status'),
+            controlledMachineStatus: document.getElementById('controlled-machine-status'),
             btnFullscreen: document.getElementById('btn-fullscreen'),
             btnFit: document.getElementById('btn-fit'),
             btnKeyboardMode: document.getElementById('btn-keyboard-mode'),
             btnToggleMic: document.getElementById('btn-toggle-mic'),
             btnToggleAudio: document.getElementById('btn-toggle-audio'),
             btnDisconnect: document.getElementById('btn-disconnect'),
+            downloadLatestOpenLink: document.getElementById('download-latest-openlink'),
+            downloadAllOpenLink: document.getElementById('download-all-openlink'),
+            remoteDownloadLatestOpenLink: document.getElementById('remote-download-latest-openlink'),
             remoteVideo: document.getElementById('remote-video'),
             remoteAudio: document.getElementById('remote-audio'),
             videoContainer: document.getElementById('video-container'),
@@ -83,9 +91,27 @@ class OpenLinkApp {
 
     init() {
         this.createDynamicElements();
+        this.applyDownloadLinks();
+        this.refreshDownloadLinksFromServer();
         this.bindEvents();
         this.loadSettings();
         this.announce('OpenLink Remote Desktop ready. Press Tab to navigate.');
+    }
+
+    resolveDownloadLinks() {
+        const configured = window.OPENLINK_DOWNLOADS || {};
+        const cloudReleases = configured.cloudReleases || 'https://cloud.raywonderis.me/s/openlink-releases';
+        return {
+            latestInstaller: configured.latestInstaller
+                || configured.windowsInstaller
+                || `${cloudReleases}/download?path=%2Fwindows&files=OpenLink-Inno-Setup.exe`,
+            macInstaller: configured.macInstaller
+                || `${cloudReleases}/download?path=%2Fmacos&files=OpenLink-macOS.zip`,
+            updateManifest: configured.updateManifest
+                || `${cloudReleases}/download?path=%2F&files=update.json`,
+            allDownloads: configured.allDownloads || cloudReleases,
+            fallbackDownloads: 'https://raywonderis.me/openlink/downloads.php'
+        };
     }
 
     createDynamicElements() {
@@ -94,15 +120,17 @@ class OpenLinkApp {
             const menu = document.createElement('div');
             menu.id = 'control-menu';
             menu.className = 'control-menu';
-            menu.setAttribute('role', 'menu');
-            menu.setAttribute('aria-label', 'OpenLink Control Menu');
+            menu.setAttribute('role', 'dialog');
+            menu.setAttribute('aria-modal', 'true');
+            menu.setAttribute('aria-labelledby', 'control-menu-title');
+            menu.setAttribute('aria-describedby', 'control-menu-help');
             menu.hidden = true;
             menu.innerHTML = `
                 <div class="menu-header">
-                    <h2>OpenLink Control Menu</h2>
-                    <p>Use arrow keys to navigate, Enter to select, Escape to close</p>
+                    <h2 id="control-menu-title">OpenLink Control Menu</h2>
+                    <p id="control-menu-help">Use arrow keys to navigate, Enter to select, Escape to close</p>
                 </div>
-                <ul id="menu-list" class="menu-list" role="menubar"></ul>
+                <ul id="menu-list" class="menu-list" role="menu"></ul>
             `;
             document.body.appendChild(menu);
             this.elements.controlMenu = menu;
@@ -196,13 +224,18 @@ class OpenLinkApp {
             }
 
             .menu-item {
+                width: 100%;
                 padding: 1rem 1.5rem;
                 cursor: pointer;
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
                 color: #e0e0e0;
+                background: transparent;
+                border: 0;
                 border-bottom: 1px solid #333;
+                font: inherit;
+                text-align: left;
             }
 
             .menu-item:last-child {
@@ -288,6 +321,13 @@ class OpenLinkApp {
                 color: #fff;
             }
 
+            .machine-details-actions {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.75rem;
+                margin: 1.5rem 0;
+            }
+
             .file-progress {
                 position: fixed;
                 bottom: 2rem;
@@ -315,6 +355,45 @@ class OpenLinkApp {
             }
         `;
         document.head.appendChild(styles);
+    }
+
+    applyDownloadLinks() {
+        const latestLinks = [
+            this.elements.downloadLatestOpenLink,
+            this.elements.remoteDownloadLatestOpenLink
+        ];
+
+        latestLinks.forEach((link) => {
+            if (link) link.href = this.downloads.latestInstaller;
+        });
+
+        if (this.elements.downloadAllOpenLink) {
+            this.elements.downloadAllOpenLink.href = this.downloads.allDownloads;
+        }
+    }
+
+    async refreshDownloadLinksFromServer() {
+        try {
+            const response = await fetch('/api/opencloud/downloads', {
+                headers: { Accept: 'application/json' },
+                cache: 'no-store'
+            });
+            if (!response.ok) return;
+
+            const downloads = await response.json();
+            if (!downloads || downloads.provider !== 'opencloud') return;
+
+            this.downloads = {
+                ...this.downloads,
+                latestInstaller: downloads.windowsInstaller || this.downloads.latestInstaller,
+                macInstaller: downloads.macInstaller || this.downloads.macInstaller,
+                updateManifest: downloads.updateManifest || this.downloads.updateManifest,
+                allDownloads: downloads.allDownloads || this.downloads.allDownloads
+            };
+            this.applyDownloadLinks();
+        } catch {
+            // Static download links remain usable when the signaling API is not serving the UI.
+        }
     }
 
     bindEvents() {
@@ -345,6 +424,15 @@ class OpenLinkApp {
 
         // Machine details
         this.elements.closeDetails?.addEventListener('click', () => this.hideMachineDetails());
+        this.elements.machineDetails?.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                this.hideMachineDetails();
+            }
+        });
+
+        // Control menu fallback for keyboard events that are not captured by the remote desktop layer.
+        this.elements.controlMenu?.addEventListener('keydown', (e) => this.handleControlMenuKeydown(e));
 
         // File input
         this.elements.fileInput?.addEventListener('change', (e) => {
@@ -358,7 +446,7 @@ class OpenLinkApp {
     setupRemoteDesktopEvents() {
         // Menu events
         this.remoteDesktop.on('show_menu', (items) => this.showControlMenu(items));
-        this.remoteDesktop.on('hide_menu', () => this.hideControlMenu());
+        this.remoteDesktop.on('hide_menu', () => this.hideControlMenu({ syncRemote: false }));
         this.remoteDesktop.on('menu_navigate', (data) => this.handleMenuNavigation(data.key));
 
         // File events
@@ -368,12 +456,14 @@ class OpenLinkApp {
 
         // Machine details
         this.remoteDesktop.on('show_machine_details', (info) => this.showMachineDetails(info));
-        this.remoteDesktop.on('machine_info_received', (info) => this.showMachineDetails(info));
+        this.remoteDesktop.on('machine_info_received', (info) => this.updateMachineInfo(info));
 
         // Confirm dialogs
         this.remoteDesktop.on('confirm_restart', (data) => this.showConfirmDialog(data));
 
         // Connection events
+        this.remoteDesktop.on('linking_ready', (linking) => this.handleOpenCloudLinking(linking));
+
         this.remoteDesktop.on('connected', () => {
             this.updateConnectionStatus('connected');
             this.announce('Connected to remote desktop. Press the OpenLink menu hotkey for control menu.');
@@ -430,18 +520,38 @@ class OpenLinkApp {
     // ==================== Control Menu ====================
 
     showControlMenu(items) {
+        if (!Array.isArray(items) || items.length === 0) return;
+        this.lastFocusBeforeMenu = document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null;
         this.currentMenu = items;
         this.menuIndex = 0;
         this.menuStack = [];
         this.renderMenu(items);
         this.elements.controlMenu.hidden = false;
-        this.focusMenuItem(0);
+        requestAnimationFrame(() => this.focusMenuItem(0));
     }
 
-    hideControlMenu() {
+    hideControlMenu(options = {}) {
+        const { restoreFocus = true, syncRemote = true } = options;
+        const wasOpen = !this.elements.controlMenu.hidden;
         this.elements.controlMenu.hidden = true;
         this.currentMenu = null;
         this.menuStack = [];
+        this.menuIndex = 0;
+
+        if (syncRemote && this.remoteDesktop) {
+            this.remoteDesktop.menuOpen = false;
+        }
+
+        if (wasOpen && restoreFocus) {
+            const target = this.lastFocusBeforeMenu?.isConnected
+                ? this.lastFocusBeforeMenu
+                : this.elements.videoContainer;
+            target?.focus?.({ preventScroll: true });
+        }
+
+        this.lastFocusBeforeMenu = null;
     }
 
     renderMenu(items) {
@@ -466,16 +576,24 @@ class OpenLinkApp {
             `;
 
             li.addEventListener('click', () => this.selectMenuItem(index));
+            li.addEventListener('focus', () => {
+                this.menuIndex = index;
+                this.updateFocusedMenuItem(index, false);
+            });
             list.appendChild(li);
         });
     }
 
     focusMenuItem(index) {
+        this.updateFocusedMenuItem(index, true);
+    }
+
+    updateFocusedMenuItem(index, moveFocus) {
         const items = this.elements.menuList.querySelectorAll('.menu-item');
         items.forEach((item, i) => {
             item.classList.toggle('focused', i === index);
             item.setAttribute('tabindex', i === index ? '0' : '-1');
-            if (i === index) {
+            if (i === index && moveFocus) {
                 item.focus();
                 // Announce the item
                 const label = this.currentMenu[i].label;
@@ -488,6 +606,7 @@ class OpenLinkApp {
     }
 
     handleMenuNavigation(key) {
+        if (!this.currentMenu?.length) return;
         const itemCount = this.currentMenu.length;
 
         switch (key) {
@@ -504,6 +623,42 @@ class OpenLinkApp {
                 break;
             case 'ArrowLeft':
                 this.goBackInMenu();
+                break;
+            case 'Home':
+                this.focusMenuItem(0);
+                break;
+            case 'End':
+                this.focusMenuItem(itemCount - 1);
+                break;
+        }
+    }
+
+    handleControlMenuKeydown(e) {
+        if (this.elements.controlMenu.hidden) return;
+
+        switch (e.key) {
+            case 'Escape':
+                e.preventDefault();
+                e.stopPropagation();
+                this.hideControlMenu();
+                this.announce('Control menu closed. All keys now go to the remote machine.', 'assertive');
+                break;
+            case 'Tab':
+                e.preventDefault();
+                e.stopPropagation();
+                this.focusMenuItem(this.menuIndex);
+                break;
+            case 'ArrowUp':
+            case 'ArrowDown':
+            case 'ArrowLeft':
+            case 'ArrowRight':
+            case 'Home':
+            case 'End':
+            case 'Enter':
+            case ' ':
+                e.preventDefault();
+                e.stopPropagation();
+                this.handleMenuNavigation(e.key);
                 break;
         }
     }
@@ -522,10 +677,7 @@ class OpenLinkApp {
             this.announce(`${item.label} submenu`);
         } else if (item.action) {
             // Execute action
-            this.hideControlMenu();
-            if (this.remoteDesktop) {
-                this.remoteDesktop.menuOpen = false;
-            }
+            this.hideControlMenu({ restoreFocus: false });
             item.action();
         }
     }
@@ -595,47 +747,78 @@ class OpenLinkApp {
 
     showMachineDetails(info) {
         this.hideControlMenu();
+        const machineInfo = info || this.latestMachineInfo || {};
 
         const content = this.elements.detailsContent;
         content.innerHTML = '';
 
         const fields = [
-            { label: 'Machine ID', value: info.id },
-            { label: 'Hostname', value: info.hostname },
-            { label: 'IP Address', value: info.ip || 'Not available' },
-            { label: 'Platform', value: info.platform },
-            { label: 'Operating System', value: info.os || info.userAgent },
-            { label: 'Screen Resolution', value: info.screenResolution },
-            { label: 'Color Depth', value: info.colorDepth ? `${info.colorDepth}-bit` : 'Unknown' },
-            { label: 'Language', value: info.language },
-            { label: 'Timezone', value: info.timezone }
+            { label: 'Machine ID', value: machineInfo.id },
+            { label: 'Hostname', value: machineInfo.hostname },
+            { label: 'IP Address', value: machineInfo.ip || 'Not available' },
+            { label: 'Platform', value: machineInfo.platform },
+            { label: 'Operating System', value: machineInfo.os || machineInfo.userAgent },
+            { label: 'Screen Resolution', value: machineInfo.screenResolution },
+            { label: 'Color Depth', value: machineInfo.colorDepth ? `${machineInfo.colorDepth}-bit` : 'Unknown' },
+            { label: 'Language', value: machineInfo.language },
+            { label: 'Timezone', value: machineInfo.timezone }
         ];
 
         fields.forEach(field => {
             if (field.value) {
                 const row = document.createElement('div');
                 row.className = 'detail-row';
-                row.innerHTML = `
-                    <span class="detail-label">${field.label}</span>
-                    <span class="detail-value">${field.value}</span>
-                `;
+                const label = document.createElement('span');
+                label.className = 'detail-label';
+                label.textContent = field.label;
+                const value = document.createElement('span');
+                value.className = 'detail-value';
+                value.textContent = field.value;
+                row.append(label, value);
                 content.appendChild(row);
             }
         });
 
+        const actions = document.createElement('div');
+        actions.className = 'machine-details-actions';
+
+        const downloadLink = document.createElement('a');
+        downloadLink.className = 'btn btn-primary';
+        downloadLink.href = this.downloads.latestInstaller;
+        downloadLink.target = '_blank';
+        downloadLink.rel = 'noopener';
+        downloadLink.textContent = 'Download Latest OpenLink';
+
+        const allDownloadsLink = document.createElement('a');
+        allDownloadsLink.className = 'btn btn-secondary';
+        allDownloadsLink.href = this.downloads.allDownloads;
+        allDownloadsLink.target = '_blank';
+        allDownloadsLink.rel = 'noopener';
+        allDownloadsLink.textContent = 'All Downloads';
+
+        actions.append(downloadLink, allDownloadsLink);
+        content.appendChild(actions);
+
         this.elements.machineDetails.hidden = false;
-        this.elements.closeDetails.focus();
+        downloadLink.focus();
 
         // Announce details
         const announcement = fields
             .filter(f => f.value)
             .map(f => `${f.label}: ${f.value}`)
             .join('. ');
-        this.announce(announcement);
+        this.announce(`${announcement}. Download links are available in this details window.`);
     }
 
     hideMachineDetails() {
         this.elements.machineDetails.hidden = true;
+        this.elements.videoContainer?.focus?.({ preventScroll: true });
+    }
+
+    updateMachineInfo(info) {
+        this.latestMachineInfo = info || null;
+        this.updateControlledMachineStatus();
+        this.showMachineDetails(info);
     }
 
     // ==================== Confirm Dialog ====================
@@ -685,8 +868,53 @@ class OpenLinkApp {
             quality: this.elements.quality.value,
             keyboardMode: 'remote',  // Always remote by default
             announceOnFocus: this.elements.announceFocus.checked,
-            captureRemoteScreenReader: this.elements.captureRemoteSR.checked
+            captureRemoteScreenReader: this.elements.captureRemoteSR.checked,
+            machineInfo: this.collectLocalMachineInfo()
         };
+    }
+
+    collectLocalMachineInfo() {
+        const platform = navigator.platform || 'web';
+        const userAgent = navigator.userAgent || '';
+        return {
+            id: localStorage.getItem('openlink-machine-id') || this.ensureMachineId(),
+            displayName: localStorage.getItem('openlink-machine-name') || `${platform} browser`,
+            platform,
+            os: userAgent,
+            language: navigator.language,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            screenResolution: `${window.screen.width}x${window.screen.height}`,
+            colorDepth: window.screen.colorDepth
+        };
+    }
+
+    ensureMachineId() {
+        const existing = localStorage.getItem('openlink-machine-id');
+        if (existing) return existing;
+
+        const generated = `web-${Math.random().toString(16).slice(2, 10)}-${Date.now().toString(36)}`;
+        localStorage.setItem('openlink-machine-id', generated);
+        return generated;
+    }
+
+    handleOpenCloudLinking(linking) {
+        this.latestLinking = linking;
+        if (!linking?.enabled) return;
+
+        if (linking.downloads) {
+            this.downloads = {
+                ...this.downloads,
+                latestInstaller: linking.downloads.windowsInstaller || this.downloads.latestInstaller,
+                macInstaller: linking.downloads.macInstaller || this.downloads.macInstaller,
+                updateManifest: linking.downloads.updateManifest || this.downloads.updateManifest,
+                allDownloads: linking.downloads.allDownloads || this.downloads.allDownloads
+            };
+            this.applyDownloadLinks();
+        }
+
+        if (this.isHost && this.elements.hostStatus) {
+            this.elements.hostStatus.textContent = 'OpenCloud status link ready. Waiting for connections...';
+        }
     }
 
     async startHosting() {
@@ -782,6 +1010,25 @@ class OpenLinkApp {
             if (text) {
                 text.textContent = status.charAt(0).toUpperCase() + status.slice(1);
             }
+        }
+        this.updateControlledMachineStatus(status);
+    }
+
+    updateControlledMachineStatus(status = null) {
+        const statusText = this.elements.controlledMachineStatus;
+        if (!statusText) return;
+
+        const machine = this.latestMachineInfo;
+        const connectionState = status
+            || this.elements.connectionStatus?.querySelector('.text')?.textContent?.toLowerCase()
+            || 'unknown';
+
+        if (machine?.hostname || machine?.platform || machine?.os) {
+            const name = machine.hostname || machine.id || 'remote machine';
+            const platform = machine.os || machine.platform || 'unknown platform';
+            statusText.textContent = `${name} is ${connectionState} on ${platform}`;
+        } else {
+            statusText.textContent = `Remote machine is ${connectionState}; details are not available yet`;
         }
     }
 

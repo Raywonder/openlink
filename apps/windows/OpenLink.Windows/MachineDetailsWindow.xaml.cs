@@ -25,27 +25,57 @@ public partial class MachineDetailsWindow : Window
         _sendRemoteAction = sendRemoteAction;
         ApplicationsListBox.ItemsSource = _applications;
         DetailsListBox.ItemsSource = _details;
-        Title = $"{machine.DisplayName} details";
-        TitleText.Text = machine.DisplayName;
+        Title = IsLocalMachine() ? $"This device, {machine.DisplayName} details" : $"{machine.DisplayName} details";
+        TitleText.Text = IsLocalMachine() ? $"This device, {machine.DisplayName}" : machine.DisplayName;
         SummaryText.Text = machine.AccessibleSummary;
         System.Windows.Automation.AutomationProperties.SetName(SummaryText, machine.AccessibleSummary);
+        ApplyLocalDeviceMode();
         RefreshLists();
+        Loaded += MachineDetailsWindow_Loaded;
     }
 
     private bool CanManageApps => _settings.AllowRemoteApplicationLaunch && _machine.IsTrusted;
 
     private RemoteApplicationRecord? SelectedApplication => ApplicationsListBox.SelectedItem as RemoteApplicationRecord;
 
-    private void RefreshLists()
+    public void UpdateRemoteApplications(IEnumerable<RemoteApplicationRecord> applications)
     {
         _applications.Clear();
-        foreach (var app in RemoteApplicationRecord.GetLocalApplications())
+        foreach (var app in applications.Where(item => !item.IsStatusOnly))
         {
             _applications.Add(app);
         }
 
+        var count = _applications.Count;
+        SetApplicationsStatus(count == 0
+            ? $"No running applications were returned by {_machine.DisplayName}."
+            : $"{count} running applications returned by {_machine.DisplayName}.");
+        FocusApplicationsList();
+        UpdateSummaryText();
+    }
+
+    private void RefreshLists()
+    {
+        _applications.Clear();
+        if (IsLocalMachine())
+        {
+            foreach (var app in RemoteApplicationRecord.GetLocalApplications())
+            {
+                _applications.Add(app);
+            }
+            System.Windows.Automation.AutomationProperties.SetName(ApplicationsListBox, "Local running applications");
+            SetApplicationsStatus($"{_applications.Count} local running applications listed.");
+        }
+        else
+        {
+            System.Windows.Automation.AutomationProperties.SetName(ApplicationsListBox, $"{_machine.DisplayName} running applications");
+            SetApplicationsStatus($"OpenLink is asking {_machine.DisplayName} for its running applications.");
+        }
+
         _details.Clear();
         AddDetail("About", "Device name", _machine.DisplayName);
+        AddDetail("About", "Device scope", IsLocalMachine() ? "This device" : "Remote device");
+        AddDetail("About", "Machine id", _machine.Id);
         AddDetail("About", "Platform", _machine.Platform);
         AddDetail("About", "Host name", _machine.MachineHostname);
         AddDetail("Connection", "Online state", _machine.IsOnline ? "online" : "offline");
@@ -55,7 +85,7 @@ public partial class MachineDetailsWindow : Window
         AddDetail("Connection", "Last connected", _machine.LastConnectedText);
         AddDetail("Connection", "Last duration", _machine.LastDurationText);
         AddDetail("Network", "Domain used", _machine.DomainUsed);
-        AddDetail("Network", "Local machine", Environment.MachineName);
+        AddDetail("Network", IsLocalMachine() ? "Local machine" : "Remote machine", _machine.MachineHostname);
         AddDetail("Permissions", "Remote control", _machine.AllowRemoteControl ? "allowed" : "blocked");
         AddDetail("Permissions", "Swap control", _machine.AllowSwapControl ? "allowed" : "blocked");
         AddDetail("Permissions", "Keyboard co-use", _machine.AllowKeyboardCoUse ? "allowed" : "blocked");
@@ -63,8 +93,42 @@ public partial class MachineDetailsWindow : Window
         AddDetail("Permissions", "System audio", _machine.AllowSystemAudio ? "allowed" : "muted");
         AddDetail("Permissions", "Remote app management", CanManageApps ? "allowed for trusted machines" : "blocked in settings or not trusted");
 
-        SummaryText.Text = $"{_machine.DisplayName}. {_applications.Count} applications listed. Escape closes this window.";
+        UpdateSummaryText();
+    }
+
+    private void UpdateSummaryText()
+    {
+        SummaryText.Text = IsLocalMachine()
+            ? $"This device, {_machine.DisplayName}. {_applications.Count} local applications listed. Use the machine list context menu to choose what remote users can access. Escape closes this window."
+            : $"{_machine.DisplayName}. {_applications.Count} remote applications listed. Escape closes this window.";
         System.Windows.Automation.AutomationProperties.SetName(SummaryText, SummaryText.Text);
+    }
+
+    private void SetApplicationsStatus(string message)
+    {
+        ApplicationsStatusText.Text = message;
+        System.Windows.Automation.AutomationProperties.SetName(ApplicationsStatusText, message);
+    }
+
+    private async void MachineDetailsWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        FocusApplicationsList();
+        if (!IsLocalMachine())
+        {
+            await _sendRemoteAction("list_applications", null);
+        }
+    }
+
+    private void FocusApplicationsList()
+    {
+        if (_applications.Count > 0 && ApplicationsListBox.SelectedIndex < 0)
+        {
+            ApplicationsListBox.SelectedIndex = 0;
+            ApplicationsListBox.ScrollIntoView(ApplicationsListBox.SelectedItem);
+        }
+
+        ApplicationsListBox.Focus();
+        Keyboard.Focus(ApplicationsListBox);
     }
 
     private void AddDetail(string category, string name, string value)
@@ -75,7 +139,10 @@ public partial class MachineDetailsWindow : Window
     private void RefreshButton_Click(object sender, RoutedEventArgs e)
     {
         RefreshLists();
-        _ = _sendRemoteAction("list_applications", null);
+        if (!IsLocalMachine())
+        {
+            _ = _sendRemoteAction("list_applications", null);
+        }
     }
 
     private void ApplicationsListBox_MouseDoubleClick(object sender, MouseButtonEventArgs e)
@@ -93,6 +160,11 @@ public partial class MachineDetailsWindow : Window
 
     private async Task RunApplicationActionAsync(string action, RemoteApplicationRecord? app)
     {
+        if (app?.IsStatusOnly == true)
+        {
+            return;
+        }
+
         if (!CanManageApps)
         {
             System.Windows.MessageBox.Show(this, "Remote app management is only available for trusted machines when the setting is enabled.", "OpenLink", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -102,10 +174,27 @@ public partial class MachineDetailsWindow : Window
         if (IsLocalMachine())
         {
             RunLocalAction(action, app);
+            RefreshLists();
+            return;
         }
 
         await _sendRemoteAction(action, app);
         RefreshLists();
+    }
+
+    private void ApplyLocalDeviceMode()
+    {
+        if (!IsLocalMachine())
+        {
+            return;
+        }
+
+        RestartMachineButton.Visibility = Visibility.Collapsed;
+        LogoutMachineButton.Visibility = Visibility.Collapsed;
+        LockMachineButton.Content = "Lock This Device";
+        System.Windows.Automation.AutomationProperties.SetName(LockMachineButton, "Lock this device");
+        System.Windows.Automation.AutomationProperties.SetName(DetailsListBox, "This device details");
+        System.Windows.Automation.AutomationProperties.SetName(ApplicationsListBox, "Local running applications");
     }
 
     private bool IsLocalMachine()

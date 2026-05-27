@@ -1128,7 +1128,8 @@ class RemoteControlManager: ObservableObject {
 
         switch type {
         case "start_interaction":
-            let canReceiveInput = canReceiveRemoteInput()
+            let accessibilityTrusted = requestAccessibilityTrustPromptIfNeeded()
+            let canReceiveInput = inputForwardingEnabled && accessibilityTrusted
             isRemoteControlActive = canReceiveInput
             isReceivingControl = canReceiveInput
             screenSharingEnabled = (json["screenSharingAllowed"] as? Bool) ?? screenSharingEnabled
@@ -1138,10 +1139,12 @@ class RemoteControlManager: ObservableObject {
                 "success": canReceiveInput,
                 "receivingControl": canReceiveInput,
                 "inputForwardingEnabled": inputForwardingEnabled,
-                "accessibilityTrusted": AXIsProcessTrusted(),
+                "accessibilityTrusted": accessibilityTrusted,
+                "inputMonitoringMayBeRequired": !accessibilityTrusted,
+                "permissionAction": "Open System Settings, then Privacy and Security, then Accessibility and Input Monitoring, and enable OpenLink.",
                 "message": canReceiveInput
                     ? "Remote keyboard control is active. Both keyboards remain available when allowed."
-                    : "OpenLink on this Mac is not approved for keyboard control yet. Check Accessibility and Input Monitoring permissions."
+                    : "OpenLink on this Mac is not approved for keyboard control yet. A macOS permission prompt was requested. Enable OpenLink in Accessibility and Input Monitoring, then choose Start Using again."
             ]
 
         case "pause_interaction", "controller_disconnect", "disconnect_user":
@@ -1187,6 +1190,16 @@ class RemoteControlManager: ObservableObject {
 
     private func canReceiveRemoteInput() -> Bool {
         inputForwardingEnabled && AXIsProcessTrusted()
+    }
+
+    private func requestAccessibilityTrustPromptIfNeeded() -> Bool {
+        if AXIsProcessTrusted() {
+            return true
+        }
+
+        let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        let options = [promptKey: true] as CFDictionary
+        return AXIsProcessTrustedWithOptions(options)
     }
 
     private func sendMessage(_ message: [String: Any], completion: @escaping (Bool) -> Void) {

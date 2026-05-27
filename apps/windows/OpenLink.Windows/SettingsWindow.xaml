@@ -52,13 +52,12 @@
                                   Grid.Row="0"
                                   Grid.Column="1"
                                   Margin="0,0,0,10"
-                                  IsEditable="True"
+                                  IsEditable="False"
                                   AutomationProperties.LabeledBy="{Binding ElementName=DefaultServerLabel}">
-                            <ComboBoxItem Content="wss://openlink.devinecreations.net/ws" />
-                            <ComboBoxItem Content="wss://openlink.raywonderis.me/ws" />
                             <ComboBoxItem Content="wss://openlink.tappedin.fm/ws" />
-                            <ComboBoxItem Content="wss://ol.tappedin.fm/ws" />
-                            <ComboBoxItem Content="wss://link.tappedin.fm/ws" />
+                            <ComboBoxItem Content="wss://openlink.raywonderis.me/ws" />
+                            <ComboBoxItem Content="wss://openlink.devinecreations.net/ws" />
+                            <ComboBoxItem Content="wss://openlink.devine-creations.com/ws" />
                         </ComboBox>
 
                         <Label x:Name="SessionPrefixLabel"
@@ -91,7 +90,7 @@
                                   Grid.Row="5"
                                   Grid.Column="1"
                                   Margin="0,0,0,8"
-                                  Content="Launch OpenLink at Windows sign-in" />
+                                  Content="Start OpenLink at sign-in and keep it active when available" />
                         <CheckBox x:Name="StartMinimizedToTrayOnLaunchBox"
                                   Grid.Row="6"
                                   Grid.Column="1"
@@ -159,6 +158,26 @@
                             IsSnapToTickEnabled="True"
                             Margin="0,0,0,8"
                             AutomationProperties.LabeledBy="{Binding ElementName=LocalAudioCaptureVolumeLabel}" />
+                    <CheckBox x:Name="EnableAsioAudioDriverBox"
+                              Margin="0,0,0,8"
+                              Content="Use ASIO or ASIO4ALL for low-latency remote playback" />
+                    <Label x:Name="AsioDriverLabel"
+                           Content="ASIO driver"
+                           Target="{Binding ElementName=AsioDriverBox}" />
+                    <ComboBox x:Name="AsioDriverBox"
+                              Margin="0,0,0,8"
+                              IsEditable="False"
+                              AutomationProperties.LabeledBy="{Binding ElementName=AsioDriverLabel}" />
+                    <Label x:Name="AsioLatencyLabel"
+                           Content="ASIO latency"
+                           Target="{Binding ElementName=AsioLatencySlider}" />
+                    <Slider x:Name="AsioLatencySlider"
+                            Minimum="5"
+                            Maximum="200"
+                            TickFrequency="5"
+                            IsSnapToTickEnabled="True"
+                            Margin="0,0,0,8"
+                            AutomationProperties.LabeledBy="{Binding ElementName=AsioLatencyLabel}" />
                     <CheckBox x:Name="AutoMuteControlledComputerAudioBox"
                               Margin="0,0,0,8"
                               Content="Ask the controlled computer to auto-mute audio on connect" />
@@ -181,7 +200,10 @@
                               Margin="0,0,0,8"
                               Content="Allow trusted machines to list, focus, quit, and relaunch apps" />
                     <CheckBox x:Name="RequireApprovalForNewDevicesBox"
+                              Margin="0,0,0,8"
                               Content="Ask before allowing a new device" />
+                    <CheckBox x:Name="TamperProtectionEnabledBox"
+                              Content="Tamper detection: block local quit during owned remote sessions" />
                 </StackPanel>
             </TabItem>
 
@@ -199,6 +221,9 @@
                     <CheckBox x:Name="ReduceMotionBox"
                               Margin="0,0,0,8"
                               Content="Reduce motion and animation" />
+                    <CheckBox x:Name="EnableDiagnosticSendingBox"
+                              Margin="0,0,0,8"
+                              Content="Send connection diagnostics to the OpenLink backend" />
                     <CheckBox x:Name="ShowOnlineOfflineNotificationsBox"
                               Margin="0,0,0,8"
                               Content="Show online and offline notifications" />
@@ -209,7 +234,56 @@
                               Margin="0,0,0,8"
                               Content="Show elapsed connection time in the tray" />
                     <CheckBox x:Name="AnnounceConnectionStrengthBox"
+                              Margin="0,0,0,14"
                               Content="Announce connection strength before connecting" />
+                    <CheckBox x:Name="EnableLocalTtsHelperBox"
+                              Margin="0,0,0,8"
+                              Content="Use local OpenLink TTS helper for announcements" />
+                    <Label x:Name="LocalTtsVoiceLabel"
+                           Content="TTS voice"
+                           Target="{Binding ElementName=LocalTtsVoiceBox}" />
+                    <ComboBox x:Name="LocalTtsVoiceBox"
+                              Margin="0,0,0,8"
+                              IsEditable="False"
+                              AutomationProperties.LabeledBy="{Binding ElementName=LocalTtsVoiceLabel}" />
+                    <Label x:Name="LocalTtsRateLabel"
+                           Content="Speech rate"
+                           Target="{Binding ElementName=LocalTtsRateSlider}" />
+                    <Slider x:Name="LocalTtsRateSlider"
+                            Minimum="0.5"
+                            Maximum="2.0"
+                            TickFrequency="0.1"
+                            IsSnapToTickEnabled="True"
+                            Margin="0,0,0,8"
+                            AutomationProperties.LabeledBy="{Binding ElementName=LocalTtsRateLabel}" />
+                    <Label x:Name="LocalTtsVolumeLabel"
+                           Content="TTS volume"
+                           Target="{Binding ElementName=LocalTtsVolumeSlider}" />
+                    <Slider x:Name="LocalTtsVolumeSlider"
+                            Minimum="0"
+                            Maximum="100"
+                            TickFrequency="10"
+                            IsSnapToTickEnabled="True"
+                            Margin="0,0,0,8"
+                            AutomationProperties.LabeledBy="{Binding ElementName=LocalTtsVolumeLabel}" />
+                    <Label x:Name="TtsFallbackModeLabel"
+                           Content="TTS fallback"
+                           Target="{Binding ElementName=TtsFallbackModeBox}" />
+                    <ComboBox x:Name="TtsFallbackModeBox"
+                              Width="220"
+                              HorizontalAlignment="Left"
+                              Margin="0,0,0,8"
+                              AutomationProperties.LabeledBy="{Binding ElementName=TtsFallbackModeLabel}">
+                        <ComboBoxItem Content="screen-reader" />
+                        <ComboBoxItem Content="browser" />
+                        <ComboBoxItem Content="silent" />
+                    </ComboBox>
+                    <Button x:Name="TestLocalTtsButton"
+                            Width="140"
+                            HorizontalAlignment="Left"
+                            Content="Test voice"
+                            Click="TestLocalTtsButton_Click"
+                            AutomationProperties.Name="Test local TTS voice" />
                 </StackPanel>
             </TabItem>
 
@@ -220,7 +294,7 @@
                               Content="Check for updates automatically" />
                     <CheckBox x:Name="DownloadUpdatesAutomaticallyBox"
                               Margin="0,0,0,12"
-                              Content="Download updates automatically when safe" />
+                              Content="Download and install updates automatically when safe" />
                     <Label x:Name="UpdateChannelLabel"
                            Content="Update channel"
                            Target="{Binding ElementName=UpdateChannelBox}" />

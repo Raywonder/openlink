@@ -209,6 +209,31 @@ html, body {
     margin-top: 0.75rem;
 }
 
+.installer-panel {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--color-border);
+    text-align: center;
+}
+
+.installer-panel h3 {
+    margin: 0 0 0.5rem;
+    color: var(--color-text-heading);
+    font-size: 1.125rem;
+}
+
+.installer-panel p {
+    margin: 0 0 1rem;
+    color: var(--color-text-muted);
+}
+
+.installer-actions {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
 /* Buttons */
 .btn {
     display: inline-flex;
@@ -477,6 +502,11 @@ input[type="checkbox"] {
     font-size: 0.875rem;
 }
 
+.machine-status-text {
+    color: var(--color-text-muted);
+    font-size: 0.875rem;
+}
+
 .status-indicator .dot {
     width: 10px;
     height: 10px;
@@ -517,6 +547,32 @@ input[type="checkbox"] {
 .btn-toolbar[aria-pressed="true"] {
     background: var(--color-primary);
     border-color: var(--color-primary);
+}
+
+.remote-download-link {
+    font-size: 0.875rem;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+    .toolbar {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .toolbar-left,
+    .toolbar-center,
+    .toolbar-right {
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .machine-status-text {
+        width: 100%;
+        text-align: center;
+    }
 }
 
 .btn-toolbar.btn-danger {

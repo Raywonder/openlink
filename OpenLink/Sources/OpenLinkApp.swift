@@ -6,24 +6,50 @@ struct OpenLinkApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        // Menu bar only app - no main window
         Settings {
             SettingsView()
+        }
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings") {
+                    openOpenLinkSettings()
+                }
+                .keyboardShortcut(",", modifiers: [.command])
+            }
         }
     }
 }
 
+private func openOpenLinkSettings() {
+    NSApplication.shared.activate(ignoringOtherApps: true)
+    if !NSApplication.shared.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) {
+        NSApplication.shared.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+    }
+}
+
+private func minimizeOpenLinkMainWindow() {
+    NSApplication.shared.keyWindow?.orderOut(nil)
+    NSApplication.shared.hide(nil)
+}
+
 // MARK: - App Delegate
 
-class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     private var statusMenu: NSMenu?
     private var escapeMonitor: Any?
+    private var mainWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.setActivationPolicy(.regular)
         setupMenuBar()
         OpenLinkService.shared.start()
+        configureMacLaunchAtLogin(UserDefaults.standard.bool(forKey: "launchAtLogin"))
+        OpenLinkUpdater.shared.checkAutomatically()
+        if !UserDefaults.standard.bool(forKey: "startMinimizedStatusMenu") {
+            showMainWindow()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -105,6 +131,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
 
         addActionItem(
+            "Open OpenLink",
+            action: #selector(openMainWindowFromMenu(_:)),
+            to: menu,
+            help: "Opens the main OpenLink window with status and connection actions."
+        )
+        addActionItem(
             service.isRunning ? "Stop OpenLink" : "Start OpenLink",
             action: #selector(toggleServiceFromMenu(_:)),
             to: menu,
@@ -126,6 +158,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 addMachineMenuItem(machine, to: menu)
             }
         }
+        addRecentConnectionsMenu(to: menu)
 
         menu.addItem(.separator())
         addActionItem(
@@ -162,23 +195,49 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         addDisabledItem(machine.accessibilitySummary, to: submenu)
         submenu.addItem(.separator())
 
-        if machine.isOnline || service.hasActiveMachineConnection {
+        let hasRemoteSession = service.hasConnectedRemoteSession(with: machine)
+        if hasRemoteSession {
             addMachineActionItem("Start Using \(machine.displayName)", machine: machine, action: #selector(startUsingMachineFromMenu(_:)), to: submenu, enabled: service.isConnectableMachine(machine), help: "Starts full keyboard control and remote audio for \(machine.displayName).")
         } else {
-            addMachineActionItem("Connect", machine: machine, action: #selector(connectMachineFromMenu(_:)), to: submenu, enabled: service.isConnectableMachine(machine), help: "Connects to \(machine.displayName).")
-            addMachineActionItem("Drop-In Connect", machine: machine, action: #selector(dropInConnectMachineFromMenu(_:)), to: submenu, enabled: service.isConnectableMachine(machine), help: "Connects to \(machine.displayName) using allowed drop-in access.")
+            let autoStartsInteraction = UserDefaults.standard.bool(forKey: "autoStartInteractionOnConnect")
+            if !autoStartsInteraction {
+                addMachineActionItem("Connect", machine: machine, action: #selector(connectMachineFromMenu(_:)), to: submenu, enabled: service.isConnectableMachine(machine), help: "Connects to \(machine.displayName) in the background without starting keyboard control.")
+            }
+            addMachineActionItem("Start Using \(machine.displayName)", machine: machine, action: #selector(startUsingMachineFromMenu(_:)), to: submenu, enabled: service.isConnectableMachine(machine), help: "Connects and starts full keyboard control and remote audio for \(machine.displayName).")
+            if !autoStartsInteraction {
+                addMachineActionItem("Drop-In Connect", machine: machine, action: #selector(dropInConnectMachineFromMenu(_:)), to: submenu, enabled: service.isConnectableMachine(machine), help: "Connects to \(machine.displayName) using allowed drop-in access.")
+            }
         }
 
+        if hasRemoteSession {
+            submenu.addItem(.separator())
+            addMachineActionItem("Minimize Remote Connection to Use Local Machine", machine: machine, action: #selector(minimizeRemoteFromMenu(_:)), to: submenu, enabled: true, help: "Pauses active remote interaction and returns focus to this Mac.")
+            addMachineActionItem("Disconnect from \(machine.displayName)", machine: machine, action: #selector(disconnectFromMachineFromMenu(_:)), to: submenu, enabled: true, help: "Disconnects this Mac from \(machine.displayName).")
+        }
         submenu.addItem(.separator())
-        addMachineActionItem("Minimize Remote Connection to Use Local Machine", machine: machine, action: #selector(minimizeRemoteFromMenu(_:)), to: submenu, enabled: machine.isOnline || service.hasActiveMachineConnection, help: "Pauses active remote interaction and returns focus to this Mac.")
-        addMachineActionItem("Disconnect from \(machine.displayName)", machine: machine, action: #selector(disconnectFromMachineFromMenu(_:)), to: submenu, enabled: machine.isOnline || service.hasActiveMachineConnection, help: "Disconnects this Mac from \(machine.displayName).")
         addMachineActionItem("Disconnect Remote User from This Device", machine: machine, action: #selector(disconnectMachineFromMenu(_:)), to: submenu, enabled: true, help: "On the controlled computer, disconnects the remote user.")
         addMachineActionItem("Swap Control", machine: machine, action: #selector(swapControlFromMenu(_:)), to: submenu, enabled: service.isConnectableMachine(machine), help: "Allows bidirectional control while both keyboards remain available.")
 
-        submenu.addItem(.separator())
-        addMachineActionItem("Microphone Audio", machine: machine, action: #selector(toggleMicrophoneAudioFromMenu(_:)), to: submenu, enabled: true, state: machine.allowMicrophoneAudio ? .on : .off, help: "Toggles microphone audio for \(machine.displayName).")
-        addMachineActionItem("System Audio", machine: machine, action: #selector(toggleSystemAudioFromMenu(_:)), to: submenu, enabled: true, state: machine.allowSystemAudio ? .on : .off, help: "Toggles system audio for \(machine.displayName).")
+        if hasRemoteSession {
+            submenu.addItem(.separator())
+            addMachineActionItem("Microphone Audio", machine: machine, action: #selector(toggleMicrophoneAudioFromMenu(_:)), to: submenu, enabled: true, state: machine.allowMicrophoneAudio ? .on : .off, help: "Toggles microphone audio for \(machine.displayName).")
+            addMachineActionItem("System Audio", machine: machine, action: #selector(toggleSystemAudioFromMenu(_:)), to: submenu, enabled: true, state: machine.allowSystemAudio ? .on : .off, help: "Toggles system audio for \(machine.displayName).")
+        }
         return submenu
+    }
+
+    private func addRecentConnectionsMenu(to menu: NSMenu) {
+        let recentMachines = OpenLinkService.shared.recentConnectableMachines()
+        guard !recentMachines.isEmpty else { return }
+
+        let item = NSMenuItem(title: "Recent Connections", action: nil, keyEquivalent: "")
+        item.toolTip = "Recently connected OpenLink machines"
+        let submenu = NSMenu(title: "Recent Connections")
+        for machine in recentMachines {
+            addMachineActionItem("Connect to \(machine.displayName)", machine: machine, action: #selector(connectMachineFromMenu(_:)), to: submenu, enabled: OpenLinkService.shared.isConnectableMachine(machine), help: "Connects to \(machine.displayName).")
+        }
+        item.submenu = submenu
+        menu.addItem(item)
     }
 
     private func addDisabledItem(_ title: String, to menu: NSMenu) {
@@ -206,6 +265,45 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
+    private func showMainWindow() {
+        if let mainWindow {
+            mainWindow.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 860, height: 620),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "OpenLink"
+        window.contentMinSize = NSSize(width: 720, height: 520)
+        window.contentViewController = NSHostingController(rootView: OpenLinkMainWindowView())
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        mainWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.orderOut(nil)
+        NSApplication.shared.hide(nil)
+        return false
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if tamperProtectionBlocksQuit() {
+            showTamperProtectionAlert()
+            return .terminateCancel
+        }
+
+        return .terminateNow
+    }
+
     private func machine(from sender: Any?) -> OpenLinkMachine? {
         guard
             let item = sender as? NSMenuItem,
@@ -214,6 +312,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return nil
         }
         return OpenLinkService.shared.machine(id: id)
+    }
+
+    @objc private func openMainWindowFromMenu(_ sender: NSMenuItem) {
+        showMainWindow()
     }
 
     @objc private func toggleServiceFromMenu(_ sender: NSMenuItem) {
@@ -280,14 +382,232 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func openSettingsFromMenu(_ sender: NSMenuItem) {
-        NSApplication.shared.activate(ignoringOtherApps: true)
-        if !NSApplication.shared.sendAction(Selector(("showSettingsWindow:")), to: nil, from: sender) {
-            NSApplication.shared.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: sender)
-        }
+        openOpenLinkSettings()
     }
 
     @objc private func quitFromMenu(_ sender: NSMenuItem) {
+        if tamperProtectionBlocksQuit() {
+            showTamperProtectionAlert()
+            return
+        }
+
         NSApplication.shared.terminate(nil)
+    }
+
+    private func tamperProtectionBlocksQuit() -> Bool {
+        UserDefaults.standard.bool(forKey: "tamperProtectionEnabled") &&
+            OpenLinkService.shared.hasActiveMachineConnection
+    }
+
+    private func showTamperProtectionAlert() {
+        NSSound.beep()
+        let alert = NSAlert()
+        alert.messageText = "OpenLink tamper protection is active"
+        alert.informativeText = "Local quitting is locked while an owned remote session is active. Disconnect the session or disable tamper protection from owner settings."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+}
+
+struct OpenLinkMainWindowView: View {
+    @StateObject private var service = OpenLinkService.shared
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: "link.circle.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(service.isRunning ? Color.green : Color.secondary)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("OpenLink")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    Text(windowStatusText)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    openOpenLinkSettings()
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .keyboardShortcut(",", modifiers: [.command])
+
+                Button {
+                    minimizeOpenLinkMainWindow()
+                } label: {
+                    Label("Minimize to Status Menu", systemImage: "menubar.rectangle")
+                }
+            }
+            .padding()
+            .background(Color(nsColor: .windowBackgroundColor))
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    statusGrid
+
+                    HStack {
+                        Text("Devices")
+                            .font(.headline)
+                        Spacer()
+                        Button {
+                            service.refreshServiceHealth()
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                    }
+
+                    if service.machines.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "desktopcomputer")
+                                .font(.system(size: 42))
+                                .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+                            Text("Waiting for a connection")
+                                .font(.headline)
+                            Text("OpenLink is online on \(activeDomainText) and ready for trusted devices.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                    } else {
+                        Table(service.machines) {
+                            TableColumn("Device") { machine in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(machine.displayName)
+                                        .fontWeight(.medium)
+                                    Text(machine.machineHostname)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            TableColumn("Status") { machine in
+                                Label(machine.isOnline ? "Online" : "Offline", systemImage: machine.isOnline ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(machine.isOnline ? .green : .secondary)
+                            }
+                            TableColumn("Domain") { machine in
+                                Text(machine.domainUsed)
+                                    .font(.caption)
+                            }
+                            TableColumn("Last Seen") { machine in
+                                Text("\(machine.lastConnectedText), \(machine.lastDurationText)")
+                                    .font(.caption)
+                            }
+                            TableColumn("Actions") { machine in
+                                MachineActionsMenu(machine: machine)
+                            }
+                        }
+                        .frame(minHeight: 300)
+                    }
+                }
+                .padding()
+            }
+        }
+        .frame(minWidth: 720, minHeight: 520)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(windowStatusText)
+    }
+
+    private var windowStatusText: String {
+        if service.hasActiveMachineConnection {
+            return service.elapsedConnectionText
+        }
+        if service.isRunning {
+            return "Online and waiting for a connection"
+        }
+        return "Stopped"
+    }
+
+    private var activeDomainText: String {
+        let backend = UserDefaults.standard.string(forKey: "openLinkBackendUrl") ?? OpenLinkService.canonicalWebSocketURL
+        return backend
+            .replacingOccurrences(of: "wss://", with: "")
+            .replacingOccurrences(of: "/ws", with: "")
+    }
+
+    private var statusGrid: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                StatusPill(label: "OpenLink", value: service.isRunning ? "Online" : "Stopped", color: service.isRunning ? .green : .secondary)
+                StatusPill(label: "Connection", value: service.hasActiveMachineConnection ? "Active" : "Waiting", color: service.hasActiveMachineConnection ? .green : .blue)
+                StatusPill(label: "Domain", value: activeDomainText, color: .primary)
+            }
+            HStack(spacing: 10) {
+                StatusPill(label: "Health", value: service.serviceHealthText.replacingOccurrences(of: "Connection health: ", with: ""), color: service.serviceOnline ? .green : .red)
+                StatusPill(label: "Signal", value: service.connectionStrengthText.replacingOccurrences(of: "Signal strength: ", with: ""), color: service.serviceOnline ? .green : .red)
+                StatusPill(label: "Local", value: "\(service.localIP ?? "No local IP"):\(service.port)", color: .secondary)
+            }
+        }
+    }
+}
+
+struct StatusPill: View {
+    let label: String
+    let value: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.callout)
+                .fontWeight(.medium)
+                .foregroundStyle(color)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label): \(value)")
+    }
+}
+
+struct MachineActionsMenu: View {
+    let machine: OpenLinkMachine
+    @StateObject private var service = OpenLinkService.shared
+
+    var body: some View {
+        Menu {
+            if service.isConnectableMachine(machine) {
+                Button("Connect") { service.connectToMachine(machine, dropIn: false) }
+                Button("Start Using \(machine.displayName)") { service.startUsingMachine(machine) }
+                Button("Drop-In Connect") { service.connectToMachine(machine, dropIn: true) }
+                Divider()
+                if service.hasConnectedRemoteSession(with: machine) {
+                    Button("Minimize Remote Connection to Use Local Machine") { service.minimizeRemoteForLocalUse(machine) }
+                    Button("Disconnect from \(machine.displayName)") { service.disconnectFromMachine(machine) }
+                }
+                Button("Swap Control") { service.swapControl(with: machine) }
+            } else {
+                Button("Open Local Machine Settings") { openOpenLinkSettings() }
+                Button("Disconnect Remote User from This Device") { service.disconnectMachine(machine) }
+            }
+            Divider()
+            Toggle("Microphone Audio", isOn: Binding(
+                get: { service.machine(id: machine.id)?.allowMicrophoneAudio ?? machine.allowMicrophoneAudio },
+                set: { service.setMicrophoneAudio(for: machine, enabled: $0) }
+            ))
+            Toggle("System Audio", isOn: Binding(
+                get: { service.machine(id: machine.id)?.allowSystemAudio ?? machine.allowSystemAudio },
+                set: { service.setSystemAudio(for: machine, enabled: $0) }
+            ))
+        } label: {
+            Label("Actions", systemImage: "ellipsis.circle")
+        }
+        .accessibilityLabel("Actions for \(machine.displayName)")
     }
 }
 
@@ -436,13 +756,12 @@ struct MenuBarView: View {
                 }
 
                 Button(action: {
-                    NSApplication.shared.terminate(nil)
+                    minimizeOpenLinkMainWindow()
                 }) {
-                    Image(systemName: "power")
+                    Image(systemName: "menubar.rectangle")
                 }
                 .buttonStyle(.bordered)
-                .tint(.red)
-                .accessibilityLabel("Quit OpenLink")
+                .accessibilityLabel("Minimize OpenLink to status menu")
             }
             .padding()
         }
@@ -551,7 +870,7 @@ struct MachineRow: View {
                 .foregroundColor(machine.allowDropIn ? .green : .secondary)
 
             Menu {
-                if machine.isOnline || service.hasActiveMachineConnection {
+                if service.hasConnectedRemoteSession(with: machine) {
                     Button("Start Using \(machine.displayName)") {
                         service.startUsingMachine(machine)
                     }
@@ -561,13 +880,17 @@ struct MachineRow: View {
                         service.connectToMachine(machine, dropIn: false)
                     }
                     .disabled(!service.isConnectableMachine(machine))
+                    Button("Start Using \(machine.displayName)") {
+                        service.startUsingMachine(machine)
+                    }
+                    .disabled(!service.isConnectableMachine(machine))
                     Button("Drop-In Connect") {
                         service.connectToMachine(machine, dropIn: true)
                     }
                     .disabled(!service.isConnectableMachine(machine))
                 }
                 Divider()
-                if machine.isOnline {
+                if service.hasConnectedRemoteSession(with: machine) {
                     Button("Minimize Remote Connection to Use Local Machine") {
                         service.minimizeRemoteForLocalUse(machine)
                     }
@@ -605,16 +928,18 @@ struct MachineRow: View {
             service.connectToMachine(machine, dropIn: machine.allowDropIn)
         }
         .contextMenu {
-            if machine.isOnline || service.hasActiveMachineConnection {
+            if service.hasConnectedRemoteSession(with: machine) {
                 Button("Start Using \(machine.displayName)") { service.startUsingMachine(machine) }
                     .disabled(!service.isConnectableMachine(machine))
             } else {
                 Button("Connect") { service.connectToMachine(machine, dropIn: false) }
                     .disabled(!service.isConnectableMachine(machine))
+                Button("Start Using \(machine.displayName)") { service.startUsingMachine(machine) }
+                    .disabled(!service.isConnectableMachine(machine))
                 Button("Drop-In Connect") { service.connectToMachine(machine, dropIn: true) }
                     .disabled(!service.isConnectableMachine(machine))
             }
-            if machine.isOnline {
+            if service.hasConnectedRemoteSession(with: machine) {
                 Button("Minimize Remote Connection to Use Local Machine") { service.minimizeRemoteForLocalUse(machine) }
                 Button("Disconnect from \(machine.displayName)") { service.disconnectFromMachine(machine) }
                 Button("Disconnect Remote User from This Device") { service.disconnectMachine(machine) }
@@ -696,36 +1021,82 @@ struct QuickSettingsView: View {
 
 // MARK: - Full Settings View (for Settings scene)
 
+enum OpenLinkSettingsSection: String, CaseIterable, Identifiable {
+    case general = "General"
+    case connection = "Connection"
+    case machines = "Devices"
+    case audio = "Audio"
+    case accessibility = "Accessibility"
+    case security = "Security"
+
+    var id: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .general: "gearshape"
+        case .connection: "antenna.radiowaves.left.and.right"
+        case .machines: "desktopcomputer"
+        case .audio: "speaker.wave.2"
+        case .accessibility: "accessibility"
+        case .security: "lock.shield"
+        }
+    }
+}
+
 struct SettingsView: View {
     @StateObject private var service = OpenLinkService.shared
+    @State private var selectedSection: OpenLinkSettingsSection = .general
 
     var body: some View {
         if service.hasActiveMachineConnection {
             ActiveSessionActionsView()
                 .frame(width: 500, height: 320)
         } else {
-        TabView {
-            GeneralSettingsTab()
-                .tabItem {
-                    Label("General", systemImage: "gear")
+            VStack(spacing: 0) {
+                Picker("Settings section", selection: $selectedSection) {
+                    ForEach(OpenLinkSettingsSection.allCases) { section in
+                        Label(section.rawValue, systemImage: section.systemImage)
+                            .tag(section)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .padding()
 
-            ConnectionSettingsTab()
-                .tabItem {
-                    Label("Connection", systemImage: "antenna.radiowaves.left.and.right")
-                }
+                Divider()
 
-            MachinesSettingsTab()
-                .tabItem {
-                    Label("Machines", systemImage: "desktopcomputer")
+                ScrollView {
+                    selectedSettingsView
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-
-            SecuritySettingsTab()
-                .tabItem {
-                    Label("Security", systemImage: "lock.shield")
+            }
+            .toolbar {
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        minimizeOpenLinkMainWindow()
+                    } label: {
+                        Label("Minimize to Status Menu", systemImage: "menubar.rectangle")
+                    }
                 }
+            }
+            .frame(width: 760, height: 620)
         }
-        .frame(width: 500, height: 400)
+    }
+
+    @ViewBuilder
+    private var selectedSettingsView: some View {
+        switch selectedSection {
+        case .general:
+            GeneralSettingsTab()
+        case .connection:
+            ConnectionSettingsTab()
+        case .machines:
+            MachinesSettingsTab()
+        case .audio:
+            AudioSettingsTab()
+        case .accessibility:
+            AccessibilitySettingsTab()
+        case .security:
+            SecuritySettingsTab()
         }
     }
 }
@@ -814,6 +1185,12 @@ struct GeneralSettingsTab: View {
     @AppStorage("showConnectionNotifications") private var showConnectionNotifications = true
     @AppStorage("showElapsedConnectionTime") private var showElapsedConnectionTime = true
     @AppStorage("announceConnectionStrength") private var announceConnectionStrength = true
+    @AppStorage("enableDiagnosticSending") private var enableDiagnosticSending = true
+    @AppStorage("openLinkBackendUrl") private var openLinkBackendUrl = OpenLinkService.canonicalWebSocketURL
+    @AppStorage("customSignalingServerAccessEnabled") private var customSignalingServerAccessEnabled = false
+    @AppStorage("checkForUpdatesAutomatically") private var checkForUpdatesAutomatically = true
+    @AppStorage("installUpdatesAutomatically") private var installUpdatesAutomatically = true
+    @AppStorage("updateManifestUrl") private var updateManifestUrl = OpenLinkUpdater.cloudUpdateManifestURL
     @AppStorage("autoMuteRemoteAudio") private var autoMuteRemoteAudio = false
     @AppStorage("autoMutedProcesses") private var autoMutedProcesses = "VoiceOver, Music"
 
@@ -837,6 +1214,39 @@ struct GeneralSettingsTab: View {
                     Toggle("Show device connection notifications", isOn: $showConnectionNotifications)
                     Toggle("Show elapsed connection time", isOn: $showElapsedConnectionTime)
                     Toggle("Announce connection strength before connecting", isOn: $announceConnectionStrength)
+                    Toggle("Send connection diagnostics to the OpenLink backend", isOn: $enableDiagnosticSending)
+                }
+                .padding(.vertical, 8)
+            }
+
+            GroupBox("OpenLink Server") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("Default signal server", selection: defaultServerBinding) {
+                        ForEach(OpenLinkService.approvedWebSocketURLs, id: \.self) { url in
+                            Text(url).tag(url)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    if customSignalingServerAccessEnabled {
+                        TextField("Custom signal server URL", text: $openLinkBackendUrl)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+
+            GroupBox("Updates") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Check for updates automatically", isOn: $checkForUpdatesAutomatically)
+                    Toggle("Download and install updates automatically when safe", isOn: $installUpdatesAutomatically)
+                    TextField("Update manifest URL", text: $updateManifestUrl)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Check for Updates Now") {
+                        Task {
+                            await OpenLinkUpdater.shared.check(interactive: true)
+                        }
+                    }
                 }
                 .padding(.vertical, 8)
             }
@@ -878,6 +1288,17 @@ struct GeneralSettingsTab: View {
         .onChange(of: launchAtLogin) { enabled in
             configureMacLaunchAtLogin(enabled)
         }
+    }
+
+    private var defaultServerBinding: Binding<String> {
+        Binding(
+            get: {
+                OpenLinkService.isApprovedDefaultWebSocketURL(openLinkBackendUrl)
+                    ? openLinkBackendUrl
+                    : OpenLinkService.canonicalWebSocketURL
+            },
+            set: { openLinkBackendUrl = $0 }
+        )
     }
 }
 
@@ -1070,6 +1491,80 @@ struct MachinesSettingsTab: View {
     }
 }
 
+struct AudioSettingsTab: View {
+    @AppStorage("autoMuteRemoteAudio") private var autoMuteRemoteAudio = false
+    @AppStorage("muteRemoteAudioWhenInactive") private var muteRemoteAudioWhenInactive = true
+    @AppStorage("autoMutedProcesses") private var autoMutedProcesses = "VoiceOver, Music"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            GroupBox("Remote Audio") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Ask controlled computer to auto-mute audio on connect", isOn: $autoMuteRemoteAudio)
+                    Toggle("Mute remote audio when connection is minimized for local use", isOn: $muteRemoteAudioWhenInactive)
+                    TextField("Auto-muted process names", text: $autoMutedProcesses)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityLabel("Auto-muted process names")
+                }
+                .padding(.vertical, 8)
+            }
+
+            GroupBox("Speech And Screen Reader Audio") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("VoiceOver audio is routed through the active remote audio path when VoiceOver is running. Remote status text is also sent as local TTS announcements on the controlling device when its local TTS helper is enabled.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Button("Open macOS Accessibility Permissions") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                    }
+                    Button("Open macOS Input Monitoring Permissions") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!)
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+
+            Spacer()
+        }
+        .padding()
+    }
+}
+
+struct AccessibilitySettingsTab: View {
+    @AppStorage("showOnlineOfflineNotifications") private var showOnlineOfflineNotifications = true
+    @AppStorage("showConnectionNotifications") private var showConnectionNotifications = true
+    @AppStorage("showElapsedConnectionTime") private var showElapsedConnectionTime = true
+    @AppStorage("announceConnectionStrength") private var announceConnectionStrength = true
+    @AppStorage("enableDiagnosticSending") private var enableDiagnosticSending = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            GroupBox("Announcements") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Show online and offline notifications", isOn: $showOnlineOfflineNotifications)
+                    Toggle("Show device connection notifications", isOn: $showConnectionNotifications)
+                    Toggle("Show elapsed connection time", isOn: $showElapsedConnectionTime)
+                    Toggle("Announce connection strength before connecting", isOn: $announceConnectionStrength)
+                }
+                .padding(.vertical, 8)
+            }
+
+            GroupBox("Diagnostics") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Send connection diagnostics to the OpenLink backend", isOn: $enableDiagnosticSending)
+                    Text("Diagnostics are metadata-only by default and help confirm keyboard, audio, TTS, and disconnect routing.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 8)
+            }
+
+            Spacer()
+        }
+        .padding()
+    }
+}
+
 struct AddServerSheet: View {
     @Environment(\.dismiss) var dismiss
     @StateObject private var service = OpenLinkService.shared
@@ -1118,6 +1613,7 @@ struct AddServerSheet: View {
 
 struct SecuritySettingsTab: View {
     @StateObject private var service = OpenLinkService.shared
+    @AppStorage("tamperProtectionEnabled") private var tamperProtectionEnabled = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -1127,6 +1623,17 @@ struct SecuritySettingsTab: View {
                     Toggle("Require authentication", isOn: .constant(true))
                     Toggle("Allow remote control", isOn: $service.allowRemoteControl)
                     Toggle("Trusted devices only", isOn: $service.trustedDevicesOnly)
+                }
+                .padding(.vertical, 8)
+            }
+
+            GroupBox("Tamper Detection") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Lock local quitting during owned remote sessions", isOn: $tamperProtectionEnabled)
+                    Text("When enabled, OpenLink stays active from the local status menu while an owner-controlled session is active. Force-quit protection requires the later service hardening pass.")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, 8)
             }

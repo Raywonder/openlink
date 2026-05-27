@@ -5,7 +5,11 @@ namespace OpenLink.Windows;
 
 public sealed class OpenLinkSettings
 {
-    public string DefaultServerUrl { get; set; } = "wss://openlink.raywonderis.me/ws";
+    public const string CloudUpdateManifestUrl = "https://devinecreations.net/openlink-downloads/update.json";
+    public const string TappedInUpdateManifestUrl = "https://files.tappedin.fm/Public/openlink/update.json";
+
+    public string DefaultServerUrl { get; set; } = EndpointNormalizer.CanonicalWebSocketUrl;
+    public bool CustomSignalingServerAccessEnabled { get; set; }
     public string SessionPrefix { get; set; } = "win";
     public bool StartHostingOnLaunch { get; set; }
     public bool CopyLinkWhenHostingStarts { get; set; } = true;
@@ -30,6 +34,9 @@ public sealed class OpenLinkSettings
     public bool AllowSystemAudio { get; set; } = true;
     public int RemoteAudioVolumePercent { get; set; } = 100;
     public int LocalAudioCaptureVolumePercent { get; set; } = 100;
+    public bool EnableAsioAudioDriver { get; set; }
+    public string AsioDriverName { get; set; } = "";
+    public int AsioLatencyMilliseconds { get; set; } = 20;
     public bool AutoMuteControlledComputerAudio { get; set; }
     public bool MuteRemoteAudioWhenInactive { get; set; } = true;
     public string AutoMuteProcessesOnConnect { get; set; } = "VoiceOver, Music";
@@ -38,17 +45,25 @@ public sealed class OpenLinkSettings
     public bool AutoConnectTrustedMachines { get; set; } = true;
     public bool AllowRemoteApplicationLaunch { get; set; } = true;
     public bool RequireApprovalForNewDevices { get; set; } = true;
+    public bool TamperProtectionEnabled { get; set; }
 
     public bool AnnounceStatusChanges { get; set; } = true;
     public bool DetailedScreenReaderMessages { get; set; } = true;
     public bool SoundAlerts { get; set; } = true;
     public bool ReduceMotion { get; set; }
+    public bool EnableDiagnosticSending { get; set; } = true;
+    public bool EnableLocalTtsHelper { get; set; }
+    public string LocalTtsVoiceId { get; set; } = "";
+    public double LocalTtsRate { get; set; } = 1.0;
+    public int LocalTtsVolumePercent { get; set; } = 100;
+    public string TtsFallbackMode { get; set; } = "screen-reader";
+    public int LocalTtsPort { get; set; } = OpenLinkTtsService.DefaultPort;
 
     public bool CheckForUpdatesAutomatically { get; set; } = true;
     public bool DownloadUpdatesAutomatically { get; set; } = true;
     public string UpdateChannel { get; set; } = "Stable";
 
-    public string UpdateManifestUrl { get; set; } = "https://files.tappedin.fm/Public/openlink/update.json";
+    public string UpdateManifestUrl { get; set; } = CloudUpdateManifestUrl;
     public bool LocalServerEnabled { get; set; }
     public string LocalServerPort { get; set; } = "8765";
 
@@ -57,6 +72,7 @@ public sealed class OpenLinkSettings
         return new OpenLinkSettings
         {
             DefaultServerUrl = DefaultServerUrl,
+            CustomSignalingServerAccessEnabled = CustomSignalingServerAccessEnabled,
             SessionPrefix = SessionPrefix,
             StartHostingOnLaunch = StartHostingOnLaunch,
             CopyLinkWhenHostingStarts = CopyLinkWhenHostingStarts,
@@ -80,6 +96,9 @@ public sealed class OpenLinkSettings
             AllowSystemAudio = AllowSystemAudio,
             RemoteAudioVolumePercent = RemoteAudioVolumePercent,
             LocalAudioCaptureVolumePercent = LocalAudioCaptureVolumePercent,
+            EnableAsioAudioDriver = EnableAsioAudioDriver,
+            AsioDriverName = AsioDriverName,
+            AsioLatencyMilliseconds = AsioLatencyMilliseconds,
             AutoMuteControlledComputerAudio = AutoMuteControlledComputerAudio,
             MuteRemoteAudioWhenInactive = MuteRemoteAudioWhenInactive,
             AutoMuteProcessesOnConnect = AutoMuteProcessesOnConnect,
@@ -88,10 +107,18 @@ public sealed class OpenLinkSettings
             AutoConnectTrustedMachines = AutoConnectTrustedMachines,
             AllowRemoteApplicationLaunch = AllowRemoteApplicationLaunch,
             RequireApprovalForNewDevices = RequireApprovalForNewDevices,
+            TamperProtectionEnabled = TamperProtectionEnabled,
             AnnounceStatusChanges = AnnounceStatusChanges,
             DetailedScreenReaderMessages = DetailedScreenReaderMessages,
             SoundAlerts = SoundAlerts,
             ReduceMotion = ReduceMotion,
+            EnableDiagnosticSending = EnableDiagnosticSending,
+            EnableLocalTtsHelper = EnableLocalTtsHelper,
+            LocalTtsVoiceId = LocalTtsVoiceId,
+            LocalTtsRate = LocalTtsRate,
+            LocalTtsVolumePercent = LocalTtsVolumePercent,
+            TtsFallbackMode = TtsFallbackMode,
+            LocalTtsPort = LocalTtsPort,
             CheckForUpdatesAutomatically = CheckForUpdatesAutomatically,
             DownloadUpdatesAutomatically = DownloadUpdatesAutomatically,
             UpdateChannel = UpdateChannel,
@@ -133,13 +160,17 @@ public static class OpenLinkSettingsStore
             var json = File.ReadAllText(settingsPath);
             var settings = JsonSerializer.Deserialize<OpenLinkSettings>(json, SerializerOptions) ?? new OpenLinkSettings();
             if (string.IsNullOrWhiteSpace(settings.UpdateManifestUrl) ||
+                settings.UpdateManifestUrl.Contains("files.tappedin.fm/Public/openlink/update.json", StringComparison.OrdinalIgnoreCase) ||
                 settings.UpdateManifestUrl.Contains("openlink.devinecreations.net/downloads", StringComparison.OrdinalIgnoreCase))
             {
                 settings.UpdateManifestUrl = new OpenLinkSettings().UpdateManifestUrl;
             }
 
-            if (string.IsNullOrWhiteSpace(settings.DefaultServerUrl) ||
-                settings.DefaultServerUrl.Contains("openlink.devinecreations.net", StringComparison.OrdinalIgnoreCase))
+            settings.DefaultServerUrl = EndpointNormalizer.NormalizeWebSocketUrl(
+                settings.DefaultServerUrl,
+                settings.CustomSignalingServerAccessEnabled);
+            if (!settings.CustomSignalingServerAccessEnabled &&
+                !EndpointNormalizer.IsApprovedDefaultWebSocketUrl(settings.DefaultServerUrl))
             {
                 settings.DefaultServerUrl = new OpenLinkSettings().DefaultServerUrl;
             }
@@ -151,6 +182,11 @@ public static class OpenLinkSettingsStore
 
             settings.RemoteAudioVolumePercent = Math.Clamp(settings.RemoteAudioVolumePercent, 0, 150);
             settings.LocalAudioCaptureVolumePercent = Math.Clamp(settings.LocalAudioCaptureVolumePercent, 0, 150);
+            settings.AsioLatencyMilliseconds = Math.Clamp(settings.AsioLatencyMilliseconds <= 0 ? 20 : settings.AsioLatencyMilliseconds, 5, 200);
+            settings.LocalTtsRate = Math.Clamp(settings.LocalTtsRate <= 0 ? 1.0 : settings.LocalTtsRate, 0.5, 2.0);
+            settings.LocalTtsVolumePercent = Math.Clamp(settings.LocalTtsVolumePercent, 0, 100);
+            settings.LocalTtsPort = settings.LocalTtsPort is < 1 or > 65535 ? OpenLinkTtsService.DefaultPort : settings.LocalTtsPort;
+            settings.TtsFallbackMode = string.IsNullOrWhiteSpace(settings.TtsFallbackMode) ? "screen-reader" : settings.TtsFallbackMode;
 
             return settings;
         }

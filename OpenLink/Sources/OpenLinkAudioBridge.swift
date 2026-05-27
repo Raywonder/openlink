@@ -3,6 +3,7 @@ import Foundation
 
 final class OpenLinkAudioBridge {
     static let shared = OpenLinkAudioBridge()
+    private static let transportChannels = 2
 
     let virtualDeviceName = "OpenLink VoiceLink Virtual Audio"
 
@@ -35,14 +36,14 @@ final class OpenLinkAudioBridge {
             }
             self.lastFrameTime = now
 
-            guard let data = Self.int16PCMData(from: buffer) else { return }
+            guard let data = Self.stereoInt16PCMData(from: buffer) else { return }
             frameSink([
                 "type": "audio_frame",
                 "targetMachineId": targetMachineId,
                 "source": "microphone",
                 "sampleRate": Int(format.sampleRate),
                 "bitsPerSample": 16,
-                "channels": Int(format.channelCount),
+                "channels": Self.transportChannels,
                 "codec": "pcm_s16le",
                 "transport": "voicelink-pcm-ws",
                 "virtualDeviceName": self.virtualDeviceName,
@@ -77,10 +78,12 @@ final class OpenLinkAudioBridge {
         }
 
         let sampleRate = Double(json["sampleRate"] as? Int ?? 48_000)
-        let channels = AVAudioChannelCount(json["channels"] as? Int ?? 2)
+        let sourceChannels = max(1, json["channels"] as? Int ?? Self.transportChannels)
+        let playbackData = sourceChannels == Self.transportChannels ? data : Self.stereoInt16PCMData(from: data, channels: sourceChannels)
+        let channels = AVAudioChannelCount(Self.transportChannels)
         guard
             let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channels),
-            let buffer = Self.floatBuffer(fromInt16PCM: data, format: format)
+            let buffer = Self.floatBuffer(fromInt16PCM: playbackData, format: format)
         else {
             return
         }
@@ -103,15 +106,16 @@ final class OpenLinkAudioBridge {
         playerNode.scheduleBuffer(buffer, completionHandler: nil)
     }
 
-    private static func int16PCMData(from buffer: AVAudioPCMBuffer) -> Data? {
+    private static func stereoInt16PCMData(from buffer: AVAudioPCMBuffer) -> Data? {
         guard let channelData = buffer.floatChannelData else { return nil }
         let channels = Int(buffer.format.channelCount)
         let frames = Int(buffer.frameLength)
-        var data = Data(capacity: frames * channels * MemoryLayout<Int16>.size)
+        var data = Data(capacity: frames * transportChannels * MemoryLayout<Int16>.size)
 
         for frame in 0..<frames {
-            for channel in 0..<channels {
-                let sample = max(-1.0, min(1.0, channelData[channel][frame]))
+            let leftSample = max(-1.0, min(1.0, channelData[0][frame]))
+            let rightSample = channels > 1 ? max(-1.0, min(1.0, channelData[1][frame])) : leftSample
+            for sample in [leftSample, rightSample] {
                 var intSample = Int16(sample * Float(Int16.max)).littleEndian
                 withUnsafeBytes(of: &intSample) { bytes in
                     data.append(contentsOf: bytes)
@@ -120,6 +124,31 @@ final class OpenLinkAudioBridge {
         }
 
         return data
+    }
+
+    private static func stereoInt16PCMData(from data: Data, channels: Int) -> Data {
+        if channels == transportChannels {
+            return data
+        }
+
+        let sampleCount = data.count / MemoryLayout<Int16>.size
+        let frames = sampleCount / channels
+        var stereo = Data(capacity: frames * transportChannels * MemoryLayout<Int16>.size)
+        data.withUnsafeBytes { rawBuffer in
+            guard let samples = rawBuffer.bindMemory(to: Int16.self).baseAddress else { return }
+            for frame in 0..<frames {
+                let left = Int16(littleEndian: samples[frame * channels])
+                let right = channels > 1 ? Int16(littleEndian: samples[(frame * channels) + 1]) : left
+                for sample in [left, right] {
+                    var littleEndianSample = sample.littleEndian
+                    withUnsafeBytes(of: &littleEndianSample) { bytes in
+                        stereo.append(contentsOf: bytes)
+                    }
+                }
+            }
+        }
+
+        return stereo
     }
 
     private static func floatBuffer(fromInt16PCM data: Data, format: AVAudioFormat) -> AVAudioPCMBuffer? {

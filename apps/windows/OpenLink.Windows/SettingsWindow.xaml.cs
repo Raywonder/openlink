@@ -11,12 +11,17 @@ public partial class SettingsWindow : Window
     {
         InitializeComponent();
         Settings = settings.Clone();
+        LoadTtsVoices();
+        LoadAsioDrivers();
+        ConfigureDefaultServerChoices();
         LoadSettings();
     }
 
     private void LoadSettings()
     {
-        DefaultServerBox.Text = Settings.DefaultServerUrl;
+        DefaultServerBox.Text = EndpointNormalizer.NormalizeWebSocketUrl(
+            Settings.DefaultServerUrl,
+            Settings.CustomSignalingServerAccessEnabled);
         SessionPrefixBox.Text = Settings.SessionPrefix;
         StartHostingOnLaunchBox.IsChecked = Settings.StartHostingOnLaunch;
         CopyLinkWhenHostingStartsBox.IsChecked = Settings.CopyLinkWhenHostingStarts;
@@ -37,6 +42,9 @@ public partial class SettingsWindow : Window
         AllowSystemAudioBox.IsChecked = Settings.AllowSystemAudio;
         RemoteAudioVolumeSlider.Value = Settings.RemoteAudioVolumePercent;
         LocalAudioCaptureVolumeSlider.Value = Settings.LocalAudioCaptureVolumePercent;
+        EnableAsioAudioDriverBox.IsChecked = Settings.EnableAsioAudioDriver;
+        SelectComboItem(AsioDriverBox, Settings.AsioDriverName);
+        AsioLatencySlider.Value = Settings.AsioLatencyMilliseconds;
         AutoMuteControlledComputerAudioBox.IsChecked = Settings.AutoMuteControlledComputerAudio;
         MuteRemoteAudioWhenInactiveBox.IsChecked = Settings.MuteRemoteAudioWhenInactive;
         AutoMuteProcessesOnConnectBox.Text = Settings.AutoMuteProcessesOnConnect;
@@ -44,15 +52,22 @@ public partial class SettingsWindow : Window
         AutoConnectTrustedMachinesBox.IsChecked = Settings.AutoConnectTrustedMachines;
         AllowRemoteApplicationLaunchBox.IsChecked = Settings.AllowRemoteApplicationLaunch;
         RequireApprovalForNewDevicesBox.IsChecked = Settings.RequireApprovalForNewDevices;
+        TamperProtectionEnabledBox.IsChecked = Settings.TamperProtectionEnabled;
 
         AnnounceStatusChangesBox.IsChecked = Settings.AnnounceStatusChanges;
         DetailedScreenReaderMessagesBox.IsChecked = Settings.DetailedScreenReaderMessages;
         SoundAlertsBox.IsChecked = Settings.SoundAlerts;
         ReduceMotionBox.IsChecked = Settings.ReduceMotion;
+        EnableDiagnosticSendingBox.IsChecked = Settings.EnableDiagnosticSending;
         ShowOnlineOfflineNotificationsBox.IsChecked = Settings.ShowOnlineOfflineNotifications;
         ShowConnectionNotificationsBox.IsChecked = Settings.ShowConnectionNotifications;
         ShowElapsedConnectionTimeBox.IsChecked = Settings.ShowElapsedConnectionTime;
         AnnounceConnectionStrengthBox.IsChecked = Settings.AnnounceConnectionStrength;
+        EnableLocalTtsHelperBox.IsChecked = Settings.EnableLocalTtsHelper;
+        SelectTtsVoice(Settings.LocalTtsVoiceId);
+        LocalTtsRateSlider.Value = Settings.LocalTtsRate;
+        LocalTtsVolumeSlider.Value = Settings.LocalTtsVolumePercent;
+        SelectComboItem(TtsFallbackModeBox, Settings.TtsFallbackMode);
 
         CheckForUpdatesAutomaticallyBox.IsChecked = Settings.CheckForUpdatesAutomatically;
         DownloadUpdatesAutomaticallyBox.IsChecked = Settings.DownloadUpdatesAutomatically;
@@ -71,7 +86,9 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        Settings.DefaultServerUrl = DefaultServerBox.Text.Trim();
+        Settings.DefaultServerUrl = EndpointNormalizer.NormalizeWebSocketUrl(
+            DefaultServerBox.Text.Trim(),
+            Settings.CustomSignalingServerAccessEnabled);
         Settings.SessionPrefix = SessionPrefixBox.Text.Trim();
         Settings.StartHostingOnLaunch = StartHostingOnLaunchBox.IsChecked == true;
         Settings.CopyLinkWhenHostingStarts = CopyLinkWhenHostingStartsBox.IsChecked == true;
@@ -92,6 +109,9 @@ public partial class SettingsWindow : Window
         Settings.AllowSystemAudio = AllowSystemAudioBox.IsChecked == true;
         Settings.RemoteAudioVolumePercent = (int)RemoteAudioVolumeSlider.Value;
         Settings.LocalAudioCaptureVolumePercent = (int)LocalAudioCaptureVolumeSlider.Value;
+        Settings.EnableAsioAudioDriver = EnableAsioAudioDriverBox.IsChecked == true;
+        Settings.AsioDriverName = GetComboText(AsioDriverBox, "");
+        Settings.AsioLatencyMilliseconds = (int)AsioLatencySlider.Value;
         Settings.AutoMuteControlledComputerAudio = AutoMuteControlledComputerAudioBox.IsChecked == true;
         Settings.MuteRemoteAudioWhenInactive = MuteRemoteAudioWhenInactiveBox.IsChecked == true;
         Settings.AutoMuteProcessesOnConnect = AutoMuteProcessesOnConnectBox.Text.Trim();
@@ -99,15 +119,22 @@ public partial class SettingsWindow : Window
         Settings.AutoConnectTrustedMachines = AutoConnectTrustedMachinesBox.IsChecked == true;
         Settings.AllowRemoteApplicationLaunch = AllowRemoteApplicationLaunchBox.IsChecked == true;
         Settings.RequireApprovalForNewDevices = RequireApprovalForNewDevicesBox.IsChecked == true;
+        Settings.TamperProtectionEnabled = TamperProtectionEnabledBox.IsChecked == true;
 
         Settings.AnnounceStatusChanges = AnnounceStatusChangesBox.IsChecked == true;
         Settings.DetailedScreenReaderMessages = DetailedScreenReaderMessagesBox.IsChecked == true;
         Settings.SoundAlerts = SoundAlertsBox.IsChecked == true;
         Settings.ReduceMotion = ReduceMotionBox.IsChecked == true;
+        Settings.EnableDiagnosticSending = EnableDiagnosticSendingBox.IsChecked == true;
         Settings.ShowOnlineOfflineNotifications = ShowOnlineOfflineNotificationsBox.IsChecked == true;
         Settings.ShowConnectionNotifications = ShowConnectionNotificationsBox.IsChecked == true;
         Settings.ShowElapsedConnectionTime = ShowElapsedConnectionTimeBox.IsChecked == true;
         Settings.AnnounceConnectionStrength = AnnounceConnectionStrengthBox.IsChecked == true;
+        Settings.EnableLocalTtsHelper = EnableLocalTtsHelperBox.IsChecked == true;
+        Settings.LocalTtsVoiceId = GetSelectedTtsVoiceId();
+        Settings.LocalTtsRate = LocalTtsRateSlider.Value;
+        Settings.LocalTtsVolumePercent = (int)LocalTtsVolumeSlider.Value;
+        Settings.TtsFallbackMode = GetComboText(TtsFallbackModeBox, "screen-reader");
 
         Settings.CheckForUpdatesAutomatically = CheckForUpdatesAutomaticallyBox.IsChecked == true;
         Settings.DownloadUpdatesAutomatically = DownloadUpdatesAutomaticallyBox.IsChecked == true;
@@ -123,10 +150,18 @@ public partial class SettingsWindow : Window
 
     private bool TryValidate()
     {
-        if (!Uri.TryCreate(DefaultServerBox.Text.Trim(), UriKind.Absolute, out var serverUri) ||
+        var serverText = DefaultServerBox.Text.Trim();
+        if (!Uri.TryCreate(serverText, UriKind.Absolute, out var serverUri) ||
             (serverUri.Scheme != "wss" && serverUri.Scheme != "ws"))
         {
             ShowValidationError("Default server must be a ws or wss URL.", DefaultServerBox);
+            return false;
+        }
+
+        if (!Settings.CustomSignalingServerAccessEnabled &&
+            !EndpointNormalizer.IsApprovedDefaultWebSocketUrl(serverText))
+        {
+            ShowValidationError("Default server must be one of the approved OpenLink servers for this client build.", DefaultServerBox);
             return false;
         }
 
@@ -156,13 +191,93 @@ public partial class SettingsWindow : Window
             return false;
         }
 
+        if (EnableAsioAudioDriverBox.IsChecked == true &&
+            AsioDriverBox.Items.OfType<ComboBoxItem>().All(item => string.IsNullOrWhiteSpace(item.Content?.ToString())))
+        {
+            ShowValidationError("No ASIO or ASIO4ALL drivers were found. Install a driver first, or leave ASIO disabled.", AsioDriverBox);
+            return false;
+        }
+
         return true;
+    }
+
+    private void ConfigureDefaultServerChoices()
+    {
+        DefaultServerBox.Items.Clear();
+        foreach (var url in EndpointNormalizer.ApprovedWebSocketUrls)
+        {
+            DefaultServerBox.Items.Add(new ComboBoxItem { Content = url });
+        }
+
+        DefaultServerBox.IsEditable = Settings.CustomSignalingServerAccessEnabled;
+        if (Settings.CustomSignalingServerAccessEnabled &&
+            !EndpointNormalizer.IsApprovedDefaultWebSocketUrl(Settings.DefaultServerUrl))
+        {
+            DefaultServerBox.Items.Add(new ComboBoxItem { Content = Settings.DefaultServerUrl });
+        }
     }
 
     private void ShowValidationError(string message, System.Windows.Controls.Control control)
     {
         System.Windows.MessageBox.Show(this, message, "Settings", MessageBoxButton.OK, MessageBoxImage.Warning);
         control.Focus();
+    }
+
+    private void LoadTtsVoices()
+    {
+        LocalTtsVoiceBox.Items.Clear();
+        LocalTtsVoiceBox.Items.Add(new ComboBoxItem { Content = "System default", Tag = "" });
+
+        foreach (var voice in OpenLinkTtsService.GetInstalledVoices())
+        {
+            LocalTtsVoiceBox.Items.Add(new ComboBoxItem
+            {
+                Content = $"{voice.Name} ({voice.Locale})",
+                Tag = voice.Id
+            });
+        }
+    }
+
+    private void SelectTtsVoice(string voiceId)
+    {
+        foreach (var item in LocalTtsVoiceBox.Items.OfType<ComboBoxItem>())
+        {
+            if (string.Equals(item.Tag?.ToString() ?? "", voiceId, StringComparison.OrdinalIgnoreCase))
+            {
+                LocalTtsVoiceBox.SelectedItem = item;
+                return;
+            }
+        }
+
+        LocalTtsVoiceBox.SelectedIndex = 0;
+    }
+
+    private void LoadAsioDrivers()
+    {
+        AsioDriverBox.Items.Clear();
+        AsioDriverBox.Items.Add(new ComboBoxItem { Content = "" });
+        foreach (var driverName in OpenLinkAudioBridge.GetAsioDriverNames())
+        {
+            AsioDriverBox.Items.Add(new ComboBoxItem { Content = driverName });
+        }
+    }
+
+    private string GetSelectedTtsVoiceId()
+    {
+        return LocalTtsVoiceBox.SelectedItem is ComboBoxItem item
+            ? item.Tag?.ToString() ?? ""
+            : "";
+    }
+
+    private async void TestLocalTtsButton_Click(object sender, RoutedEventArgs e)
+    {
+        var preview = Settings.Clone();
+        preview.EnableLocalTtsHelper = true;
+        preview.LocalTtsVoiceId = GetSelectedTtsVoiceId();
+        preview.LocalTtsRate = LocalTtsRateSlider.Value;
+        preview.LocalTtsVolumePercent = (int)LocalTtsVolumeSlider.Value;
+        using var service = new OpenLinkTtsService(preview);
+        await service.TestAsync();
     }
 
     private static void SelectComboItem(System.Windows.Controls.ComboBox comboBox, string value)

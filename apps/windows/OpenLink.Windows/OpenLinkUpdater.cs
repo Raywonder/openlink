@@ -37,8 +37,7 @@ public sealed class OpenLinkUpdater
         try
         {
             using var http = new HttpClient();
-            await using var stream = await http.GetStreamAsync(_settings.UpdateManifestUrl, cancellationToken);
-            var manifest = await JsonSerializer.DeserializeAsync<UpdateManifest>(stream, ManifestJsonOptions, cancellationToken);
+            var manifest = await FetchManifestAsync(http, cancellationToken);
             if (manifest is null || string.IsNullOrWhiteSpace(manifest.Version) || string.IsNullOrWhiteSpace(manifest.ResolvedDownloadUrl))
             {
                 if (interactive)
@@ -76,6 +75,60 @@ public sealed class OpenLinkUpdater
             if (interactive)
             {
                 _announce($"OpenLink update check failed: {ex.Message}");
+            }
+        }
+    }
+
+    private async Task<UpdateManifest?> FetchManifestAsync(HttpClient http, CancellationToken cancellationToken)
+    {
+        Exception? lastError = null;
+        foreach (var manifestUrl in GetManifestUrls())
+        {
+            try
+            {
+                await using var stream = await http.GetStreamAsync(manifestUrl, cancellationToken);
+                var manifest = await JsonSerializer.DeserializeAsync<UpdateManifest>(stream, ManifestJsonOptions, cancellationToken);
+                if (manifest is not null)
+                {
+                    _log($"OpenLink update manifest loaded from {manifestUrl.Host}.");
+                    return manifest;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                lastError = ex;
+                _log($"OpenLink update manifest failed from {manifestUrl.Host}: {ex.Message}");
+            }
+        }
+
+        if (lastError is not null)
+        {
+            throw lastError;
+        }
+
+        return null;
+    }
+
+    private IEnumerable<Uri> GetManifestUrls()
+    {
+        var urls = new[]
+        {
+            _settings.UpdateManifestUrl,
+            OpenLinkSettings.CloudUpdateManifestUrl,
+            OpenLinkSettings.TappedInUpdateManifestUrl
+        };
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var url in urls)
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            {
+                continue;
+            }
+
+            if (seen.Add(uri.AbsoluteUri))
+            {
+                yield return uri;
             }
         }
     }

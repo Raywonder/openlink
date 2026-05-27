@@ -16,11 +16,6 @@
         </Grid.RowDefinitions>
 
         <DockPanel Grid.Row="0" Margin="0,0,0,14">
-            <Button DockPanel.Dock="Right"
-                    MinWidth="92"
-                    Content="Refresh"
-                    AutomationProperties.Name="Refresh machine details and application list"
-                    Click="RefreshButton_Click" />
             <StackPanel>
                 <TextBlock x:Name="TitleText"
                            FontSize="22"
@@ -36,8 +31,26 @@
                     AutomationProperties.Name="Machine detail categories">
             <TabItem Header="Applications">
                 <Grid Margin="0,12,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <DockPanel Margin="0,0,0,8">
+                        <Button x:Name="RefreshApplicationsButton"
+                                DockPanel.Dock="Right"
+                                MinWidth="140"
+                                Content="Refresh Applications"
+                                AutomationProperties.Name="Refresh running applications"
+                                Click="RefreshButton_Click" />
+                        <TextBlock x:Name="ApplicationsStatusText"
+                                   VerticalAlignment="Center"
+                                   AutomationProperties.LiveSetting="Polite"
+                                   Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+                    </DockPanel>
                     <ListBox x:Name="ApplicationsListBox"
+                             Grid.Row="1"
                              AutomationProperties.Name="Running applications"
+                             AutomationProperties.LiveSetting="Polite"
                              MouseDoubleClick="ApplicationsListBox_MouseDoubleClick">
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="{x:Type ListBoxItem}">
@@ -57,7 +70,7 @@
                                         <TextBlock Text="{Binding DisplayName}"
                                                    FontWeight="SemiBold"
                                                    TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Text="{Binding Path}"
+                                        <TextBlock Text="{Binding DisplayPath}"
                                                    FontSize="12"
                                                    Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"
                                                    TextTrimming="CharacterEllipsis" />
@@ -65,7 +78,7 @@
                                     <TextBlock Grid.Column="1"
                                                Margin="12,0,0,0"
                                                VerticalAlignment="Center"
-                                               Text="{Binding MemoryMb, StringFormat={}{0:N1} MB}" />
+                                               Text="{Binding DisplayMemoryText}" />
                                     <TextBlock Grid.Column="2"
                                                Margin="12,0,0,0"
                                                VerticalAlignment="Center"
@@ -120,15 +133,18 @@
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,14,0,0">
-            <Button MinWidth="96"
+            <Button x:Name="RestartMachineButton"
+                    MinWidth="96"
                     Margin="0,0,8,0"
                     Content="Restart"
                     Click="RestartMachine_Click" />
-            <Button MinWidth="96"
+            <Button x:Name="LockMachineButton"
+                    MinWidth="96"
                     Margin="0,0,8,0"
                     Content="Lock"
                     Click="LockMachine_Click" />
-            <Button MinWidth="96"
+            <Button x:Name="LogoutMachineButton"
+                    MinWidth="96"
                     Margin="0,0,8,0"
                     Content="Log Out"
                     Click="LogoutMachine_Click" />

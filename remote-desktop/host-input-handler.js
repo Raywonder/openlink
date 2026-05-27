@@ -16,7 +16,7 @@ class HostInputHandler {
             enableMouse: true,
             enableClipboard: true,
             restrictedKeys: ['Meta', 'Super'],  // Keys that won't be forwarded by default
-            allowedModifiers: ['Control', 'Alt', 'Shift'],
+            allowedModifiers: ['Control', 'Alt', 'Shift', 'Meta'],
             // Platform-aware key mapping: when controlling Windows from Mac,
             // prevent Cmd+L from becoming Win+L (locks Windows)
             enableCrossplatformKeyMapping: true,
@@ -195,10 +195,11 @@ class HostInputHandler {
     handleKeyboard(data) {
         if (!this.options.enableKeyboard) return;
 
-        const { key, code, modifiers, isDown } = data;
+        const { key, code, isDown } = data;
+        const modifiers = { ...(data.modifiers || {}) };
 
         // Check restricted keys
-        if (this.options.restrictedKeys.includes(key)) {
+        if (this.options.restrictedKeys.includes(key) && !this.shouldAllowRestrictedKey(key, modifiers)) {
             return;
         }
 
@@ -258,6 +259,9 @@ class HostInputHandler {
             if (modifiers.ctrl && this.options.allowedModifiers.includes('Control')) mods.push('control');
             if (modifiers.alt && this.options.allowedModifiers.includes('Alt')) mods.push('alt');
             if (modifiers.shift && this.options.allowedModifiers.includes('Shift')) mods.push('shift');
+            if (modifiers.meta && this.options.allowedModifiers.includes('Meta')) {
+                mods.push(this.hostPlatform === 'darwin' ? 'command' : 'meta');
+            }
 
             if (isDown) {
                 this.pressedKeys.add(keyCode);
@@ -278,10 +282,67 @@ class HostInputHandler {
 
             if (nutKey) {
                 if (isDown) {
+                    this.pressNutModifiers(modifiers, nutKey);
+                    this.pressedKeys.add(nutKey);
                     this.inputModule.keyboard.pressKey(nutKey);
                 } else {
                     this.inputModule.keyboard.releaseKey(nutKey);
+                    this.pressedKeys.delete(nutKey);
+                    this.releaseNutModifiers(modifiers, nutKey);
                 }
+            }
+        }
+    }
+
+    shouldAllowRestrictedKey(key, modifiers) {
+        if (!this.options.enableCrossplatformKeyMapping) return false;
+
+        const isWindowsClient = this.clientPlatform === 'win32';
+        const isMacClient = this.clientPlatform === 'darwin';
+        const isWindowsHost = this.hostPlatform === 'win32';
+        const isMacHost = this.hostPlatform === 'darwin';
+
+        return (key === 'Meta' || key === 'Super') &&
+            ((isWindowsClient && isMacHost && modifiers.ctrl) || (isMacClient && isWindowsHost && modifiers.meta));
+    }
+
+    getNutKeyEnum() {
+        try {
+            return require('@nut-tree-fork/nut-js').Key;
+        } catch (e) {
+            return require('@nut-tree/nut-js').Key;
+        }
+    }
+
+    getNutModifierKeys(modifiers, mainKey = null) {
+        const Key = this.getNutKeyEnum();
+        const keys = [];
+
+        if (modifiers.ctrl && this.options.allowedModifiers.includes('Control')) keys.push(Key.LeftControl);
+        if (modifiers.alt && this.options.allowedModifiers.includes('Alt')) keys.push(Key.LeftAlt);
+        if (modifiers.shift && this.options.allowedModifiers.includes('Shift')) keys.push(Key.LeftShift);
+        if (modifiers.meta && this.options.allowedModifiers.includes('Meta')) {
+            const metaKey = Key.LeftSuper || Key.LeftMeta || Key.LeftCommand || Key.LeftWin;
+            if (metaKey) keys.push(metaKey);
+        }
+
+        return keys.filter(key => key && key !== mainKey);
+    }
+
+    pressNutModifiers(modifiers, mainKey = null) {
+        for (const modifierKey of this.getNutModifierKeys(modifiers, mainKey)) {
+            if (!this.pressedKeys.has(modifierKey)) {
+                this.inputModule.keyboard.pressKey(modifierKey);
+                this.pressedKeys.add(modifierKey);
+            }
+        }
+    }
+
+    releaseNutModifiers(modifiers, mainKey = null) {
+        for (const modifierKey of this.getNutModifierKeys(modifiers, mainKey).reverse()) {
+            if (this.pressedKeys.has(modifierKey)) {
+                this.inputModule.keyboard.releaseKey(modifierKey);
+                this.pressedKeys.delete(modifierKey);
             }
         }
     }
@@ -421,6 +482,14 @@ class HostInputHandler {
             for (const key of this.pressedKeys) {
                 try {
                     this.inputModule.keyToggle(key, 'up');
+                } catch (e) {
+                    // Ignore errors
+                }
+            }
+        } else if (this.inputType === 'nutjs') {
+            for (const key of this.pressedKeys) {
+                try {
+                    this.inputModule.keyboard.releaseKey(key);
                 } catch (e) {
                     // Ignore errors
                 }

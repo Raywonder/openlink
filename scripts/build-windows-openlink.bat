@@ -20,6 +20,11 @@ echo Building native OpenLink Windows app...
 "%DOTNET_EXE%" publish "%PROJECT%" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "%PUBLISH_DIR%"
 if errorlevel 1 goto fail
 
+if exist "%ROOT%\apps\windows\OpenLink.Windows\Assets" (
+  robocopy "%ROOT%\apps\windows\OpenLink.Windows\Assets" "%PUBLISH_DIR%\Assets" /E /NFL /NDL /NJH /NJS /NP
+  if %ERRORLEVEL% GEQ 8 exit /b %ERRORLEVEL%
+)
+
 if exist "%PF86%\Inno Setup 6\ISCC.exe" set "ISCC_EXE=%PF86%\Inno Setup 6\ISCC.exe"
 if not defined ISCC_EXE if exist "%PF64%\Inno Setup 6\ISCC.exe" set "ISCC_EXE=%PF64%\Inno Setup 6\ISCC.exe"
 

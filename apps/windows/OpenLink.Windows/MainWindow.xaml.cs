@@ -10,6 +10,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using System.IO;
+using System.Media;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using Forms = System.Windows.Forms;
@@ -26,8 +27,10 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _healthTimer;
     private readonly DispatcherTimer _elapsedTimer;
     private readonly OpenLinkAudioBridge _audioBridge = new();
+    private readonly OpenLinkTtsService _ttsService;
     private readonly SoundActionPlayer _soundPlayer;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private readonly Dictionary<string, MachineDetailsWindow> _machineDetailsWindows = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HttpClient HealthClient = new() { Timeout = TimeSpan.FromSeconds(5) };
     private string? _activeSessionId;
     private string? _activeLink;
@@ -50,6 +53,7 @@ public partial class MainWindow : Window
     private bool _controllerActionsMenuQueued;
     private bool _controllerActionsMenuOpen;
     private Forms.ContextMenuStrip? _controllerActionsMenu;
+    private bool _controllerHotkeyChordDown;
     private IntPtr _windowHandle;
     private IntPtr _keyboardHook;
     private LowLevelKeyboardProc? _keyboardHookProc;
@@ -66,18 +70,28 @@ public partial class MainWindow : Window
     private const uint ModShift = 0x0004;
     private const uint VkOem5 = 0xDC;
     private const int VkControl = 0x11;
+    private const int VkLControl = 0xA2;
+    private const int VkRControl = 0xA3;
     private const int VkMenu = 0x12;
+    private const int VkLMenu = 0xA4;
+    private const int VkRMenu = 0xA5;
     private const int VkShift = 0x10;
+    private const int VkLShift = 0xA0;
+    private const int VkRShift = 0xA1;
     private const int VkTab = 0x09;
     private const int VkEscape = 0x1B;
     private const int VkLWin = 0x5B;
     private const int VkRWin = 0x5C;
+    private const int VkOem102 = 0xE2;
     private const ulong MacShiftFlag = 0x20000;
     private const ulong MacControlFlag = 0x40000;
     private const ulong MacAlternateFlag = 0x80000;
     private const ulong MacCommandFlag = 0x100000;
     private const string ConnectionShortcutHelp = "Press Enter on a selected machine to connect. Press Shift F10 or the Applications key for the connection menu. Press Control Alt Backslash for controller actions. Press Control Shift Backslash to show Machines and settings. Press Alt C for the Connections menu.";
     private const string InteractionShortcutHelp = "To interact with the connected device, choose Start Using the device. Press Control Alt Backslash for controller actions. Use Minimize Remote Connection to Use Local Machine to return to this computer.";
+    private static readonly string RuntimeLogDirectory = Path.Combine(OpenLinkSettingsStore.SettingsDirectory, "logs");
+    private static readonly string RuntimeLogPath = Path.Combine(RuntimeLogDirectory, "openlink-windows.log");
+    private const long RuntimeLogMaxBytes = 1024 * 1024;
     private static readonly string[] LegacyStartupValueNames =
     [
         "electron.app.OpenLink",
@@ -88,6 +102,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _soundPlayer = new SoundActionPlayer(AddLog);
+        _ttsService = new OpenLinkTtsService(_settings, AddLog);
         _machines = new ObservableCollection<MachineRecord>(MachineStore.Load());
         MachinesListBox.ItemsSource = _machines;
         _trayIcon = CreateTrayIcon();
@@ -114,6 +129,7 @@ public partial class MainWindow : Window
             }
             _trayIcon.Dispose();
             _audioBridge.Dispose();
+            _ttsService.Dispose();
             _sendLock.Dispose();
         };
     }
@@ -168,20 +184,41 @@ public partial class MainWindow : Window
         if (nCode >= 0 && (message == WmKeydown || message == WmSyskeydown || message == WmKeyup || message == WmSyskeyup))
         {
             var vkCode = Marshal.ReadInt32(lParam);
-            var ctrlDown = (GetAsyncKeyState(VkControl) & 0x8000) != 0;
-            var altDown = (GetAsyncKeyState(VkMenu) & 0x8000) != 0;
-            var shiftDown = (GetAsyncKeyState(VkShift) & 0x8000) != 0;
             var keyDown = message == WmKeydown || message == WmSyskeydown;
+            var ctrlDown = IsControlDown(vkCode, keyDown);
+            var altDown = IsAltDown(vkCode, keyDown);
+            var shiftDown = IsShiftDown(vkCode, keyDown);
+            var controllerKey = IsBackslashVirtualKey(vkCode);
 
-            if (keyDown && vkCode == VkOem5 && ctrlDown && altDown)
+            if (controllerKey && ctrlDown && altDown)
             {
-                Dispatcher.BeginInvoke(QueueControllerActionsMenu);
+                if (keyDown && !_controllerHotkeyChordDown)
+                {
+                    _controllerHotkeyChordDown = true;
+                    Dispatcher.BeginInvoke(QueueControllerActionsMenu);
+                }
+                if (!keyDown)
+                {
+                    _controllerHotkeyChordDown = false;
+                }
                 return new IntPtr(1);
             }
-            if (keyDown && vkCode == VkOem5 && ctrlDown && shiftDown)
+            if (controllerKey && ctrlDown && shiftDown)
             {
-                Dispatcher.BeginInvoke(ShowMachinesAndSettingsSurface);
+                if (keyDown && !_controllerHotkeyChordDown)
+                {
+                    _controllerHotkeyChordDown = true;
+                    Dispatcher.BeginInvoke(ShowMachinesAndSettingsSurface);
+                }
+                if (!keyDown)
+                {
+                    _controllerHotkeyChordDown = false;
+                }
                 return new IntPtr(1);
+            }
+            if (!keyDown && controllerKey)
+            {
+                _controllerHotkeyChordDown = false;
             }
             if (keyDown && vkCode == VkEscape && _controllerActionsMenuOpen)
             {
@@ -220,6 +257,35 @@ public partial class MainWindow : Window
         }
 
         return CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
+    }
+
+    private static bool IsBackslashVirtualKey(int vkCode)
+    {
+        return vkCode == VkOem5 || vkCode == VkOem102;
+    }
+
+    private static bool IsControlDown(int vkCode, bool keyDown)
+    {
+        return (GetAsyncKeyState(VkControl) & 0x8000) != 0 ||
+            (GetAsyncKeyState(VkLControl) & 0x8000) != 0 ||
+            (GetAsyncKeyState(VkRControl) & 0x8000) != 0 ||
+            (keyDown && (vkCode == VkControl || vkCode == VkLControl || vkCode == VkRControl));
+    }
+
+    private static bool IsAltDown(int vkCode, bool keyDown)
+    {
+        return (GetAsyncKeyState(VkMenu) & 0x8000) != 0 ||
+            (GetAsyncKeyState(VkLMenu) & 0x8000) != 0 ||
+            (GetAsyncKeyState(VkRMenu) & 0x8000) != 0 ||
+            (keyDown && (vkCode == VkMenu || vkCode == VkLMenu || vkCode == VkRMenu));
+    }
+
+    private static bool IsShiftDown(int vkCode, bool keyDown)
+    {
+        return (GetAsyncKeyState(VkShift) & 0x8000) != 0 ||
+            (GetAsyncKeyState(VkLShift) & 0x8000) != 0 ||
+            (GetAsyncKeyState(VkRShift) & 0x8000) != 0 ||
+            (keyDown && (vkCode == VkShift || vkCode == VkLShift || vkCode == VkRShift));
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -269,10 +335,16 @@ public partial class MainWindow : Window
             _activeServerUrl = serverUrl;
             _hostingReadyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             await RefreshServiceHealthAsync(showTransitionNotifications: false);
-            _socketCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             _socket = new ClientWebSocket();
-            await _socket.ConnectAsync(new Uri(serverUrl), _socketCancellation.Token);
+            using var connectTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await _socket.ConnectAsync(new Uri(serverUrl), connectTimeout.Token);
+            _socketCancellation = new CancellationTokenSource();
             AddLog($"Connected to {serverUrl}");
+            _ = SendDiagnosticEventAsync("signaling_connected", outcome: "success", metadata: new
+            {
+                endpoint = EndpointNormalizer.ShareHostFor(serverUrl),
+                transport = "websocket"
+            });
 
             var machineInfo = CreateLocalMachineInfo(serverUrl);
             var connectionPolicy = CreateConnectionPolicy();
@@ -289,7 +361,7 @@ public partial class MainWindow : Window
                     machineName = Environment.MachineName,
                     os = "Windows",
                     app = "OpenLink",
-                    version = "1.7.18",
+                    version = GetType().Assembly.GetName().Version?.ToString(3) ?? "1.7.21",
                     permissions = new
                     {
                         remoteControl = _settings.AllowRemoteControl,
@@ -341,9 +413,26 @@ public partial class MainWindow : Window
         OpenLinkSettingsStore.Save(_settings);
         ApplySettingsToMainWindow();
         _audioBridge.Configure(_settings, AddLog);
+        _ttsService.Configure(_settings);
+        _ = SendDiagnosticEventAsync("settings_saved", outcome: "success", metadata: new
+        {
+            diagnosticsEnabled = _settings.EnableDiagnosticSending,
+            localTtsEnabled = _settings.EnableLocalTtsHelper,
+            audioAllowed = _settings.AllowAudio
+        });
         ConfigureLaunchAtLogin();
         SetStatus("Settings saved.");
         SettingsButton.Focus();
+    }
+
+    private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == Key.OemComma &&
+            (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+        {
+            e.Handled = true;
+            SettingsButton_Click(sender, new RoutedEventArgs());
+        }
     }
 
     private async void StopHostingButton_Click(object sender, RoutedEventArgs e)
@@ -385,9 +474,12 @@ public partial class MainWindow : Window
 
     private void QuitMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        _allowClose = true;
-        _trayIcon.Visible = false;
-        System.Windows.Application.Current.Shutdown();
+        HideToTrayForActiveSession();
+        if (IsVisible)
+        {
+            Hide();
+        }
+        _trayIcon.ShowBalloonTip(2500, "OpenLink", "OpenLink is minimized to the tray. Use the tray menu to quit.", Forms.ToolTipIcon.Info);
     }
 
     private void ConnectLastMachineMenuItem_Click(object sender, RoutedEventArgs e)
@@ -434,6 +526,10 @@ public partial class MainWindow : Window
             SetStatus("No connected machine is selected.");
             return;
         }
+        if (TryBlockLocalMachineAction(machine, "disconnect from"))
+        {
+            return;
+        }
 
         _ = DisconnectFromDeviceAsync(machine);
     }
@@ -446,6 +542,10 @@ public partial class MainWindow : Window
             SetStatus("No machine is selected.");
             return;
         }
+        if (TryBlockLocalMachineAction(machine, "start using"))
+        {
+            return;
+        }
 
         _ = StartUsingMachineAsync(machine);
     }
@@ -456,6 +556,10 @@ public partial class MainWindow : Window
         if (machine is null)
         {
             SetStatus("No connected machine is selected.");
+            return;
+        }
+        if (TryBlockLocalMachineAction(machine, "swap control with"))
+        {
             return;
         }
 
@@ -503,8 +607,6 @@ public partial class MainWindow : Window
 
     private void HandleServerMessage(string json)
     {
-        AddLog(json);
-
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
         var type = root.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : "";
@@ -515,6 +617,11 @@ public partial class MainWindow : Window
         {
             HandleServerMessage(broadcastData.GetRawText());
             return;
+        }
+
+        if (!ShouldSuppressServerLog(type))
+        {
+            AddLog(SummarizeServerMessage(root, type));
         }
 
         switch (type)
@@ -546,6 +653,7 @@ public partial class MainWindow : Window
                     ? peerElement.GetString() ?? "remote device"
                     : "remote device";
                 NotifyDeviceConnection(peerId, Environment.MachineName, true);
+                _ = SendDiagnosticEventAsync("peer_joined", outcome: "success", metadata: new { peerId });
                 break;
             case "peer_disconnected":
                 var disconnectedPeerId = root.TryGetProperty("peerId", out var disconnectedPeerElement)
@@ -553,6 +661,7 @@ public partial class MainWindow : Window
                     : "remote device";
                 NotifyDeviceConnection(disconnectedPeerId, Environment.MachineName, false);
                 StopRemoteInputForwarding("remote peer disconnected");
+                _ = SendDiagnosticEventAsync("peer_disconnected", outcome: "success", metadata: new { peerId = disconnectedPeerId });
                 break;
             case "machine_connect_ack":
                 SetStatus(_remoteInputPending
@@ -561,11 +670,29 @@ public partial class MainWindow : Window
                         ? "Remote machine accepted the connection. Preparing keyboard and audio interaction."
                         : "Remote machine accepted the connection. Choose Start Using to begin keyboard and audio control.");
                 break;
+            case "machine_connect_request":
+                HandleMachineConnectRequest(root);
+                break;
+            case "start_interaction":
+                HandleStartInteractionRequest(root);
+                break;
             case "start_interaction_ack":
                 HandleStartInteractionAck(root);
                 break;
             case "audio_frame":
                 HandleRemoteAudioFrame(root);
+                break;
+            case "machine_management_action":
+                HandleMachineManagementAction(root);
+                break;
+            case "application_list":
+            case "applications_list":
+            case "running_applications":
+                HandleRemoteApplicationList(root);
+                break;
+            case "tts_announcement":
+            case "screen_reader_announcement":
+                HandleRemoteTtsAnnouncement(root);
                 break;
             case "message":
             case "chat_message":
@@ -577,6 +704,12 @@ public partial class MainWindow : Window
             case "controller_disconnect_ack":
             case "disconnect_user_ack":
                 StopRemoteInputForwarding(type ?? "remote interaction stopped");
+                _ = SendDiagnosticEventAsync(type ?? "remote_interaction_stopped", outcome: "success");
+                break;
+            case "pause_interaction":
+            case "controller_disconnect":
+            case "disconnect_user":
+                HandleRemoteInteractionStopRequest(type ?? "remote interaction stopped", root);
                 break;
             case "error":
             case "join_error":
@@ -586,8 +719,37 @@ public partial class MainWindow : Window
                 SetStatus($"Server error: {message}");
                 PlaySound(SoundAction.Error);
                 StopRemoteInputForwarding($"server error: {message}");
+                _ = SendDiagnosticEventAsync("server_error", outcome: "error", metadata: new { errorType = type, message });
                 break;
         }
+    }
+
+    private static bool ShouldSuppressServerLog(string? type)
+    {
+        return string.Equals(type, "audio_frame", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string SummarizeServerMessage(JsonElement root, string? type)
+    {
+        if (string.IsNullOrWhiteSpace(type))
+        {
+            return "Received server message with no type.";
+        }
+
+        var source = root.TryGetProperty("sourceMachineId", out var sourceElement)
+            ? sourceElement.GetString()
+            : root.TryGetProperty("source", out var sourceNameElement) ? sourceNameElement.GetString() : null;
+        var target = root.TryGetProperty("targetMachineId", out var targetElement) ? targetElement.GetString() : null;
+        var requestId = root.TryGetProperty("requestId", out var requestElement) ? requestElement.GetString() : null;
+
+        return string.Join(" ",
+            new[]
+            {
+                $"Received {type}.",
+                string.IsNullOrWhiteSpace(source) ? null : $"source={source}.",
+                string.IsNullOrWhiteSpace(target) ? null : $"target={target}.",
+                string.IsNullOrWhiteSpace(requestId) ? null : $"requestId={requestId}."
+            }.Where(part => !string.IsNullOrWhiteSpace(part)));
     }
 
     private void HandleStartInteractionAck(JsonElement root)
@@ -604,11 +766,186 @@ public partial class MainWindow : Window
             StopRemoteInputForwarding(error);
             SetStatus($"Remote keyboard control did not start: {error}. Keyboard remains on this computer.");
             PlaySound(SoundAction.Error);
-            ShowFromTray();
             return;
         }
 
         ActivateRemoteInputForwarding(requestId, message);
+        _ = SendDiagnosticEventAsync("start_interaction_ack", _remoteInputMachine, "success");
+    }
+
+    private void HandleRemoteTtsAnnouncement(JsonElement root)
+    {
+        var target = root.TryGetProperty("targetMachineId", out var targetElement) ? targetElement.GetString() : null;
+        if (!string.IsNullOrWhiteSpace(target) &&
+            !string.Equals(target, Environment.MachineName, StringComparison.OrdinalIgnoreCase) &&
+            !_machines.Any(machine => string.Equals(machine.Id, target, StringComparison.OrdinalIgnoreCase) && IsLocalMachine(machine)))
+        {
+            return;
+        }
+
+        var text = root.TryGetProperty("text", out var textElement)
+            ? textElement.GetString()
+            : root.TryGetProperty("message", out var messageElement) ? messageElement.GetString() : null;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        AddLog($"Remote announcement: {text}");
+        _ = _ttsService.SpeakRemoteAnnouncementAsync(text);
+    }
+
+    private void HandleMachineManagementAction(JsonElement root)
+    {
+        if (!IsMessageTargetedToThisMachine(root))
+        {
+            return;
+        }
+
+        var action = root.TryGetProperty("action", out var actionElement) ? actionElement.GetString() : null;
+        if (!string.Equals(action, "list_applications", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var applications = RemoteApplicationRecord.GetLocalApplications()
+            .Select(app => app.ToPayload())
+            .ToList();
+        _ = SendPeerAsync(new
+        {
+            type = "application_list",
+            targetMachineId = GetSourceMachineId(root),
+            sourceMachineId = Environment.MachineName,
+            applications
+        });
+        SetStatus($"Sent {applications.Count} running applications to the controlling OpenLink machine.");
+    }
+
+    private void HandleRemoteApplicationList(JsonElement root)
+    {
+        if (!IsMessageTargetedToThisMachine(root))
+        {
+            return;
+        }
+
+        var sourceMachineId = GetSourceMachineId(root);
+        if (string.IsNullOrWhiteSpace(sourceMachineId))
+        {
+            sourceMachineId = root.TryGetProperty("sourceMachineId", out var sourceElement)
+                ? sourceElement.GetString()
+                : null;
+        }
+
+        if (string.IsNullOrWhiteSpace(sourceMachineId) ||
+            !root.TryGetProperty("applications", out var applicationsElement) ||
+            applicationsElement.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        var applications = applicationsElement
+            .EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.Object)
+            .Select(RemoteApplicationRecord.FromJson)
+            .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(item => item.ProcessId)
+            .ToList();
+
+        if (_machineDetailsWindows.TryGetValue(NormalizeMachineToken(sourceMachineId), out var window))
+        {
+            window.UpdateRemoteApplications(applications);
+        }
+
+        SetStatus($"{applications.Count} running applications received from {sourceMachineId}.");
+    }
+
+    private void HandleMachineConnectRequest(JsonElement root)
+    {
+        if (!IsMessageTargetedToThisMachine(root))
+        {
+            return;
+        }
+
+        var remoteMachine = UpsertRemoteMachineFromMessage(root);
+        var accepted = _settings.AllowRemoteControl &&
+            (!_settings.RequireApprovalForNewDevices || remoteMachine?.IsTrusted == true || remoteMachine?.AllowDropIn == true);
+        var message = accepted
+            ? $"Remote machine accepted by {Environment.MachineName}."
+            : $"Remote control is not approved on {Environment.MachineName}.";
+
+        _ = SendPeerAsync(new
+        {
+            type = "machine_connect_ack",
+            targetMachineId = GetSourceMachineId(root),
+            sourceMachineId = Environment.MachineName,
+            success = accepted,
+            message
+        });
+
+        SetStatus(accepted
+            ? $"Remote connection request accepted from {remoteMachine?.DisplayName ?? "another OpenLink machine"}."
+            : "Remote connection request blocked because this machine requires approval or remote control is disabled.");
+        _ = SendDiagnosticEventAsync("machine_connect_request", remoteMachine, accepted ? "accepted" : "blocked");
+    }
+
+    private void HandleStartInteractionRequest(JsonElement root)
+    {
+        if (!IsMessageTargetedToThisMachine(root))
+        {
+            return;
+        }
+
+        var remoteMachine = UpsertRemoteMachineFromMessage(root);
+        var requestId = root.TryGetProperty("requestId", out var requestElement) ? requestElement.GetString() : null;
+        var accepted = _settings.AllowRemoteControl &&
+            (!_settings.RequireApprovalForNewDevices || remoteMachine?.IsTrusted == true || remoteMachine?.AllowDropIn == true);
+        var message = accepted
+            ? $"Keyboard and audio control accepted by {Environment.MachineName}."
+            : $"Keyboard control is not approved on {Environment.MachineName}.";
+
+        _ = SendPeerAsync(new
+        {
+            type = "start_interaction_ack",
+            targetMachineId = GetSourceMachineId(root),
+            sourceMachineId = Environment.MachineName,
+            requestId,
+            success = accepted,
+            message
+        });
+
+        if (!accepted)
+        {
+            SetStatus("Remote keyboard control request blocked because this machine requires approval or remote control is disabled.");
+            PlaySound(SoundAction.Error);
+            _ = SendDiagnosticEventAsync("start_interaction", remoteMachine, "blocked");
+            return;
+        }
+
+        _sessionActive = true;
+        UpdateConnectedUiState();
+        PlaySound(SoundAction.Connect);
+        SetStatus($"Remote keyboard and audio control accepted from {remoteMachine?.DisplayName ?? "another OpenLink machine"}. Use Control Alt Backslash for local OpenLink actions.");
+        HideToTrayForActiveSession();
+        _ = SendDiagnosticEventAsync("start_interaction", remoteMachine, "accepted");
+    }
+
+    private void HandleRemoteInteractionStopRequest(string type, JsonElement root)
+    {
+        if (!IsMessageTargetedToThisMachine(root))
+        {
+            return;
+        }
+
+        _audioBridge.SetFrameSink(null);
+        SetStatus("Remote interaction ended. Local keyboard and audio remain on this computer.");
+        _ = SendPeerAsync(new
+        {
+            type = $"{type}_ack",
+            targetMachineId = GetSourceMachineId(root),
+            sourceMachineId = Environment.MachineName,
+            success = true
+        });
+        _ = SendDiagnosticEventAsync(type, outcome: "acknowledged");
     }
 
     private void CompleteHosting()
@@ -629,6 +966,11 @@ public partial class MainWindow : Window
         }
 
         SetStatus($"Hosting. Session {_activeSessionId}. {ConnectionShortcutHelp}");
+        _ = SendDiagnosticEventAsync("hosting_started", outcome: "success", metadata: new
+        {
+            sessionId = _activeSessionId ?? "",
+            audioTransport = "native-wasapi"
+        });
         HideToTrayForActiveSession();
     }
 
@@ -657,6 +999,29 @@ public partial class MainWindow : Window
         {
             type = "broadcast",
             data = payload
+        });
+    }
+
+    private Task<bool> SendDiagnosticEventAsync(string eventName, MachineRecord? machine = null, string? outcome = null, object? metadata = null)
+    {
+        if (!_settings.EnableDiagnosticSending)
+        {
+            return Task.FromResult(false);
+        }
+
+        return SendAsync(new
+        {
+            type = "diagnostic_event",
+            eventName,
+            sessionId = _activeSessionId,
+            sourceMachineId = Environment.MachineName,
+            sourceMachineName = Environment.MachineName,
+            sourcePlatform = "Windows",
+            targetMachineId = machine?.Id,
+            targetMachineName = machine?.DisplayName,
+            targetPlatform = machine?.Platform,
+            outcome = outcome ?? "info",
+            metadata
         });
     }
 
@@ -717,7 +1082,7 @@ public partial class MainWindow : Window
             StopRemoteInputForwarding("remote input handshake timed out");
             SetStatus($"The remote machine did not confirm keyboard control for {machine.DisplayName}. Keyboard stayed on this computer.");
             AddLog($"Remote keyboard forwarding handshake timed out for {machine.DisplayName}.");
-            ShowFromTray();
+            PlaySound(SoundAction.Error);
         });
     }
 
@@ -973,7 +1338,7 @@ public partial class MainWindow : Window
         var rawUrl = string.IsNullOrWhiteSpace(selected)
             ? _settings.DefaultServerUrl
             : selected;
-        var normalized = EndpointNormalizer.NormalizeWebSocketUrl(rawUrl);
+        var normalized = EndpointNormalizer.NormalizeWebSocketUrl(rawUrl, _settings.CustomSignalingServerAccessEnabled);
         if (!string.Equals(rawUrl, normalized, StringComparison.OrdinalIgnoreCase))
         {
             AddLog($"Normalized endpoint {rawUrl} to {normalized}");
@@ -991,9 +1356,22 @@ public partial class MainWindow : Window
 
     private void ApplySettingsToMainWindow()
     {
+        ServerCombo.Items.Clear();
+        foreach (var url in EndpointNormalizer.ApprovedWebSocketUrls)
+        {
+            ServerCombo.Items.Add(new System.Windows.Controls.ComboBoxItem { Content = url });
+        }
+        ServerCombo.IsEditable = _settings.CustomSignalingServerAccessEnabled;
+        if (_settings.CustomSignalingServerAccessEnabled &&
+            !EndpointNormalizer.IsApprovedDefaultWebSocketUrl(_settings.DefaultServerUrl))
+        {
+            ServerCombo.Items.Add(new System.Windows.Controls.ComboBoxItem { Content = _settings.DefaultServerUrl });
+        }
+
         ServerCombo.Text = string.IsNullOrWhiteSpace(_settings.DefaultServerUrl)
             ? EndpointNormalizer.CanonicalWebSocketUrl
-            : EndpointNormalizer.NormalizeWebSocketUrl(_settings.DefaultServerUrl);
+            : EndpointNormalizer.NormalizeWebSocketUrl(_settings.DefaultServerUrl, _settings.CustomSignalingServerAccessEnabled);
+        _ttsService.Configure(_settings);
         RebuildTrayMenu();
     }
 
@@ -1001,15 +1379,70 @@ public partial class MainWindow : Window
     {
         StatusTextBlock.Text = status;
         System.Windows.Automation.AutomationProperties.SetName(StatusTextBlock, $"Status: {status}");
+        AnnounceStatusToScreenReader(status);
         if (_settings.AnnounceStatusChanges)
         {
             AddLog(status);
+            _ = _ttsService.SpeakStatusAsync(status);
+        }
+    }
+
+    private void AnnounceStatusToScreenReader(string status)
+    {
+        try
+        {
+            var peer = System.Windows.Automation.Peers.UIElementAutomationPeer.FromElement(StatusTextBlock)
+                ?? System.Windows.Automation.Peers.UIElementAutomationPeer.CreatePeerForElement(StatusTextBlock);
+            peer?.RaiseNotificationEvent(
+                System.Windows.Automation.AutomationNotificationKind.ActionCompleted,
+                System.Windows.Automation.AutomationNotificationProcessing.ImportantMostRecent,
+                status,
+                "OpenLinkStatus");
+        }
+        catch
+        {
+            // Screen reader announcement is best-effort; local TTS remains the fallback when enabled.
         }
     }
 
     private void AddLog(string message)
     {
         LogListBox.Items.Insert(0, $"[{DateTime.Now:T}] {message}");
+        WriteRuntimeLog(message);
+    }
+
+    private static void WriteRuntimeLog(string message)
+    {
+        try
+        {
+            Directory.CreateDirectory(RuntimeLogDirectory);
+            if (File.Exists(RuntimeLogPath) && new FileInfo(RuntimeLogPath).Length > RuntimeLogMaxBytes)
+            {
+                var rotatedPath = Path.Combine(RuntimeLogDirectory, $"openlink-windows-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+                File.Move(RuntimeLogPath, rotatedPath, overwrite: true);
+            }
+
+            var line = $"{DateTimeOffset.Now:O} {SanitizeLogLine(message)}{Environment.NewLine}";
+            File.AppendAllText(RuntimeLogPath, line, Encoding.UTF8);
+        }
+        catch
+        {
+            // Logging must never interrupt remote control.
+        }
+    }
+
+    private static string SanitizeLogLine(string message)
+    {
+        var line = string.IsNullOrWhiteSpace(message) ? "" : message.Replace("\r", " ").Replace("\n", " ");
+        foreach (var key in new[] { "token", "accessToken", "authorization", "password", "secret" })
+        {
+            line = System.Text.RegularExpressions.Regex.Replace(
+                line,
+                $"(\"{key}\"\\s*:\\s*\")[^\"]+(\")",
+                $"$1[redacted]$2",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+        return line.Length > 4000 ? line[..4000] : line;
     }
 
     private void PlaySound(SoundAction action)
@@ -1064,9 +1497,20 @@ public partial class MainWindow : Window
             id = Environment.MachineName,
             displayName = Environment.MachineName,
             hostname = Environment.MachineName,
+            aliases = GetLocalMachineAliases(),
             domainUsed = EndpointNormalizer.ShareHostFor(serverUrl),
             platform = "Windows",
             lastSessionId = _activeSessionId
+        };
+    }
+
+    private static string[] GetLocalMachineAliases()
+    {
+        return new[]
+        {
+            Environment.MachineName,
+            "dom-pc-laptop",
+            "Dom PC Laptop"
         };
     }
 
@@ -1089,6 +1533,7 @@ public partial class MainWindow : Window
             clipboardAllowed = _settings.AllowClipboardSync,
             fileTransferAllowed = _settings.AllowFileTransfer,
             remoteApplicationLaunchAllowed = _settings.AllowRemoteApplicationLaunch,
+            diagnosticsEnabled = _settings.EnableDiagnosticSending,
             managedMachineConfirmation = "desktop-built-in",
             companionConfirmationSupported = true,
             companionPlatform = "iOS",
@@ -1105,6 +1550,131 @@ public partial class MainWindow : Window
                string.Equals(machine.MachineHostname, Environment.MachineName, StringComparison.OrdinalIgnoreCase);
     }
 
+    private bool IsMessageTargetedToThisMachine(JsonElement root)
+    {
+        var target = root.TryGetProperty("targetMachineId", out var targetElement)
+            ? targetElement.GetString()
+            : null;
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            return true;
+        }
+
+        return GetLocalMachineAliases()
+            .Append(Environment.MachineName)
+            .Any(alias => string.Equals(NormalizeMachineToken(alias), NormalizeMachineToken(target), StringComparison.Ordinal));
+    }
+
+    private static string NormalizeMachineToken(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "";
+        }
+
+        var builder = new StringBuilder(value.Length);
+        foreach (var ch in value)
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                builder.Append(char.ToLowerInvariant(ch));
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static string? GetSourceMachineId(JsonElement root)
+    {
+        if (root.TryGetProperty("sourceMachineId", out var sourceElement) &&
+            sourceElement.ValueKind == JsonValueKind.String)
+        {
+            return sourceElement.GetString();
+        }
+
+        if (root.TryGetProperty("machineInfo", out var machineInfo) &&
+            machineInfo.ValueKind == JsonValueKind.Object)
+        {
+            if (machineInfo.TryGetProperty("id", out var idElement) && idElement.ValueKind == JsonValueKind.String)
+            {
+                return idElement.GetString();
+            }
+            if (machineInfo.TryGetProperty("machineId", out var machineIdElement) && machineIdElement.ValueKind == JsonValueKind.String)
+            {
+                return machineIdElement.GetString();
+            }
+            if (machineInfo.TryGetProperty("hostname", out var hostElement) && hostElement.ValueKind == JsonValueKind.String)
+            {
+                return hostElement.GetString();
+            }
+        }
+
+        return null;
+    }
+
+    private MachineRecord? UpsertRemoteMachineFromMessage(JsonElement root)
+    {
+        if (!root.TryGetProperty("machineInfo", out var machineInfo) ||
+            machineInfo.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var id = ReadString(machineInfo, "id") ?? ReadString(machineInfo, "machineId") ?? ReadString(machineInfo, "hostname") ?? GetSourceMachineId(root);
+        var displayName = ReadString(machineInfo, "displayName") ?? ReadString(machineInfo, "machineName") ?? id ?? "OpenLink machine";
+        var hostname = ReadString(machineInfo, "hostname") ?? ReadString(machineInfo, "machineName") ?? id ?? displayName;
+        var platform = ReadString(machineInfo, "platform") ?? ReadString(machineInfo, "os") ?? "Unknown";
+        var domainUsed = ReadString(machineInfo, "domainUsed") ?? ReadString(machineInfo, "domain") ?? "";
+
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return null;
+        }
+
+        var machine = _machines.FirstOrDefault(item =>
+            string.Equals(NormalizeMachineToken(item.Id), NormalizeMachineToken(id), StringComparison.Ordinal) ||
+            string.Equals(NormalizeMachineToken(item.MachineHostname), NormalizeMachineToken(hostname), StringComparison.Ordinal));
+        if (machine is null)
+        {
+            machine = new MachineRecord
+            {
+                Id = id,
+                DisplayName = displayName,
+                MachineHostname = hostname,
+                Platform = platform,
+                DomainUsed = domainUsed,
+                IsTrusted = !_settings.RequireApprovalForNewDevices,
+                AllowRemoteControl = _settings.AllowRemoteControl,
+                AllowDropIn = _settings.AllowDropInAccess,
+                AllowKeyboardCoUse = _settings.AllowKeyboardCoUse,
+                AllowMicrophoneAudio = _settings.AllowMicrophoneAudio,
+                AllowSystemAudio = _settings.AllowSystemAudio
+            };
+            _machines.Add(machine);
+        }
+        else
+        {
+            machine.DisplayName = displayName;
+            machine.MachineHostname = hostname;
+            machine.Platform = platform;
+            if (!string.IsNullOrWhiteSpace(domainUsed))
+            {
+                machine.DomainUsed = domainUsed;
+            }
+        }
+
+        machine.TouchConnected(_activeSessionId);
+        MachineStore.Save(_machines);
+        return machine;
+    }
+
+    private static string? ReadString(JsonElement root, string propertyName)
+    {
+        return root.TryGetProperty(propertyName, out var element) && element.ValueKind == JsonValueKind.String
+            ? element.GetString()
+            : null;
+    }
+
     private MachineRecord? GetControllerTargetMachine()
     {
         if (SelectedMachine is { } selected && IsConnectableMachine(selected))
@@ -1117,14 +1687,48 @@ public partial class MainWindow : Window
 
     private MachineRecord? GetLastConnectableMachine()
     {
-        return _machines
-            .Where(IsConnectableMachine)
-            .OrderByDescending(machine => machine.IsOnline)
-            .ThenByDescending(machine => machine.LastConnectedAt)
-            .FirstOrDefault();
+        return GetRecentConnectableMachines(1).FirstOrDefault();
     }
 
     private bool IsConnectableMachine(MachineRecord machine) => !IsLocalMachine(machine);
+
+    private bool IsActiveRemoteSessionFor(MachineRecord machine)
+    {
+        if (!IsConnectableMachine(machine))
+        {
+            return false;
+        }
+
+        if ((_remoteInputActive || _remoteInputPending) &&
+            _remoteInputMachine is { } remoteMachine &&
+            SameMachine(remoteMachine, machine))
+        {
+            return true;
+        }
+
+        return _sessionActive &&
+               machine.IsOnline &&
+               !string.IsNullOrWhiteSpace(_activeMachineName) &&
+               string.Equals(_activeMachineName, machine.DisplayName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool SameMachine(MachineRecord first, MachineRecord second)
+    {
+        return string.Equals(first.Id, second.Id, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(first.MachineHostname, second.MachineHostname, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(first.DisplayName, second.DisplayName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private List<MachineRecord> GetRecentConnectableMachines(int limit = 6)
+    {
+        return _machines
+            .Where(IsConnectableMachine)
+            .OrderByDescending(machine => machine.IsOnline)
+            .ThenByDescending(machine => machine.LastConnectedAt ?? machine.LastDisconnectedAt ?? DateTimeOffset.MinValue)
+            .ThenBy(machine => machine.DisplayName)
+            .Take(limit)
+            .ToList();
+    }
 
     private bool TryBlockLocalMachineAction(MachineRecord machine, string action)
     {
@@ -1162,7 +1766,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        var endpoint = EndpointNormalizer.SignalingEndpointForMachine(machine, _settings.DefaultServerUrl);
+        var endpoint = EndpointNormalizer.SignalingEndpointForMachine(
+            machine,
+            _settings.DefaultServerUrl,
+            _settings.CustomSignalingServerAccessEnabled);
         ServerCombo.Text = endpoint;
         await RefreshServiceHealthAsync(showTransitionNotifications: false);
         AnnounceConnectionStrengthIfNeeded();
@@ -1180,7 +1787,7 @@ public partial class MainWindow : Window
         {
             SetStatus($"Could not connect to {machine.DisplayName} because the OpenLink signaling backend is not ready. Keyboard stayed on this computer.");
             AddLog($"Connect to {machine.DisplayName} stopped because the signaling socket was not ready. Endpoint: {endpoint}");
-            ShowFromTray();
+            _ = SendDiagnosticEventAsync("machine_connect_request", machine, "backend_not_ready", new { endpoint = EndpointNormalizer.ShareHostFor(endpoint) });
             return;
         }
 
@@ -1197,7 +1804,7 @@ public partial class MainWindow : Window
         {
             SetStatus($"Could not connect to {machine.DisplayName} because the OpenLink signaling socket is closed. Keyboard stayed on this computer.");
             AddLog($"machine_connect_request for {machine.DisplayName} was not sent because the signaling socket is closed.");
-            ShowFromTray();
+            _ = SendDiagnosticEventAsync("machine_connect_request", machine, "send_failed", new { endpoint = EndpointNormalizer.ShareHostFor(endpoint) });
             return;
         }
 
@@ -1205,6 +1812,12 @@ public partial class MainWindow : Window
             ? $"Drop-in connect requested for {machine.DisplayName}. {InteractionShortcutHelp}"
             : $"Connect requested for {machine.DisplayName}. {InteractionShortcutHelp}");
         NotifyDeviceConnection(Environment.MachineName, machine.DisplayName, true);
+        _ = SendDiagnosticEventAsync("machine_connect_request", machine, "sent", new
+        {
+            dropIn,
+            endpoint = EndpointNormalizer.ShareHostFor(endpoint),
+            autoStartInteraction = autoStartInteraction ?? _settings.AutoStartInteractionOnConnect
+        });
         _sessionActive = true;
         _audioBridge.Configure(_settings, AddLog);
         UpdateConnectedUiState();
@@ -1224,6 +1837,7 @@ public partial class MainWindow : Window
             targetMachineId = machine.Id,
             sessionId = machine.LastSessionId
         });
+        _ = SendDiagnosticEventAsync("disconnect_user", machine, "sent");
         machine.TouchDisconnected();
         MachineStore.Save(_machines);
         SetStatus($"Disconnect requested for {machine.DisplayName}.");
@@ -1239,12 +1853,18 @@ public partial class MainWindow : Window
 
     private async Task DisconnectFromDeviceAsync(MachineRecord machine)
     {
+        if (TryBlockLocalMachineAction(machine, "disconnect from"))
+        {
+            return;
+        }
+
         await SendPeerAsync(new
         {
             type = "controller_disconnect",
             targetMachineId = machine.Id,
             sessionId = machine.LastSessionId
         });
+        _ = SendDiagnosticEventAsync("controller_disconnect", machine, "sent");
         machine.TouchDisconnected();
         MachineStore.Save(_machines);
         SetStatus($"Disconnected from {machine.DisplayName}.");
@@ -1295,6 +1915,11 @@ public partial class MainWindow : Window
             type = "start_interaction",
             requestId,
             targetMachineId = machine.Id,
+            sourceMachineId = Environment.MachineName,
+            sourceMachineName = Environment.MachineName,
+            sourcePlatform = "Windows",
+            sourceMachineAliases = GetLocalMachineAliases(),
+            machineInfo = CreateLocalMachineInfo(_activeServerUrl ?? GetServerUrl()),
             fullKeyboardControl = true,
             transmitKeyboard = true,
             captureKeyboard = true,
@@ -1308,6 +1933,9 @@ public partial class MainWindow : Window
             audioTransport = "native-wasapi",
             voiceLinkAudioFallback = _settings.UseVoiceLinkAudioFallback,
             voiceLinkAudioFallbackUrl = _settings.VoiceLinkAudioFallbackUrl,
+            localTtsEnabled = _settings.EnableLocalTtsHelper,
+            localTtsPort = _settings.LocalTtsPort,
+            localTtsFallbackMode = _settings.TtsFallbackMode,
             interactionMode = "full-keyboard-and-audio",
             connectionPolicy = CreateConnectionPolicy()
         });
@@ -1318,10 +1946,17 @@ public partial class MainWindow : Window
             ShowFromTray();
             SetStatus($"Start using {machine.DisplayName} could not begin because the remote connection is not open. Keyboard stayed on this computer.");
             PlaySound(SoundAction.Error);
+            _ = SendDiagnosticEventAsync("start_interaction", machine, "send_failed");
             return;
         }
 
         StartAudioBridge($"using {machine.DisplayName}");
+        _ = SendDiagnosticEventAsync("start_interaction", machine, "sent", new
+        {
+            audioDirection = "bidirectional",
+            audioTransport = "native-wasapi",
+            keyboardControl = true
+        });
         SetStatus($"Start using {machine.DisplayName} requested. Waiting for the remote machine to confirm keyboard control. Keyboard remains on this computer until confirmation. {_audioBridge.StatusText}");
     }
 
@@ -1382,6 +2017,11 @@ public partial class MainWindow : Window
 
     private async Task MinimizeRemoteForLocalUseAsync(MachineRecord machine)
     {
+        if (TryBlockLocalMachineAction(machine, "minimize remote connection for"))
+        {
+            return;
+        }
+
         StopRemoteInputForwarding();
         await SendPeerAsync(new
         {
@@ -1391,6 +2031,7 @@ public partial class MainWindow : Window
             muteRemoteAudio = _settings.MuteRemoteAudioWhenInactive,
             reason = "controller-returned-to-local-machine"
         });
+        _ = SendDiagnosticEventAsync("pause_interaction", machine, "sent", new { muteRemoteAudio = _settings.MuteRemoteAudioWhenInactive });
         ShowFromTray();
         SetStatus(_settings.MuteRemoteAudioWhenInactive
             ? $"Remote control for {machine.DisplayName} minimized. Remote audio muted while inactive."
@@ -1399,6 +2040,11 @@ public partial class MainWindow : Window
 
     private async Task SwapControlAsync(MachineRecord machine)
     {
+        if (TryBlockLocalMachineAction(machine, "swap control with"))
+        {
+            return;
+        }
+
         await SendPeerAsync(new
         {
             type = "swap_control_request",
@@ -1408,6 +2054,12 @@ public partial class MainWindow : Window
             systemAudioAllowed = machine.AllowSystemAudio,
             autoMuteControlledComputerAudio = _settings.AutoMuteControlledComputerAudio,
             autoMuteProcessesOnConnect = ParseProcessList(_settings.AutoMuteProcessesOnConnect)
+        });
+        _ = SendDiagnosticEventAsync("swap_control_request", machine, "sent", new
+        {
+            keyboardCoUse = machine.AllowKeyboardCoUse,
+            microphoneAudio = machine.AllowMicrophoneAudio,
+            systemAudio = machine.AllowSystemAudio
         });
         SetStatus($"Swap control requested for {machine.DisplayName}. Both keyboards remain enabled when allowed.");
     }
@@ -1420,8 +2072,10 @@ public partial class MainWindow : Window
         }
 
         e.Handled = true;
-        if (TryBlockLocalMachineAction(machine, "connect to"))
+        if (IsLocalMachine(machine))
         {
+            ShowMachineDetails(machine);
+            SetStatus($"This device selected: {machine.DisplayName}. Use local actions to control what remote users can access.");
             return;
         }
 
@@ -1432,8 +2086,10 @@ public partial class MainWindow : Window
     {
         if (SelectedMachine is { } machine)
         {
-            if (TryBlockLocalMachineAction(machine, "connect to"))
+            if (IsLocalMachine(machine))
             {
+                ShowMachineDetails(machine);
+                SetStatus($"This device selected: {machine.DisplayName}. Use local actions to control what remote users can access.");
                 return;
             }
 
@@ -1471,17 +2127,33 @@ public partial class MainWindow : Window
 
     private void UpdateSelectedMachineActionLabels()
     {
-        var name = SelectedMachine?.DisplayName;
+        var selectedMachine = SelectedMachine;
+        var name = selectedMachine?.DisplayNameForList;
+        var localSelected = selectedMachine is not null && IsLocalMachine(selectedMachine);
         var startHeader = string.IsNullOrWhiteSpace(name) ? "Start Using Selected Device" : $"Start Using {name}";
         var disconnectHeader = string.IsNullOrWhiteSpace(name) ? "Disconnect from Selected Device" : $"Disconnect from {name}";
-        var selectedConnected = SelectedMachine is { } selected && (selected.IsOnline || (_sessionActive && string.Equals(_activeMachineName, selected.DisplayName, StringComparison.OrdinalIgnoreCase)));
+        var detailsHeader = localSelected ? "This Device Details" : "Machine Details";
+        var applicationsHeader = localSelected ? "Local Applications" : "Running Applications";
+        var selectedConnected = selectedMachine is { } selected && (selected.IsOnline || (_sessionActive && string.Equals(_activeMachineName, selected.DisplayName, StringComparison.OrdinalIgnoreCase)));
         StartUsingSelectedMenuItem.Header = startHeader;
         DisconnectFromSelectedMenuItem.Header = disconnectHeader;
+        MachineDetailsMenuItem.Header = detailsHeader;
+        RunningApplicationsMenuItem.Header = applicationsHeader;
+        SwapSelectedMenuItem.IsEnabled = !localSelected && selectedMachine is not null;
+        StartUsingSelectedMenuItem.IsEnabled = !localSelected && selectedMachine is not null;
+        DisconnectFromSelectedMenuItem.IsEnabled = !localSelected && selectedMachine is not null;
         StartUsingMachineContextItem.Header = startHeader;
         DisconnectFromMachineContextItem.Header = disconnectHeader;
-        StartUsingMachineContextItem.Visibility = selectedConnected ? Visibility.Visible : Visibility.Collapsed;
-        ConnectMachineContextItem.Visibility = selectedConnected ? Visibility.Collapsed : Visibility.Visible;
-        DropInMachineContextItem.Visibility = selectedConnected ? Visibility.Collapsed : Visibility.Visible;
+        MachineDetailsContextItem.Header = detailsHeader;
+        RunningApplicationsContextItem.Header = applicationsHeader;
+        StartUsingMachineContextItem.Visibility = !localSelected && selectedConnected ? Visibility.Visible : Visibility.Collapsed;
+        ConnectMachineContextItem.Visibility = !localSelected && !selectedConnected ? Visibility.Visible : Visibility.Collapsed;
+        DropInMachineContextItem.Visibility = !localSelected && !selectedConnected ? Visibility.Visible : Visibility.Collapsed;
+        DisconnectFromMachineContextItem.Visibility = !localSelected && selectedMachine is not null ? Visibility.Visible : Visibility.Collapsed;
+        SwapMachineContextItem.Visibility = !localSelected && selectedMachine is not null ? Visibility.Visible : Visibility.Collapsed;
+        UseCanonicalDomainContextItem.Header = localSelected ? "Use Canonical Public Domain for This Device" : "Use Canonical Public Domain";
+        UseTailnetDomainContextItem.Header = localSelected ? "Use Tailnet Address for This Device" : "Use Tailnet Address";
+        DisconnectRemoteUserContextItem.Header = localSelected ? "Disconnect Remote User from This Device" : "Disconnect Remote User from This Device";
         UpdateSelectedMachineToggleMenuStates();
     }
 
@@ -1524,6 +2196,11 @@ public partial class MainWindow : Window
     {
         if (SelectedMachine is { } machine)
         {
+            if (TryBlockLocalMachineAction(machine, "swap control with"))
+            {
+                return;
+            }
+
             _ = SwapControlAsync(machine);
         }
     }
@@ -1705,7 +2382,7 @@ public partial class MainWindow : Window
         if (activeMachine is not null)
         {
             AddTrayMenuItem(menu, $"Start Using {activeMachine.DisplayName}", "Start full keyboard control and remote audio for the selected machine", (_, _) => _ = StartUsingMachineAsync(activeMachine));
-            if (_sessionActive || activeMachine.IsOnline)
+            if (IsActiveRemoteSessionFor(activeMachine))
             {
                 AddTrayMenuItem(menu, "Minimize Remote Connection to Use Local Machine", "Pause active remote interaction and return focus to this local computer", (_, _) => _ = MinimizeRemoteForLocalUseAsync(activeMachine));
                 AddTrayMenuItem(menu, $"Disconnect from {activeMachine.DisplayName}", "Disconnect this computer from the selected remote device", (_, _) => _ = DisconnectFromDeviceAsync(activeMachine));
@@ -1769,6 +2446,11 @@ public partial class MainWindow : Window
         });
         AddTrayMenuItem(menu, "Quit", "Quit OpenLink", (_, _) =>
         {
+            if (TryBlockQuitForTamperProtection())
+            {
+                return;
+            }
+
             _allowClose = true;
             _trayIcon.Visible = false;
             System.Windows.Application.Current.Shutdown();
@@ -1783,8 +2465,8 @@ public partial class MainWindow : Window
         var lastMachine = GetControllerTargetMachine();
         if (lastMachine is null)
         {
-            ShowFromTray();
-            SetStatus("No remote machine is available for controller actions. The Machines list is open.");
+            ShowMachinesAndSettingsSurface();
+            SetStatus("No remote machine is available for controller actions. Machines and settings are open.");
             return;
         }
 
@@ -1796,7 +2478,8 @@ public partial class MainWindow : Window
         _controllerActionsMenu?.Close();
         _controllerActionsMenu = menu;
 
-        if (_sessionActive || lastMachine.IsOnline)
+        var hasRemoteSession = IsActiveRemoteSessionFor(lastMachine);
+        if (hasRemoteSession)
         {
             AddTrayMenuItem(menu, $"Start Using {lastMachine.DisplayName}", $"Start full keyboard control and remote audio transmission for {lastMachine.DisplayName}", (_, _) => _ = StartUsingMachineAsync(lastMachine));
             AddTrayMenuItem(menu, $"Minimize Remote Connection to Use Local Machine", "Pause active remote interaction and return focus to this local computer", (_, _) => _ = MinimizeRemoteForLocalUseAsync(lastMachine));
@@ -1805,22 +2488,34 @@ public partial class MainWindow : Window
         }
         else
         {
-            AddTrayMenuItem(menu, $"Connect Last Machine, {lastMachine.DisplayName}", $"Connect to {lastMachine.DisplayName}", (_, _) => _ = ConnectLastMachineAsync());
+            if (_settings.AutoStartInteractionOnConnect)
+            {
+                AddTrayMenuItem(menu, $"Start Using {lastMachine.DisplayName}", $"Connect and start full keyboard control and remote audio transmission for {lastMachine.DisplayName}", (_, _) => _ = StartUsingMachineAsync(lastMachine));
+            }
+            else
+            {
+                AddTrayMenuItem(menu, $"Connect to {lastMachine.DisplayName}", $"Connect to {lastMachine.DisplayName} in the background without starting keyboard control", (_, _) => _ = ConnectToMachineAsync(lastMachine, lastMachine.AllowDropIn));
+                AddTrayMenuItem(menu, $"Start Using {lastMachine.DisplayName}", $"Connect and start full keyboard control and remote audio transmission for {lastMachine.DisplayName}", (_, _) => _ = StartUsingMachineAsync(lastMachine));
+            }
+            AddRecentConnectionsMenu(menu, lastMachine);
         }
         AddTrayMenuItem(menu, $"Machine Details for {lastMachine.DisplayName}", "Show device, connection, network, and application details", (_, _) => ShowMachineDetails(lastMachine));
-        menu.Items.Add(new Forms.ToolStripSeparator());
-        AddTrayMenuItem(menu, "Toggle Microphone Audio", "Mute or allow microphone audio for OpenLink", (_, _) =>
+        if (hasRemoteSession)
         {
-            lastMachine.AllowMicrophoneAudio = !lastMachine.AllowMicrophoneAudio;
-            MachineStore.Save(_machines);
-            SetStatus($"Microphone audio {(lastMachine.AllowMicrophoneAudio ? "allowed" : "muted")} for {lastMachine.DisplayName}.");
-        }, isChecked: lastMachine.AllowMicrophoneAudio);
-        AddTrayMenuItem(menu, "Toggle System Audio", "Mute or allow system audio for OpenLink", (_, _) =>
-        {
-            lastMachine.AllowSystemAudio = !lastMachine.AllowSystemAudio;
-            MachineStore.Save(_machines);
-            SetStatus($"System audio {(lastMachine.AllowSystemAudio ? "allowed" : "muted")} for {lastMachine.DisplayName}.");
-        }, isChecked: lastMachine.AllowSystemAudio);
+            menu.Items.Add(new Forms.ToolStripSeparator());
+            AddTrayMenuItem(menu, "Toggle Microphone Audio", "Mute or allow microphone audio for OpenLink", (_, _) =>
+            {
+                lastMachine.AllowMicrophoneAudio = !lastMachine.AllowMicrophoneAudio;
+                MachineStore.Save(_machines);
+                SetStatus($"Microphone audio {(lastMachine.AllowMicrophoneAudio ? "allowed" : "muted")} for {lastMachine.DisplayName}.");
+            }, isChecked: lastMachine.AllowMicrophoneAudio);
+            AddTrayMenuItem(menu, "Toggle System Audio", "Mute or allow system audio for OpenLink", (_, _) =>
+            {
+                lastMachine.AllowSystemAudio = !lastMachine.AllowSystemAudio;
+                MachineStore.Save(_machines);
+                SetStatus($"System audio {(lastMachine.AllowSystemAudio ? "allowed" : "muted")} for {lastMachine.DisplayName}.");
+            }, isChecked: lastMachine.AllowSystemAudio);
+        }
 
         menu.Opening += (_, _) =>
         {
@@ -1845,24 +2540,91 @@ public partial class MainWindow : Window
             {
                 _controllerActionsMenu = null;
             }
-            if (_sessionActive)
+            if (hasRemoteSession)
             {
                 Hide();
             }
         };
-        SetForegroundWindow(_windowHandle);
+        if (IsVisible && WindowState != WindowState.Minimized)
+        {
+            SetForegroundWindow(_windowHandle);
+        }
+
+        var position = GetControllerMenuPosition();
+        menu.Show(position);
+        menu.BeginInvoke(new Action(() =>
+        {
+            menu.Focus();
+            if (menu.Items.Count > 0)
+            {
+                menu.Items[0].Select();
+            }
+        }));
+        SetStatus(hasRemoteSession
+            ? $"Controller actions for {lastMachine.DisplayName}. Use arrow keys to choose an action. Escape closes the menu and keeps OpenLink in the tray."
+            : $"Connection actions for {lastMachine.DisplayName}. Use Recent Connections for another device. Escape closes the menu.");
+    }
+
+    private void AddRecentConnectionsMenu(Forms.ContextMenuStrip menu, MachineRecord currentMachine)
+    {
+        var recentMachines = GetRecentConnectableMachines()
+            .Where(machine => !SameMachine(machine, currentMachine))
+            .ToList();
+
+        if (recentMachines.Count == 0)
+        {
+            return;
+        }
+
+        var recentMenu = new Forms.ToolStripMenuItem("Recent Connections")
+        {
+            AccessibleName = "Recent connections",
+            AccessibleDescription = "Recently connected OpenLink machines"
+        };
+
+        foreach (var machine in recentMachines)
+        {
+            var title = _settings.AutoStartInteractionOnConnect
+                ? $"Start Using {machine.DisplayName}"
+                : $"Connect to {machine.DisplayName}";
+            var description = _settings.AutoStartInteractionOnConnect
+                ? $"Connect to recent OpenLink machine {machine.DisplayName} and start keyboard control"
+                : $"Connect to recent OpenLink machine {machine.DisplayName} in the background";
+            var item = new Forms.ToolStripMenuItem(title)
+            {
+                ToolTipText = title,
+                AccessibleName = title,
+                AccessibleDescription = description
+            };
+            item.Click += (_, _) =>
+            {
+                if (_settings.AutoStartInteractionOnConnect)
+                {
+                    _ = StartUsingMachineAsync(machine);
+                }
+                else
+                {
+                    _ = ConnectToMachineAsync(machine, machine.AllowDropIn);
+                }
+            };
+            recentMenu.DropDownItems.Add(item);
+        }
+
+        menu.Items.Add(recentMenu);
+    }
+
+    private System.Drawing.Point GetControllerMenuPosition()
+    {
         var screenArea = Forms.Screen.PrimaryScreen?.WorkingArea ?? new System.Drawing.Rectangle(0, 0, 800, 600);
+        if (!IsVisible || WindowState == WindowState.Minimized)
+        {
+            return new System.Drawing.Point(screenArea.Right - 24, screenArea.Bottom - 24);
+        }
+
         var cursorPosition = Forms.Cursor.Position;
-        var position = new System.Drawing.Point(
+        return new System.Drawing.Point(
             Math.Clamp(cursorPosition.X, screenArea.Left + 8, screenArea.Right - 8),
             Math.Clamp(cursorPosition.Y, screenArea.Top + 8, screenArea.Bottom - 8));
-        menu.Show(position);
-        menu.Focus();
-        if (menu.Items.Count > 0)
-        {
-            menu.Items[0].Select();
-        }
-        SetStatus($"Controller actions for {lastMachine.DisplayName}. Use arrow keys to choose an action. Escape closes the menu and keeps OpenLink in the tray.");
     }
 
     private async void QueueControllerActionsMenu()
@@ -1875,7 +2637,7 @@ public partial class MainWindow : Window
         _controllerActionsMenuQueued = true;
         try
         {
-            await Task.Delay(180);
+            await Task.Delay(_remoteInputActive || _remoteInputPending ? 40 : 120);
             if (_controllerActionsMenuOpen && _controllerActionsMenu is not null)
             {
                 _controllerActionsMenu.Focus();
@@ -1894,7 +2656,7 @@ public partial class MainWindow : Window
     {
         _controllerActionsMenu?.Close(Forms.ToolStripDropDownCloseReason.Keyboard);
         _controllerActionsMenuOpen = false;
-        if (_sessionActive)
+        if (_remoteInputActive || _remoteInputPending)
         {
             Hide();
         }
@@ -1920,7 +2682,38 @@ public partial class MainWindow : Window
         {
             Owner = this
         };
-        window.ShowDialog();
+        foreach (var key in GetMachineWindowKeys(machine))
+        {
+            _machineDetailsWindows[key] = window;
+        }
+
+        try
+        {
+            window.ShowDialog();
+        }
+        finally
+        {
+            foreach (var key in GetMachineWindowKeys(machine))
+            {
+                if (_machineDetailsWindows.TryGetValue(key, out var existing) && ReferenceEquals(existing, window))
+                {
+                    _machineDetailsWindows.Remove(key);
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<string> GetMachineWindowKeys(MachineRecord machine)
+    {
+        return new[]
+        {
+            machine.Id,
+            machine.MachineHostname,
+            machine.DisplayName
+        }
+            .Select(NormalizeMachineToken)
+            .Where(token => !string.IsNullOrWhiteSpace(token))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
     }
 
     private async Task SendRemoteMachineActionAsync(MachineRecord machine, string action, RemoteApplicationRecord? application)
@@ -2223,6 +3016,13 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        if (_allowClose && TryBlockQuitForTamperProtection())
+        {
+            _allowClose = false;
+            e.Cancel = true;
+            return;
+        }
+
         if (_allowClose || !_settings.MinimizeToTrayOnClose)
         {
             return;
@@ -2231,6 +3031,31 @@ public partial class MainWindow : Window
         e.Cancel = true;
         Hide();
         _trayIcon.ShowBalloonTip(2000, "OpenLink", "OpenLink is still running. Use the tray menu to disconnect or quit.", Forms.ToolTipIcon.Info);
+    }
+
+    private bool TryBlockQuitForTamperProtection()
+    {
+        if (!_settings.TamperProtectionEnabled || !HasActiveRemoteQuitLock())
+        {
+            return false;
+        }
+
+        const string message = "Tamper detection is active. Disconnect the owned remote session or disable tamper protection from settings before quitting OpenLink.";
+        SetStatus(message);
+        SystemSounds.Exclamation.Play();
+        if (_trayIcon.Visible)
+        {
+            _trayIcon.ShowBalloonTip(4000, "OpenLink tamper protection", message, Forms.ToolTipIcon.Warning);
+        }
+        ShowFromTray();
+        return true;
+    }
+
+    private bool HasActiveRemoteQuitLock()
+    {
+        return _remoteInputActive ||
+               _remoteInputPending ||
+               _machines.Any(machine => machine.IsOnline && IsConnectableMachine(machine));
     }
 
     private static T? FindParent<T>(DependencyObject? source) where T : DependencyObject
