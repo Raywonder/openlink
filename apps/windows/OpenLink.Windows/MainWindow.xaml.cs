@@ -217,16 +217,38 @@ public partial class MainWindow : Window
             var shiftDown = IsShiftDown(vkCode, keyDown);
             var controllerKey = IsBackslashVirtualKey(vkCode);
 
-            if (controllerKey && ctrlDown && altDown)
+            if (controllerKey && ctrlDown && altDown && shiftDown)
             {
                 if (keyDown && !_controllerHotkeyChordDown)
                 {
                     _controllerHotkeyChordDown = true;
-                    Dispatcher.BeginInvoke(QueueControllerActionsMenu);
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        if (_remoteInputActive || _remoteInputPending)
+                        {
+                            StopRemoteInputForwarding("Control Alt Shift Backslash recovery shortcut");
+                            SetStatus("Remote keyboard forwarding stopped. Keyboard returned to this computer.");
+                        }
+                        ShowMachinesAndSettingsSurface();
+                    });
                 }
                 if (!keyDown)
                 {
                     _controllerHotkeyChordDown = false;
+                }
+                return new IntPtr(1);
+            }
+
+            if (controllerKey && ctrlDown && altDown)
+            {
+                if (keyDown)
+                {
+                    _controllerHotkeyChordDown = true;
+                }
+                if (!keyDown)
+                {
+                    _controllerHotkeyChordDown = false;
+                    Dispatcher.BeginInvoke(ShowControllerActionsMenu);
                 }
                 return new IntPtr(1);
             }
@@ -1425,7 +1447,7 @@ public partial class MainWindow : Window
         _remoteInputActivationCts = new CancellationTokenSource();
         var token = _remoteInputActivationCts.Token;
         _ = TimeoutRemoteInputHandshakeAsync(machine, requestId, token);
-        AddLog($"Remote keyboard forwarding handshake requested for {machine.DisplayName} ({machine.Platform}).");
+        AddLog($"Remote keyboard forwarding handshake requested for {machine.DisplayName} ({machine.Platform}).", announce: false);
     }
 
     private async Task TimeoutRemoteInputHandshakeAsync(MachineRecord machine, string requestId, CancellationToken token)
@@ -1478,15 +1500,14 @@ public partial class MainWindow : Window
         _remoteInputActivationCts = null;
         _remoteInputPending = false;
         _remoteInputActive = true;
-        AddLog($"Remote keyboard forwarding enabled for {_remoteInputMachine.DisplayName} ({_remoteInputMachine.Platform}).");
+        AddLog($"Remote keyboard forwarding enabled for {_remoteInputMachine.DisplayName} ({_remoteInputMachine.Platform}).", announce: false);
         StartAudioBridge($"using {_remoteInputMachine.DisplayName}");
         var screenReaderMessage = BuildScreenReaderConnectionMessage(_remoteInputMachine);
         if (!string.IsNullOrWhiteSpace(screenReaderMessage))
         {
-            AddLog(screenReaderMessage);
-            _ = _ttsService.SpeakStatusAsync(screenReaderMessage);
+            AddLog(screenReaderMessage, announce: false);
         }
-        SetStatus(message ?? $"Keyboard is now being sent to {_remoteInputMachine.DisplayName}. Press Control Alt Backslash for controller actions. Press Control Alt Shift Escape to return keyboard to this computer.");
+        SetStatus(message ?? $"Remote control active for {_remoteInputMachine.DisplayName}. Press Control Alt Backslash for controller actions, or Control Alt Shift Escape to return keyboard to this computer.");
         PlaySound(SoundAction.Connect);
         HideOpenLinkWindow();
     }
@@ -1523,7 +1544,7 @@ public partial class MainWindow : Window
         var macKeyCode = TryMapWindowsVirtualKeyToMacKeyCode(vkCode);
         if (macKeyCode is null)
         {
-            AddLog($"No macOS key mapping for Windows virtual key 0x{vkCode:X2}.", announce: false);
+            WriteRuntimeLog($"No macOS key mapping for Windows virtual key 0x{vkCode:X2}.");
             return;
         }
 
@@ -1644,12 +1665,13 @@ public partial class MainWindow : Window
         }
         if (ctrlDown || vkCode == VkControl || vkCode == VkLControl || vkCode == VkRControl)
         {
-            // Windows Ctrl maps to macOS Command for normal shortcut parity.
-            flags |= MacCommandFlag;
+            // Windows Ctrl maps to macOS Control so VoiceOver Control+Option chords work.
+            // Use the Windows key for macOS Command shortcuts.
+            flags |= MacControlFlag;
         }
         if (vkCode == VkLWin || vkCode == VkRWin)
         {
-            flags |= MacControlFlag;
+            flags |= MacCommandFlag;
         }
 
         return flags;
@@ -1722,11 +1744,20 @@ public partial class MainWindow : Window
         0x6E => 65, // Numpad decimal
         0x6F => 75, // Numpad divide
         0x6A => 67, // Numpad multiply
+        0x0C => 71, // Numpad clear
+        0x6C => 76, // Numpad enter
+        VkLWin => 55, // Left Windows maps to Command
+        VkRWin => 54, // Right Windows maps to Command
         VkShift or VkLShift or VkRShift => 56,
-        VkControl or VkLControl or VkRControl => 55,
-        VkMenu or VkLMenu or VkRMenu => 58,
+        VkControl or VkLControl => 59, // Control
+        VkRControl => 62, // Right Control
+        VkMenu or VkLMenu => 58, // Option
+        VkRMenu => 61, // Right Option
+        0x14 => 57, // Caps Lock
         0x1B => 53, // Escape
         0x08 => 51, // Delete/backspace
+        0x2D => 114, // Insert/Help
+        VkDelete => 117, // Forward Delete
         0x25 => 123, // Left
         0x27 => 124, // Right
         0x28 => 125, // Down
@@ -2073,7 +2104,7 @@ public partial class MainWindow : Window
     private void StartAudioBridge(string reason)
     {
         _audioBridge.Start(_settings, AddLog);
-        AddLog($"Audio bridge active for {reason}: {_audioBridge.StatusText}");
+        AddLog($"Audio bridge active for {reason}: {_audioBridge.StatusText}", announce: false);
     }
 
     private object CreateLocalMachineInfo(string serverUrl)

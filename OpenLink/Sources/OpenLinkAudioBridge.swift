@@ -17,6 +17,8 @@ final class OpenLinkAudioBridge {
     private var captureBufferSamples = 512
     private var playbackBufferSamples = 512
     private var requestedCodec = "pcm_s16le"
+    private var currentCaptureTargetMachineId: String?
+    private var currentFrameSink: (([String: Any]) -> Void)?
 
     private init() {}
 
@@ -38,12 +40,15 @@ final class OpenLinkAudioBridge {
         }
     }
 
-    func startCapture(targetMachineId: String, directBufferSamples: Int? = nil, requestedCodec: String? = nil, frameSink: @escaping ([String: Any]) -> Void) {
+    @discardableResult
+    func startCapture(targetMachineId: String, directBufferSamples: Int? = nil, requestedCodec: String? = nil, frameSink: @escaping ([String: Any]) -> Void) -> Bool {
         lock.lock()
         defer { lock.unlock() }
 
+        currentCaptureTargetMachineId = targetMachineId
+        currentFrameSink = frameSink
         if isCapturing {
-            return
+            return true
         }
 
         if let directBufferSamples {
@@ -62,14 +67,23 @@ final class OpenLinkAudioBridge {
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: AVAudioFrameCount(captureBufferSamples), format: format) { [weak self] buffer, _ in
             guard let self else { return }
+            self.lock.lock()
+            let captureTarget = self.currentCaptureTargetMachineId
+            let captureSink = self.currentFrameSink
+            let captureSamples = self.captureBufferSamples
+            let activeRequestedCodec = self.requestedCodec
+            let playbackSamples = self.playbackBufferSamples
+            self.lock.unlock()
+
+            guard let targetMachineId = captureTarget, let frameSink = captureSink else { return }
             let now = Date()
-            if now.timeIntervalSince(self.lastFrameTime) < Self.frameIntervalSeconds(samples: self.captureBufferSamples, sampleRate: format.sampleRate) {
+            if now.timeIntervalSince(self.lastFrameTime) < Self.frameIntervalSeconds(samples: captureSamples, sampleRate: format.sampleRate) {
                 return
             }
             self.lastFrameTime = now
 
             guard let data = Self.stereoInt16PCMData(from: buffer) else { return }
-            let activeCodec = Self.activeTransportCodec(for: self.requestedCodec)
+            let activeCodec = Self.activeTransportCodec(for: activeRequestedCodec)
             frameSink([
                 "type": "audio_frame",
                 "targetMachineId": targetMachineId,
@@ -79,9 +93,9 @@ final class OpenLinkAudioBridge {
                 "bitsPerSample": 16,
                 "channels": Self.transportChannels,
                 "codec": activeCodec,
-                "requestedCodec": self.requestedCodec,
-                "directAudioBufferSamples": self.captureBufferSamples,
-                "playbackBufferSamples": self.playbackBufferSamples,
+                "requestedCodec": activeRequestedCodec,
+                "directAudioBufferSamples": captureSamples,
+                "playbackBufferSamples": playbackSamples,
                 "transport": "voicelink-pcm-ws",
                 "virtualDeviceName": self.virtualDeviceName,
                 "data": data.base64EncodedString()
@@ -91,9 +105,13 @@ final class OpenLinkAudioBridge {
         do {
             try captureEngine.start()
             isCapturing = true
+            return true
         } catch {
             input.removeTap(onBus: 0)
             isCapturing = false
+            currentCaptureTargetMachineId = nil
+            currentFrameSink = nil
+            return false
         }
     }
 
@@ -104,6 +122,8 @@ final class OpenLinkAudioBridge {
         captureEngine.inputNode.removeTap(onBus: 0)
         captureEngine.stop()
         isCapturing = false
+        currentCaptureTargetMachineId = nil
+        currentFrameSink = nil
     }
 
     func play(frame json: [String: Any]) {

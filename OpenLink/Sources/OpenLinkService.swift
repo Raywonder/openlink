@@ -1155,7 +1155,7 @@ class OpenLinkService: ObservableObject {
                 sendWebSocketResponse(routedResponse, serverId: serverId, broadcast: respondWithBroadcast)
                 let success = routedResponse["success"] as? Bool ?? true
                 let message = routedResponse["message"] as? String ?? (success
-                    ? "Remote keyboard control is active. Press Escape to close the status menu silently; both keyboards remain available when allowed."
+                    ? "Remote control active. Audio is starting."
                     : "OpenLink needs macOS Accessibility and Input Monitoring permissions before keyboard control can start.")
                 runtimeLog("sent start_interaction_ack success=\(success) target=\(routedResponse["targetMachineId"] as? String ?? "unknown-controller") accessibilityTrusted=\(routedResponse["accessibilityTrusted"] as? Bool ?? false) accessibilityTrustedBeforePrompt=\(routedResponse["accessibilityTrustedBeforePrompt"] as? Bool ?? false) bundleId=\(routedResponse["diagnosticBundleIdentifier"] as? String ?? "unknown") bundlePath=\(routedResponse["diagnosticBundlePath"] as? String ?? "unknown") executablePath=\(routedResponse["diagnosticExecutablePath"] as? String ?? "unknown") processName=\(routedResponse["diagnosticProcessName"] as? String ?? "unknown")")
                 postStatusNotification(title: "OpenLink", body: message)
@@ -1351,19 +1351,22 @@ class OpenLinkService: ObservableObject {
         let controllerMachineId = controllerMachineId(from: json) ?? serverId
 
         runtimeLog("starting audio bridge for controller \(controllerMachineId) broadcast=\(respondWithBroadcast)")
-        OpenLinkAudioBridge.shared.startCapture(
+        let audioStarted = OpenLinkAudioBridge.shared.startCapture(
             targetMachineId: controllerMachineId,
             directBufferSamples: json["directAudioBufferSamples"] as? Int,
             requestedCodec: (json["audioCodec"] as? String) ?? (json["requestedAudioCodec"] as? String)
         ) { [weak self] frame in
             self?.sendWebSocketResponse(frame, serverId: serverId, broadcast: respondWithBroadcast)
         }
-        sendControllerAnnouncement(
-            "OpenLink audio is connected to \(localStableMachineName()). System voice announcements are ready.",
-            originalMessage: json,
-            serverId: serverId,
-            broadcast: respondWithBroadcast
-        )
+        runtimeLog("audio bridge capture \(audioStarted ? "started" : "failed") for controller \(controllerMachineId)")
+        if !audioStarted {
+            sendControllerAnnouncement(
+                "OpenLink could not start Mac audio capture. Check microphone or system audio recording permission on this Mac.",
+                originalMessage: json,
+                serverId: serverId,
+                broadcast: respondWithBroadcast
+            )
+        }
     }
 
     private func sendControllerAnnouncement(_ text: String, originalMessage: [String: Any], serverId: String, broadcast: Bool) {

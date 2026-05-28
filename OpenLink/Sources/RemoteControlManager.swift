@@ -1186,7 +1186,7 @@ class RemoteControlManager: ObservableObject {
                     "As a fallback, use another approved remote-access path such as NVDA Remote or local SSH to complete the approval."
                 ],
                 "message": canReceiveInput
-                    ? "Remote keyboard control is active. Both keyboards remain available when allowed."
+                    ? "Remote control active. Audio is starting."
                     : blockedMessage
             ]
 
@@ -1348,12 +1348,15 @@ class RemoteControlManager: ObservableObject {
             if let response = handleSignalingMessage(json) {
                 let success = (response["success"] as? Bool) ?? true
                 if type == "start_interaction", success, let controllerMachineId = controllerMachineId(from: json) {
-                    OpenLinkAudioBridge.shared.startCapture(
+                    let audioStarted = OpenLinkAudioBridge.shared.startCapture(
                         targetMachineId: controllerMachineId,
                         directBufferSamples: json["directAudioBufferSamples"] as? Int,
                         requestedCodec: (json["audioCodec"] as? String) ?? (json["requestedAudioCodec"] as? String)
                     ) { [weak self] frame in
                         self?.sendMessage(frame) { _ in }
+                    }
+                    if !audioStarted {
+                        // The routed signaling path reports richer diagnostics; direct sockets keep this quiet.
                     }
                 } else if type == "start_interaction", !success {
                     OpenLinkAudioBridge.shared.stopCapture()
