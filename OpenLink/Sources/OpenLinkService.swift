@@ -576,10 +576,17 @@ class OpenLinkService: ObservableObject {
 
         if let response = RemoteControlManager.shared.handleSignalingMessage(json) {
             if let type = json["type"] as? String, type == "start_interaction" {
-                if let controllerMachineId = controllerMachineId(from: json) {
-                    OpenLinkAudioBridge.shared.startCapture(targetMachineId: controllerMachineId) { [weak self] frame in
+                let success = (response["success"] as? Bool) ?? true
+                if success, let controllerMachineId = controllerMachineId(from: json) {
+                    OpenLinkAudioBridge.shared.startCapture(
+                        targetMachineId: controllerMachineId,
+                        directBufferSamples: json["directAudioBufferSamples"] as? Int,
+                        requestedCodec: (json["audioCodec"] as? String) ?? (json["requestedAudioCodec"] as? String)
+                    ) { [weak self] frame in
                         self?.sendResponse(frame, to: connectionId)
                     }
+                } else if !success {
+                    OpenLinkAudioBridge.shared.stopCapture()
                 }
             } else if let type = json["type"] as? String,
                       type == "pause_interaction" || type == "controller_disconnect" || type == "disconnect_user" {
@@ -1166,6 +1173,20 @@ class OpenLinkService: ObservableObject {
                 if let remoteAudioVolumePercent = audioSettings["remoteAudioVolumePercent"] as? Int {
                     UserDefaults.standard.set(max(0, min(150, remoteAudioVolumePercent)), forKey: "remoteAudioVolumePercent")
                 }
+                if let directAudioBufferSamples = audioSettings["directAudioBufferSamples"] as? Int {
+                    UserDefaults.standard.set(max(16, min(2048, directAudioBufferSamples)), forKey: "directAudioBufferSamples")
+                }
+                if let windowsAudioBufferSamples = audioSettings["windowsAudioBufferSamples"] as? Int {
+                    UserDefaults.standard.set(max(16, min(2048, windowsAudioBufferSamples)), forKey: "macAudioPlaybackBufferSamples")
+                }
+                if let audioStreamingCodec = audioSettings["audioStreamingCodec"] as? String {
+                    UserDefaults.standard.set(audioStreamingCodec, forKey: "audioStreamingCodec")
+                }
+                OpenLinkAudioBridge.shared.configure(
+                    directBufferSamples: audioSettings["directAudioBufferSamples"] as? Int,
+                    playbackBufferSamples: audioSettings["windowsAudioBufferSamples"] as? Int,
+                    requestedCodec: audioSettings["audioStreamingCodec"] as? String
+                )
             }
             let message = accepted
                 ? "Audio settings updated on \(localStableMachineName())."
@@ -1253,7 +1274,11 @@ class OpenLinkService: ObservableObject {
         let controllerMachineId = controllerMachineId(from: json) ?? serverId
 
         runtimeLog("starting audio bridge for controller \(controllerMachineId) broadcast=\(respondWithBroadcast)")
-        OpenLinkAudioBridge.shared.startCapture(targetMachineId: controllerMachineId) { [weak self] frame in
+        OpenLinkAudioBridge.shared.startCapture(
+            targetMachineId: controllerMachineId,
+            directBufferSamples: json["directAudioBufferSamples"] as? Int,
+            requestedCodec: (json["audioCodec"] as? String) ?? (json["requestedAudioCodec"] as? String)
+        ) { [weak self] frame in
             self?.sendWebSocketResponse(frame, serverId: serverId, broadcast: respondWithBroadcast)
         }
         sendControllerAnnouncement(
@@ -1876,7 +1901,14 @@ class OpenLinkService: ObservableObject {
             "hostname": localStableMachineId(),
             "aliases": Array(localMachineIdentityTokens()),
             "domainUsed": domainUsed,
-            "platform": "macOS"
+            "platform": "macOS",
+            "audio": [
+                "sampleRate": 48_000,
+                "codec": "pcm_s16le",
+                "requestedCodec": UserDefaults.standard.string(forKey: "audioStreamingCodec") ?? "pcm_s16le",
+                "directAudioBufferSamples": max(16, min(2048, UserDefaults.standard.integer(forKey: "directAudioBufferSamples") == 0 ? 512 : UserDefaults.standard.integer(forKey: "directAudioBufferSamples"))),
+                "windowsAudioBufferSamples": max(16, min(2048, UserDefaults.standard.integer(forKey: "macAudioPlaybackBufferSamples") == 0 ? 512 : UserDefaults.standard.integer(forKey: "macAudioPlaybackBufferSamples")))
+            ]
         ]
     }
 
@@ -1889,6 +1921,11 @@ class OpenLinkService: ObservableObject {
             "keyboardCoUseAllowed": true,
             "microphoneAudioAllowed": true,
             "systemAudioAllowed": true,
+            "audioTransport": "native-coreaudio",
+            "audioCodec": "pcm_s16le",
+            "requestedAudioCodec": UserDefaults.standard.string(forKey: "audioStreamingCodec") ?? "pcm_s16le",
+            "directAudioBufferSamples": max(16, min(2048, UserDefaults.standard.integer(forKey: "directAudioBufferSamples") == 0 ? 512 : UserDefaults.standard.integer(forKey: "directAudioBufferSamples"))),
+            "windowsAudioBufferSamples": max(16, min(2048, UserDefaults.standard.integer(forKey: "macAudioPlaybackBufferSamples") == 0 ? 512 : UserDefaults.standard.integer(forKey: "macAudioPlaybackBufferSamples"))),
             "diagnosticsEnabled": UserDefaults.standard.bool(forKey: "enableDiagnosticSending"),
             "autoMuteControlledComputerAudio": UserDefaults.standard.bool(forKey: "autoMuteRemoteAudio"),
             "autoMuteProcessesOnConnect": autoMuteProcessList(),

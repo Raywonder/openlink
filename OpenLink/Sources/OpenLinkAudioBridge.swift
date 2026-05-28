@@ -14,10 +14,31 @@ final class OpenLinkAudioBridge {
     private var isCapturing = false
     private var lastFrameTime = Date.distantPast
     private let lock = NSLock()
+    private var captureBufferSamples = 512
+    private var playbackBufferSamples = 512
+    private var requestedCodec = "pcm_s16le"
 
     private init() {}
 
-    func startCapture(targetMachineId: String, frameSink: @escaping ([String: Any]) -> Void) {
+    func configure(directBufferSamples: Int? = nil, playbackBufferSamples: Int? = nil, requestedCodec: String? = nil) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if let directBufferSamples {
+            self.captureBufferSamples = Self.clampBufferSamples(directBufferSamples)
+            UserDefaults.standard.set(self.captureBufferSamples, forKey: "directAudioBufferSamples")
+        }
+        if let playbackBufferSamples {
+            self.playbackBufferSamples = Self.clampBufferSamples(playbackBufferSamples)
+            UserDefaults.standard.set(self.playbackBufferSamples, forKey: "macAudioPlaybackBufferSamples")
+        }
+        if let requestedCodec, !requestedCodec.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            self.requestedCodec = Self.normalizeCodec(requestedCodec)
+            UserDefaults.standard.set(self.requestedCodec, forKey: "audioStreamingCodec")
+        }
+    }
+
+    func startCapture(targetMachineId: String, directBufferSamples: Int? = nil, requestedCodec: String? = nil, frameSink: @escaping ([String: Any]) -> Void) {
         lock.lock()
         defer { lock.unlock() }
 
@@ -25,26 +46,42 @@ final class OpenLinkAudioBridge {
             return
         }
 
+        if let directBufferSamples {
+            captureBufferSamples = Self.clampBufferSamples(directBufferSamples)
+        } else {
+            captureBufferSamples = Self.clampBufferSamples(UserDefaults.standard.integer(forKey: "directAudioBufferSamples"))
+        }
+        if let requestedCodec {
+            self.requestedCodec = Self.normalizeCodec(requestedCodec)
+        } else if let savedCodec = UserDefaults.standard.string(forKey: "audioStreamingCodec") {
+            self.requestedCodec = Self.normalizeCodec(savedCodec)
+        }
+
         let input = captureEngine.inputNode
         let format = input.inputFormat(forBus: 0)
         input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        input.installTap(onBus: 0, bufferSize: AVAudioFrameCount(captureBufferSamples), format: format) { [weak self] buffer, _ in
             guard let self else { return }
             let now = Date()
-            if now.timeIntervalSince(self.lastFrameTime) < 0.04 {
+            if now.timeIntervalSince(self.lastFrameTime) < Self.frameIntervalSeconds(samples: self.captureBufferSamples, sampleRate: format.sampleRate) {
                 return
             }
             self.lastFrameTime = now
 
             guard let data = Self.stereoInt16PCMData(from: buffer) else { return }
+            let activeCodec = Self.activeTransportCodec(for: self.requestedCodec)
             frameSink([
                 "type": "audio_frame",
                 "targetMachineId": targetMachineId,
+                "sourceMachineId": self.localMachineId(),
                 "source": "microphone",
                 "sampleRate": Int(format.sampleRate),
                 "bitsPerSample": 16,
                 "channels": Self.transportChannels,
-                "codec": "pcm_s16le",
+                "codec": activeCodec,
+                "requestedCodec": self.requestedCodec,
+                "directAudioBufferSamples": self.captureBufferSamples,
+                "playbackBufferSamples": self.playbackBufferSamples,
                 "transport": "voicelink-pcm-ws",
                 "virtualDeviceName": self.virtualDeviceName,
                 "data": data.base64EncodedString()
@@ -77,6 +114,14 @@ final class OpenLinkAudioBridge {
             return
         }
 
+        let codec = (json["codec"] as? String) ?? "pcm_s16le"
+        guard Self.activeTransportCodec(for: codec) == "pcm_s16le" else {
+            return
+        }
+        if let playbackSamples = (json["windowsAudioBufferSamples"] as? Int) ?? (json["playbackBufferSamples"] as? Int) {
+            configure(playbackBufferSamples: playbackSamples)
+        }
+
         let sampleRate = Double(json["sampleRate"] as? Int ?? 48_000)
         let sourceChannels = max(1, json["channels"] as? Int ?? Self.transportChannels)
         let playbackData = sourceChannels == Self.transportChannels ? data : Self.stereoInt16PCMData(from: data, channels: sourceChannels)
@@ -104,6 +149,44 @@ final class OpenLinkAudioBridge {
             playerNode.play()
         }
         playerNode.scheduleBuffer(buffer, completionHandler: nil)
+    }
+
+    private static func clampBufferSamples(_ samples: Int) -> Int {
+        if samples <= 0 { return 512 }
+        return min(2048, max(16, samples))
+    }
+
+    private static func frameIntervalSeconds(samples: Int, sampleRate: Double) -> TimeInterval {
+        let rate = sampleRate > 0 ? sampleRate : 48_000
+        let seconds = Double(clampBufferSamples(samples)) / rate
+        return min(0.08, max(0.005, seconds))
+    }
+
+    private static func normalizeCodec(_ codec: String) -> String {
+        let normalized = codec.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "pcm_s16le", "flac", "ogg_opus", "mp3":
+            return normalized
+        default:
+            return "pcm_s16le"
+        }
+    }
+
+    private static func activeTransportCodec(for requestedCodec: String) -> String {
+        // The current native stream is always PCM stereo 16-bit. Compressed codecs are
+        // retained in policy/settings until both endpoints have matching encoders.
+        return "pcm_s16le"
+    }
+
+    private func localMachineId() -> String {
+        let host = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+        return host
+            .lowercased()
+            .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "’", with: "")
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
     }
 
     private static func stereoInt16PCMData(from buffer: AVAudioPCMBuffer) -> Data? {

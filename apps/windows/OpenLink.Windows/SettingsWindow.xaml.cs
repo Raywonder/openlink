@@ -13,6 +13,7 @@ public partial class SettingsWindow : Window
         Settings = settings.Clone();
         LoadTtsVoices();
         LoadAsioDrivers();
+        LoadAudioBufferChoices();
         ConfigureDefaultServerChoices();
         LoadSettings();
     }
@@ -46,6 +47,9 @@ public partial class SettingsWindow : Window
         AllowSystemAudioBox.IsChecked = Settings.AllowSystemAudio;
         RemoteAudioVolumeSlider.Value = Settings.RemoteAudioVolumePercent;
         LocalAudioCaptureVolumeSlider.Value = Settings.LocalAudioCaptureVolumePercent;
+        SelectComboItem(DirectAudioBufferBox, Settings.DirectAudioBufferSamples.ToString());
+        SelectComboItem(WindowsAudioBufferBox, Settings.WindowsAudioBufferSamples.ToString());
+        SelectComboItem(AudioStreamingCodecBox, Settings.AudioStreamingCodec);
         EnableAsioAudioDriverBox.IsChecked = Settings.EnableAsioAudioDriver;
         SelectComboItem(AsioDriverBox, Settings.AsioDriverName);
         AsioLatencySlider.Value = Settings.AsioLatencyMilliseconds;
@@ -122,6 +126,9 @@ public partial class SettingsWindow : Window
         Settings.AllowSystemAudio = AllowSystemAudioBox.IsChecked == true;
         Settings.RemoteAudioVolumePercent = (int)RemoteAudioVolumeSlider.Value;
         Settings.LocalAudioCaptureVolumePercent = (int)LocalAudioCaptureVolumeSlider.Value;
+        Settings.DirectAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(GetComboInt(DirectAudioBufferBox, 512));
+        Settings.WindowsAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(GetComboInt(WindowsAudioBufferBox, 512));
+        Settings.AudioStreamingCodec = OpenLinkAudioSettings.NormalizeCodec(GetComboText(AudioStreamingCodecBox, "pcm_s16le"));
         Settings.EnableAsioAudioDriver = EnableAsioAudioDriverBox.IsChecked == true;
         Settings.AsioDriverName = GetComboText(AsioDriverBox, "");
         Settings.AsioLatencyMilliseconds = (int)AsioLatencySlider.Value;
@@ -287,6 +294,18 @@ public partial class SettingsWindow : Window
                 Tag = driverName,
                 ToolTip = driverName
             });
+        }
+    }
+
+    private void LoadAudioBufferChoices()
+    {
+        DirectAudioBufferBox.Items.Clear();
+        WindowsAudioBufferBox.Items.Clear();
+        foreach (var samples in OpenLinkAudioSettings.BufferSampleChoices)
+        {
+            var label = $"{samples} samples";
+            DirectAudioBufferBox.Items.Add(new ComboBoxItem { Content = label, Tag = samples.ToString() });
+            WindowsAudioBufferBox.Items.Add(new ComboBoxItem { Content = label, Tag = samples.ToString() });
         }
     }
 

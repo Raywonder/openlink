@@ -25,6 +25,11 @@ public sealed class MachineRecord : INotifyPropertyChanged
     public DateTimeOffset? LastDisconnectedAt { get; set; }
     public long LastDurationSeconds { get; set; }
     public string? LastSessionId { get; set; }
+    public int AudioSampleRate { get; set; }
+    public int DirectAudioBufferSamples { get; set; }
+    public int WindowsAudioBufferSamples { get; set; }
+    public string AudioStreamingCodec { get; set; } = "pcm_s16le";
+    public DateTimeOffset? LastAudioFrameAt { get; set; }
     public bool IsTrusted { get; set; }
     public bool AllowClipboardSync { get; set; } = true;
     public bool AllowFileTransfer { get; set; } = true;
@@ -82,6 +87,17 @@ public sealed class MachineRecord : INotifyPropertyChanged
     public string LastDurationText => LastDurationSeconds <= 0 ? "No duration" : FormatDuration(LastDurationSeconds);
     public string DropInText => AllowDropIn ? "Drop-in allowed" : "Approval required";
     public string AudioText => $"Mic {(AllowMicrophoneAudio ? "on" : "off")}, system {(AllowSystemAudio ? "on" : "off")}";
+    public string AudioDetailsText
+    {
+        get
+        {
+            var sampleRate = AudioSampleRate > 0 ? $"{AudioSampleRate} Hz" : "sample rate unknown";
+            var directBuffer = DirectAudioBufferSamples > 0 ? $"{DirectAudioBufferSamples} samples direct" : "direct buffer unknown";
+            var windowsBuffer = WindowsAudioBufferSamples > 0 ? $"{WindowsAudioBufferSamples} samples Windows" : "Windows buffer unknown";
+            var codec = string.IsNullOrWhiteSpace(AudioStreamingCodec) ? "codec unknown" : AudioStreamingCodec;
+            return $"{sampleRate}, {directBuffer}, {windowsBuffer}, {codec}";
+        }
+    }
     public bool IsThisDevice =>
         string.Equals(Id, Environment.MachineName, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(MachineHostname, Environment.MachineName, StringComparison.OrdinalIgnoreCase);
@@ -112,6 +128,30 @@ public sealed class MachineRecord : INotifyPropertyChanged
 
         IsOnline = false;
         OnPropertyChanged(nameof(LastDurationText));
+        OnPropertyChanged(nameof(AccessibleSummary));
+    }
+
+    public void UpdateAudioDiagnostics(int sampleRate, int directBufferSamples, int windowsBufferSamples, string? codec)
+    {
+        if (sampleRate > 0)
+        {
+            AudioSampleRate = sampleRate;
+        }
+        if (directBufferSamples > 0)
+        {
+            DirectAudioBufferSamples = directBufferSamples;
+        }
+        if (windowsBufferSamples > 0)
+        {
+            WindowsAudioBufferSamples = windowsBufferSamples;
+        }
+        if (!string.IsNullOrWhiteSpace(codec))
+        {
+            AudioStreamingCodec = codec.Trim();
+        }
+
+        LastAudioFrameAt = DateTimeOffset.Now;
+        OnPropertyChanged(nameof(AudioDetailsText));
         OnPropertyChanged(nameof(AccessibleSummary));
     }
 

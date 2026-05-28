@@ -34,6 +34,10 @@ public sealed class OpenLinkAudioBridge : IDisposable
     private bool _useAsioPlayback;
     private string _asioDriverName = "";
     private int _asioLatencyMilliseconds = 20;
+    private int _directAudioBufferSamples = 512;
+    private int _windowsAudioBufferSamples = 512;
+    private string _audioStreamingCodec = "pcm_s16le";
+    private bool _loggedCodecFallback;
 
     public string StatusText { get; private set; } = "OpenLink audio bridge is stopped.";
     public string VirtualDeviceName { get; } = "OpenLink VoiceLink Virtual Audio";
@@ -69,13 +73,25 @@ public sealed class OpenLinkAudioBridge : IDisposable
     {
         _localCaptureGain = PercentToGain(settings.LocalAudioCaptureVolumePercent);
         _remotePlaybackVolume = PercentToGain(settings.RemoteAudioVolumePercent);
+        var directBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(settings.DirectAudioBufferSamples);
+        var windowsBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(settings.WindowsAudioBufferSamples);
+        var codec = OpenLinkAudioSettings.NormalizeCodec(settings.AudioStreamingCodec);
         var playbackDriverChanged =
             _useAsioPlayback != settings.EnableAsioAudioDriver ||
             !string.Equals(_asioDriverName, settings.AsioDriverName, StringComparison.OrdinalIgnoreCase) ||
-            _asioLatencyMilliseconds != settings.AsioLatencyMilliseconds;
+            _asioLatencyMilliseconds != settings.AsioLatencyMilliseconds ||
+            _windowsAudioBufferSamples != windowsBufferSamples;
         _useAsioPlayback = settings.EnableAsioAudioDriver;
         _asioDriverName = settings.AsioDriverName.Trim();
         _asioLatencyMilliseconds = Math.Clamp(settings.AsioLatencyMilliseconds, 5, 200);
+        _directAudioBufferSamples = directBufferSamples;
+        _windowsAudioBufferSamples = windowsBufferSamples;
+        _audioStreamingCodec = codec;
+        if (!OpenLinkAudioSettings.IsCodecAvailable(codec) && !_loggedCodecFallback)
+        {
+            log?.Invoke($"Audio streaming format {codec} is saved for negotiation, but this build can only transmit PCM stereo 16-bit. Using PCM until both endpoints support {codec}.");
+            _loggedCodecFallback = true;
+        }
 
         if (playbackDriverChanged && _remotePlaybackSession is not null)
         {
@@ -250,7 +266,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
         var microphone = _microphoneCapture is null ? "microphone muted" : "microphone capture active";
         var system = _systemCapture is null ? "system audio muted" : "system audio capture active";
         var playback = _remotePlaybackSession is null ? "remote playback inactive" : $"remote playback active via {_remotePlaybackDriverKey}";
-        return $"OpenLink audio bridge: {microphone} ({_microphoneFormatText}), {system} ({_systemFormatText}), {playback}, virtual endpoint {VirtualDeviceName}.";
+        return $"OpenLink audio bridge: {microphone} ({_microphoneFormatText}), {system} ({_systemFormatText}), {playback}, direct buffer {_directAudioBufferSamples} samples, Windows playback buffer {_windowsAudioBufferSamples} samples, streaming PCM stereo 16-bit, virtual endpoint {VirtualDeviceName}.";
     }
 
     private void ForwardCaptureFrame(string source, WaveFormat format, byte[] buffer, int byteCount, ref long lastTicks)
@@ -262,7 +278,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
         }
 
         var now = DateTimeOffset.UtcNow.Ticks;
-        if (now - Interlocked.Read(ref lastTicks) < TimeSpan.FromMilliseconds(40).Ticks)
+        if (now - Interlocked.Read(ref lastTicks) < CaptureFrameInterval(format.SampleRate).Ticks)
         {
             return;
         }
@@ -322,7 +338,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
         _remotePlaybackFormat = format;
         _remotePlaybackBuffer = new BufferedWaveProvider(format)
         {
-            BufferDuration = TimeSpan.FromSeconds(2),
+            BufferDuration = PlaybackBufferDuration(format.SampleRate),
             DiscardOnBufferOverflow = true
         };
         _remotePlaybackSession = CreatePlaybackSession(format);
@@ -355,7 +371,30 @@ public sealed class OpenLinkAudioBridge : IDisposable
         }
 
         _remotePlaybackDriverKey = "WaveOut/WASAPI-compatible";
-        return new WaveOutEvent { DesiredLatency = Math.Max(50, _asioLatencyMilliseconds), Volume = _remotePlaybackVolume };
+        return new WaveOutEvent { DesiredLatency = WindowsDesiredLatencyMilliseconds(format.SampleRate), Volume = _remotePlaybackVolume };
+    }
+
+    private TimeSpan CaptureFrameInterval(int sampleRate)
+    {
+        var milliseconds = SamplesToMilliseconds(_directAudioBufferSamples, sampleRate);
+        return TimeSpan.FromMilliseconds(Math.Clamp(milliseconds, 5.0, 80.0));
+    }
+
+    private TimeSpan PlaybackBufferDuration(int sampleRate)
+    {
+        var milliseconds = SamplesToMilliseconds(_windowsAudioBufferSamples, sampleRate);
+        return TimeSpan.FromMilliseconds(Math.Clamp(milliseconds * 4, 20.0, 250.0));
+    }
+
+    private int WindowsDesiredLatencyMilliseconds(int sampleRate)
+    {
+        var bufferMilliseconds = SamplesToMilliseconds(_windowsAudioBufferSamples, sampleRate);
+        return (int)Math.Round(Math.Clamp(bufferMilliseconds * 2, 16.0, 200.0));
+    }
+
+    private static double SamplesToMilliseconds(int samples, int sampleRate)
+    {
+        return sampleRate <= 0 ? 20.0 : samples / (double)sampleRate * 1000.0;
     }
 
     public static IReadOnlyList<string> GetAsioDriverNames()

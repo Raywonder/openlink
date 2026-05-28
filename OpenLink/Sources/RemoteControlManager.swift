@@ -1347,7 +1347,11 @@ class RemoteControlManager: ObservableObject {
             if let response = handleSignalingMessage(json) {
                 let success = (response["success"] as? Bool) ?? true
                 if type == "start_interaction", success, let controllerMachineId = controllerMachineId(from: json) {
-                    OpenLinkAudioBridge.shared.startCapture(targetMachineId: controllerMachineId) { [weak self] frame in
+                    OpenLinkAudioBridge.shared.startCapture(
+                        targetMachineId: controllerMachineId,
+                        directBufferSamples: json["directAudioBufferSamples"] as? Int,
+                        requestedCodec: (json["audioCodec"] as? String) ?? (json["requestedAudioCodec"] as? String)
+                    ) { [weak self] frame in
                         self?.sendMessage(frame) { _ in }
                     }
                 } else if type == "start_interaction", !success {

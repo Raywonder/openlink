@@ -1686,6 +1686,9 @@ struct AudioSettingsTab: View {
     @AppStorage("allowSystemAudio") private var allowSystemAudio = true
     @AppStorage("remoteAudioVolumePercent") private var remoteAudioVolumePercent = 100.0
     @AppStorage("localAudioCaptureVolumePercent") private var localAudioCaptureVolumePercent = 100.0
+    @AppStorage("directAudioBufferSamples") private var directAudioBufferSamples = 512
+    @AppStorage("macAudioPlaybackBufferSamples") private var macAudioPlaybackBufferSamples = 512
+    @AppStorage("audioStreamingCodec") private var audioStreamingCodec = "pcm_s16le"
     @AppStorage("autoMuteRemoteAudio") private var autoMuteRemoteAudio = false
     @AppStorage("muteRemoteAudioWhenInactive") private var muteRemoteAudioWhenInactive = true
     @AppStorage("autoMutedProcesses") private var autoMutedProcesses = "VoiceOver, Music"
@@ -1701,6 +1704,25 @@ struct AudioSettingsTab: View {
                     Toggle("Allow system audio", isOn: $allowSystemAudio)
                     SliderRow(title: "Remote audio volume", value: $remoteAudioVolumePercent, range: 0...150, step: 10, suffix: "%")
                     SliderRow(title: "Local audio capture volume", value: $localAudioCaptureVolumePercent, range: 0...150, step: 10, suffix: "%")
+                    Picker("Direct audio buffer size", selection: $directAudioBufferSamples) {
+                        ForEach([16, 32, 64, 128, 256, 512, 1024, 2048], id: \.self) { samples in
+                            Text("\(samples) samples").tag(samples)
+                        }
+                    }
+                    .accessibilityLabel("Direct audio buffer size")
+                    Picker("Mac playback buffer size", selection: $macAudioPlaybackBufferSamples) {
+                        ForEach([16, 32, 64, 128, 256, 512, 1024, 2048], id: \.self) { samples in
+                            Text("\(samples) samples").tag(samples)
+                        }
+                    }
+                    .accessibilityLabel("Mac playback buffer size")
+                    Picker("Streaming format", selection: $audioStreamingCodec) {
+                        Text("PCM stereo 16-bit, active").tag("pcm_s16le")
+                        Text("FLAC, saved for endpoint negotiation").tag("flac")
+                        Text("Ogg Opus, saved for endpoint negotiation").tag("ogg_opus")
+                        Text("MP3, saved for endpoint negotiation").tag("mp3")
+                    }
+                    .accessibilityLabel("Streaming format")
                     Toggle("Ask controlled computer to auto-mute audio on connect", isOn: $autoMuteRemoteAudio)
                     Toggle("Mute remote audio when connection is minimized for local use", isOn: $muteRemoteAudioWhenInactive)
                     TextField("Auto-muted process names", text: $autoMutedProcesses)
@@ -1753,6 +1775,7 @@ struct AccessibilitySettingsTab: View {
     @AppStorage("showConnectionNotifications") private var showConnectionNotifications = true
     @AppStorage("showElapsedConnectionTime") private var showElapsedConnectionTime = true
     @AppStorage("announceConnectionStrength") private var announceConnectionStrength = true
+    @AppStorage("showActivityLog") private var showActivityLog = false
     @AppStorage("enableDiagnosticSending") private var enableDiagnosticSending = true
     @AppStorage("enableLocalTtsHelper") private var enableLocalTtsHelper = false
     @AppStorage("localTtsVoiceId") private var localTtsVoiceId = ""

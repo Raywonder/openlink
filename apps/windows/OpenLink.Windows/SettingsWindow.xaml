@@ -214,6 +214,38 @@
                             IsSnapToTickEnabled="True"
                             Margin="0,0,0,8"
                             AutomationProperties.LabeledBy="{Binding ElementName=LocalAudioCaptureVolumeLabel}" />
+                    <Label x:Name="DirectAudioBufferLabel"
+                           Content="Direct audio buffer size"
+                           Target="{Binding ElementName=DirectAudioBufferBox}" />
+                    <ComboBox x:Name="DirectAudioBufferBox"
+                              Width="180"
+                              HorizontalAlignment="Left"
+                              Margin="0,0,0,8"
+                              AutomationProperties.LabeledBy="{Binding ElementName=DirectAudioBufferLabel}"
+                              AutomationProperties.HelpText="Controls the capture frame size sent to the remote device. Smaller values reduce latency and may use more CPU and network capacity." />
+                    <Label x:Name="WindowsAudioBufferLabel"
+                           Content="Windows playback buffer size"
+                           Target="{Binding ElementName=WindowsAudioBufferBox}" />
+                    <ComboBox x:Name="WindowsAudioBufferBox"
+                              Width="180"
+                              HorizontalAlignment="Left"
+                              Margin="0,0,0,8"
+                              AutomationProperties.LabeledBy="{Binding ElementName=WindowsAudioBufferLabel}"
+                              AutomationProperties.HelpText="Controls the local Windows playback buffer for incoming remote audio. Larger values can smooth buffering." />
+                    <Label x:Name="AudioStreamingCodecLabel"
+                           Content="Streaming format"
+                           Target="{Binding ElementName=AudioStreamingCodecBox}" />
+                    <ComboBox x:Name="AudioStreamingCodecBox"
+                              Width="280"
+                              HorizontalAlignment="Left"
+                              Margin="0,0,0,8"
+                              AutomationProperties.LabeledBy="{Binding ElementName=AudioStreamingCodecLabel}"
+                              AutomationProperties.HelpText="PCM stereo 16-bit is the active native format in this build. Other formats are saved for endpoint negotiation when both sides support them.">
+                        <ComboBoxItem Content="PCM stereo 16-bit, lowest processing latency" Tag="pcm_s16le" />
+                        <ComboBoxItem Content="FLAC, not active in this build" Tag="flac" />
+                        <ComboBoxItem Content="Ogg Opus, not active in this build" Tag="ogg_opus" />
+                        <ComboBoxItem Content="MP3, not active in this build" Tag="mp3" />
+                    </ComboBox>
                     <CheckBox x:Name="EnableAsioAudioDriverBox"
                               Margin="0,0,0,8"
                               Content="Use ASIO or ASIO4ALL for low-latency remote playback" />

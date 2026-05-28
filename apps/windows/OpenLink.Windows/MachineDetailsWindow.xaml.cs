@@ -92,6 +92,11 @@ public partial class MachineDetailsWindow : Window
         AddDetail("Permissions", "Microphone audio", _machine.AllowMicrophoneAudio ? "allowed" : "muted");
         AddDetail("Permissions", "System audio", _machine.AllowSystemAudio ? "allowed" : "muted");
         AddDetail("Permissions", "Remote app management", CanManageApps ? "allowed for trusted machines" : "blocked in settings or not trusted");
+        AddDetail("Audio", "Sample rate", _machine.AudioSampleRate > 0 ? $"{_machine.AudioSampleRate} Hz" : "unknown until audio frames arrive");
+        AddDetail("Audio", "Direct audio buffer", _machine.DirectAudioBufferSamples > 0 ? $"{_machine.DirectAudioBufferSamples} samples" : $"{_settings.DirectAudioBufferSamples} samples requested locally");
+        AddDetail("Audio", "Windows playback buffer", _machine.WindowsAudioBufferSamples > 0 ? $"{_machine.WindowsAudioBufferSamples} samples" : $"{_settings.WindowsAudioBufferSamples} samples requested locally");
+        AddDetail("Audio", "Streaming format", string.IsNullOrWhiteSpace(_machine.AudioStreamingCodec) ? _settings.AudioStreamingCodec : _machine.AudioStreamingCodec);
+        AddDetail("Audio", "Last audio frame", _machine.LastAudioFrameAt?.LocalDateTime.ToString("g") ?? "not received in this session");
 
         UpdateSummaryText();
     }

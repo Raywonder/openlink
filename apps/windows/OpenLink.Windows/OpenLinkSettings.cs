@@ -38,6 +38,9 @@ public sealed class OpenLinkSettings
     public bool AllowSystemAudio { get; set; } = true;
     public int RemoteAudioVolumePercent { get; set; } = 100;
     public int LocalAudioCaptureVolumePercent { get; set; } = 100;
+    public int DirectAudioBufferSamples { get; set; } = 512;
+    public int WindowsAudioBufferSamples { get; set; } = 512;
+    public string AudioStreamingCodec { get; set; } = "pcm_s16le";
     public bool EnableAsioAudioDriver { get; set; }
     public string AsioDriverName { get; set; } = "";
     public int AsioLatencyMilliseconds { get; set; } = 20;
@@ -109,6 +112,9 @@ public sealed class OpenLinkSettings
             AllowSystemAudio = AllowSystemAudio,
             RemoteAudioVolumePercent = RemoteAudioVolumePercent,
             LocalAudioCaptureVolumePercent = LocalAudioCaptureVolumePercent,
+            DirectAudioBufferSamples = DirectAudioBufferSamples,
+            WindowsAudioBufferSamples = WindowsAudioBufferSamples,
+            AudioStreamingCodec = AudioStreamingCodec,
             EnableAsioAudioDriver = EnableAsioAudioDriver,
             AsioDriverName = AsioDriverName,
             AsioLatencyMilliseconds = AsioLatencyMilliseconds,
@@ -200,6 +206,9 @@ public static class OpenLinkSettingsStore
 
             settings.RemoteAudioVolumePercent = Math.Clamp(settings.RemoteAudioVolumePercent, 0, 150);
             settings.LocalAudioCaptureVolumePercent = Math.Clamp(settings.LocalAudioCaptureVolumePercent, 0, 150);
+            settings.DirectAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(settings.DirectAudioBufferSamples);
+            settings.WindowsAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(settings.WindowsAudioBufferSamples);
+            settings.AudioStreamingCodec = OpenLinkAudioSettings.NormalizeCodec(settings.AudioStreamingCodec);
             settings.CtrlAltDeleteRemotePressCount = Math.Clamp(settings.CtrlAltDeleteRemotePressCount <= 0 ? 2 : settings.CtrlAltDeleteRemotePressCount, 1, 5);
             settings.CtrlAltDeleteLocalLockPressCount = Math.Clamp(settings.CtrlAltDeleteLocalLockPressCount <= 0 ? 3 : settings.CtrlAltDeleteLocalLockPressCount, 1, 5);
             if (string.IsNullOrWhiteSpace(settings.CtrlAltDeleteUnlockAction))
@@ -225,5 +234,40 @@ public static class OpenLinkSettingsStore
         Directory.CreateDirectory(SettingsDirectory);
         var json = JsonSerializer.Serialize(settings, SerializerOptions);
         File.WriteAllText(SettingsPath, json);
+    }
+}
+
+public static class OpenLinkAudioSettings
+{
+    public static readonly int[] BufferSampleChoices = [16, 32, 64, 128, 256, 512, 1024, 2048];
+    public static readonly string[] SupportedTransportCodecs = ["pcm_s16le"];
+    public static readonly string[] KnownCodecChoices = ["pcm_s16le", "flac", "ogg_opus", "mp3"];
+
+    public static int ClampBufferSamples(int samples)
+    {
+        if (samples <= 0)
+        {
+            return 512;
+        }
+
+        return Math.Clamp(samples, BufferSampleChoices[0], BufferSampleChoices[^1]);
+    }
+
+    public static string NormalizeCodec(string? codec)
+    {
+        if (string.IsNullOrWhiteSpace(codec))
+        {
+            return "pcm_s16le";
+        }
+
+        var normalized = codec.Trim().ToLowerInvariant();
+        return KnownCodecChoices.Contains(normalized, StringComparer.OrdinalIgnoreCase)
+            ? normalized
+            : "pcm_s16le";
+    }
+
+    public static bool IsCodecAvailable(string? codec)
+    {
+        return SupportedTransportCodecs.Contains(NormalizeCodec(codec), StringComparer.OrdinalIgnoreCase);
     }
 }

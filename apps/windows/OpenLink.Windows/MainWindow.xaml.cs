@@ -1366,7 +1366,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(8), token);
+            await Task.Delay(TimeSpan.FromSeconds(20), token);
         }
         catch (OperationCanceledException)
         {
@@ -1413,6 +1413,7 @@ public partial class MainWindow : Window
         _remoteInputPending = false;
         _remoteInputActive = true;
         AddLog($"Remote keyboard forwarding enabled for {_remoteInputMachine.DisplayName} ({_remoteInputMachine.Platform}).");
+        StartAudioBridge($"using {_remoteInputMachine.DisplayName}");
         var screenReaderMessage = BuildScreenReaderConnectionMessage(_remoteInputMachine);
         if (!string.IsNullOrWhiteSpace(screenReaderMessage))
         {
@@ -1999,6 +2000,16 @@ public partial class MainWindow : Window
             domainUsed = EndpointNormalizer.ShareHostFor(serverUrl),
             platform = "Windows",
             screenReader = DetectLocalScreenReader(),
+            audio = new
+            {
+                sampleRate = 48000,
+                codec = OpenLinkAudioSettings.IsCodecAvailable(_settings.AudioStreamingCodec)
+                    ? OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec)
+                    : "pcm_s16le",
+                requestedCodec = OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec),
+                directAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.DirectAudioBufferSamples),
+                windowsAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.WindowsAudioBufferSamples)
+            },
             lastSessionId = _activeSessionId
         };
     }
@@ -2065,6 +2076,12 @@ public partial class MainWindow : Window
             microphoneAudioAllowed = _settings.AllowMicrophoneAudio,
             systemAudioAllowed = _settings.AllowSystemAudio,
             audioTransport = "native-wasapi",
+            audioCodec = OpenLinkAudioSettings.IsCodecAvailable(_settings.AudioStreamingCodec)
+                ? OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec)
+                : "pcm_s16le",
+            requestedAudioCodec = OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec),
+            directAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.DirectAudioBufferSamples),
+            windowsAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.WindowsAudioBufferSamples),
             voiceLinkAudioFallback = _settings.UseVoiceLinkAudioFallback,
             voiceLinkAudioFallbackUrl = _settings.VoiceLinkAudioFallbackUrl,
             clipboardAllowed = _settings.AllowClipboardSync,
@@ -2200,9 +2217,25 @@ public partial class MainWindow : Window
             }
         }
 
+        if (machineInfo.TryGetProperty("audio", out var audioInfo) && audioInfo.ValueKind == JsonValueKind.Object)
+        {
+            machine.UpdateAudioDiagnostics(
+                ReadInt(audioInfo, "sampleRate"),
+                ReadInt(audioInfo, "directAudioBufferSamples"),
+                ReadInt(audioInfo, "windowsAudioBufferSamples"),
+                ReadString(audioInfo, "codec") ?? ReadString(audioInfo, "requestedCodec"));
+        }
+
         machine.TouchConnected(_activeSessionId);
         MachineStore.Save(_machines);
         return machine;
+    }
+
+    private static int ReadInt(JsonElement root, string propertyName)
+    {
+        return root.TryGetProperty(propertyName, out var element) && element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var value)
+            ? value
+            : 0;
     }
 
     private static string? ReadString(JsonElement root, string propertyName)
@@ -2478,6 +2511,12 @@ public partial class MainWindow : Window
             audioAllowed = _settings.AllowAudio,
             audioDirection = "bidirectional",
             audioTransport = "native-wasapi",
+            audioCodec = OpenLinkAudioSettings.IsCodecAvailable(_settings.AudioStreamingCodec)
+                ? OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec)
+                : "pcm_s16le",
+            requestedAudioCodec = OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec),
+            directAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.DirectAudioBufferSamples),
+            windowsAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.WindowsAudioBufferSamples),
             voiceLinkAudioFallback = _settings.UseVoiceLinkAudioFallback,
             voiceLinkAudioFallbackUrl = _settings.VoiceLinkAudioFallbackUrl,
             localTtsEnabled = _settings.EnableLocalTtsHelper,
@@ -2497,14 +2536,17 @@ public partial class MainWindow : Window
             return;
         }
 
-        StartAudioBridge($"using {machine.DisplayName}");
         _ = SendDiagnosticEventAsync("start_interaction", machine, "sent", new
         {
             audioDirection = "bidirectional",
             audioTransport = "native-wasapi",
+            audioCodec = "pcm_s16le",
+            requestedAudioCodec = OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec),
+            directAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.DirectAudioBufferSamples),
+            windowsAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.WindowsAudioBufferSamples),
             keyboardControl = true
         });
-        SetStatus($"Start using {machine.DisplayName} requested. Waiting for the remote machine to confirm keyboard control. Keyboard remains on this computer until confirmation. {_audioBridge.StatusText}");
+        SetStatus($"Start using {machine.DisplayName} requested. Waiting for the remote machine to confirm keyboard control. Keyboard and audio remain on this computer until confirmation.");
     }
 
     private Task<bool> SendRemoteAudioFrameAsync(MachineRecord machine, OpenLinkAudioFrame frame)
@@ -2518,11 +2560,15 @@ public partial class MainWindow : Window
         {
             type = "audio_frame",
             targetMachineId = machine.Id,
+            sourceMachineId = Environment.MachineName,
             source = frame.Source,
             sampleRate = frame.SampleRate,
             bitsPerSample = frame.BitsPerSample,
             channels = frame.Channels,
             codec = frame.Codec,
+            requestedCodec = OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec),
+            directAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.DirectAudioBufferSamples),
+            windowsAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.WindowsAudioBufferSamples),
             transport = "voicelink-pcm-ws",
             virtualDeviceName = _audioBridge.VirtualDeviceName,
             data = Convert.ToBase64String(frame.Payload)
@@ -2554,6 +2600,18 @@ public partial class MainWindow : Window
                 root.TryGetProperty("channels", out var channelsElement) ? channelsElement.GetInt32() : 2,
                 root.TryGetProperty("codec", out var codecElement) ? codecElement.GetString() ?? "pcm_s16le" : "pcm_s16le",
                 Convert.FromBase64String(data));
+            var sourceMachineId = root.TryGetProperty("sourceMachineId", out var sourceMachineElement)
+                ? sourceMachineElement.GetString()
+                : null;
+            var sourceMachine = _machines.FirstOrDefault(machine =>
+                string.Equals(NormalizeMachineToken(machine.Id), NormalizeMachineToken(sourceMachineId), StringComparison.Ordinal) ||
+                string.Equals(NormalizeMachineToken(machine.MachineHostname), NormalizeMachineToken(sourceMachineId), StringComparison.Ordinal)) ??
+                _remoteInputMachine;
+            sourceMachine?.UpdateAudioDiagnostics(
+                frame.SampleRate,
+                root.TryGetProperty("directAudioBufferSamples", out var directElement) && directElement.TryGetInt32(out var directSamples) ? directSamples : 0,
+                root.TryGetProperty("windowsAudioBufferSamples", out var windowsElement) && windowsElement.TryGetInt32(out var windowsSamples) ? windowsSamples : 0,
+                frame.Codec);
             _audioBridge.PlayRemoteFrame(frame, AddLog);
         }
         catch (Exception ex)
@@ -3056,7 +3114,10 @@ public partial class MainWindow : Window
         var menu = new Forms.ContextMenuStrip
         {
             AccessibleName = $"Controller actions for {lastMachine.DisplayName}",
-            AccessibleDescription = "Actions for the connected OpenLink controller"
+            AccessibleDescription = "Actions for the connected OpenLink controller",
+            RenderMode = Forms.ToolStripRenderMode.System,
+            ShowImageMargin = false,
+            ShowCheckMargin = true
         };
         _controllerActionsMenu?.Close();
         _controllerActionsMenu = menu;
@@ -3092,23 +3153,6 @@ public partial class MainWindow : Window
         AddTrayMenuItem(menu, $"Restart {lastMachine.DisplayName}", $"Restart {lastMachine.DisplayName}", (_, _) => _ = SendRemoteMachineActionAsync(lastMachine, "restart_machine", null));
         AddTrayMenuItem(menu, $"Shut Down {lastMachine.DisplayName}", $"Shut down {lastMachine.DisplayName}", (_, _) => _ = SendRemoteMachineActionAsync(lastMachine, "shutdown_machine", null));
         AddTrayMenuItem(menu, $"Log Out {lastMachine.DisplayName}", $"Log out {lastMachine.DisplayName}", (_, _) => _ = SendRemoteMachineActionAsync(lastMachine, "logout_machine", null));
-        if (hasRemoteSession)
-        {
-            menu.Items.Add(new Forms.ToolStripSeparator());
-            AddTrayMenuItem(menu, "Toggle Microphone Audio", "Mute or allow microphone audio for OpenLink", (_, _) =>
-            {
-                lastMachine.AllowMicrophoneAudio = !lastMachine.AllowMicrophoneAudio;
-                MachineStore.Save(_machines);
-                SetStatus($"Microphone audio {(lastMachine.AllowMicrophoneAudio ? "allowed" : "muted")} for {lastMachine.DisplayName}.");
-            }, isChecked: lastMachine.AllowMicrophoneAudio);
-            AddTrayMenuItem(menu, "Toggle System Audio", "Mute or allow system audio for OpenLink", (_, _) =>
-            {
-                lastMachine.AllowSystemAudio = !lastMachine.AllowSystemAudio;
-                MachineStore.Save(_machines);
-                SetStatus($"System audio {(lastMachine.AllowSystemAudio ? "allowed" : "muted")} for {lastMachine.DisplayName}.");
-            }, isChecked: lastMachine.AllowSystemAudio);
-        }
-
         menu.Opening += (_, _) =>
         {
             _controllerActionsMenuOpen = true;
@@ -3161,65 +3205,11 @@ public partial class MainWindow : Window
 
     private void AddRemoteAudioMenu(Forms.ContextMenuStrip menu, MachineRecord machine)
     {
-        var audioMenu = new Forms.ToolStripMenuItem($"Audio Settings for {machine.DisplayName}")
-        {
-            AccessibleName = $"Audio settings for {machine.DisplayName}",
-            AccessibleDescription = $"Change remote audio and volume settings for {machine.DisplayName}"
-        };
-        audioMenu.DropDownItems.Add(CreateRemoteAudioMenuItem(
-            "Toggle Microphone Audio",
-            $"Toggle microphone audio on {machine.DisplayName}",
-            machine,
-            allowMicrophoneAudio: !machine.AllowMicrophoneAudio,
-            allowSystemAudio: null,
-            remoteAudioVolumePercent: null,
-            isChecked: machine.AllowMicrophoneAudio));
-        audioMenu.DropDownItems.Add(CreateRemoteAudioMenuItem(
-            "Toggle System Audio",
-            $"Toggle system audio on {machine.DisplayName}",
-            machine,
-            allowMicrophoneAudio: null,
-            allowSystemAudio: !machine.AllowSystemAudio,
-            remoteAudioVolumePercent: null,
-            isChecked: machine.AllowSystemAudio));
-        audioMenu.DropDownItems.Add(new Forms.ToolStripSeparator());
-
-        foreach (var volume in new[] { 50, 75, 100, 125, 150 })
-        {
-            audioMenu.DropDownItems.Add(CreateRemoteAudioMenuItem(
-                $"Remote Audio Volume {volume} Percent",
-                $"Set remote audio volume on {machine.DisplayName} to {volume} percent",
-                machine,
-                allowMicrophoneAudio: null,
-                allowSystemAudio: null,
-                remoteAudioVolumePercent: volume,
-                isChecked: null));
-        }
-
-        menu.Items.Add(audioMenu);
-    }
-
-    private Forms.ToolStripMenuItem CreateRemoteAudioMenuItem(
-        string text,
-        string accessibleDescription,
-        MachineRecord machine,
-        bool? allowMicrophoneAudio,
-        bool? allowSystemAudio,
-        int? remoteAudioVolumePercent,
-        bool? isChecked)
-    {
-        var item = new Forms.ToolStripMenuItem(text)
-        {
-            AccessibleName = text,
-            AccessibleDescription = accessibleDescription,
-            AccessibleRole = isChecked.HasValue
-                ? Forms.AccessibleRole.CheckButton
-                : Forms.AccessibleRole.MenuItem,
-            Checked = isChecked == true,
-            CheckOnClick = isChecked.HasValue
-        };
-        item.Click += (_, _) => _ = SendRemoteAudioSettingsAsync(machine, allowMicrophoneAudio, allowSystemAudio, remoteAudioVolumePercent);
-        return item;
+        AddTrayMenuItem(
+            menu,
+            $"Audio Settings for {machine.DisplayName}",
+            $"Open one dialog for microphone, system audio, volume, buffer size, and streaming format settings for {machine.DisplayName}",
+            (_, _) => ShowRemoteAudioSettingsDialog(machine));
     }
 
     private void AddRecentConnectionsMenu(Forms.ContextMenuStrip menu, MachineRecord currentMachine)
@@ -3448,11 +3438,43 @@ public partial class MainWindow : Window
         SetStatus($"Sent {action.Replace('_', ' ')} request for {machine.DisplayName}.");
     }
 
+    private void ShowRemoteAudioSettingsDialog(MachineRecord machine)
+    {
+        var dialog = new RemoteAudioSettingsDialog(machine, _settings)
+        {
+            Owner = this
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            SetStatus($"Audio settings for {machine.DisplayName} canceled.");
+            return;
+        }
+
+        _settings.RemoteAudioVolumePercent = dialog.RemoteAudioVolumePercent;
+        _settings.DirectAudioBufferSamples = dialog.DirectAudioBufferSamples;
+        _settings.WindowsAudioBufferSamples = dialog.WindowsAudioBufferSamples;
+        _settings.AudioStreamingCodec = dialog.AudioStreamingCodec;
+        OpenLinkSettingsStore.Save(_settings);
+        _audioBridge.Configure(_settings, AddLog);
+
+        _ = SendRemoteAudioSettingsAsync(
+            machine,
+            dialog.AllowMicrophoneAudio,
+            dialog.AllowSystemAudio,
+            dialog.RemoteAudioVolumePercent,
+            dialog.DirectAudioBufferSamples,
+            dialog.WindowsAudioBufferSamples,
+            dialog.AudioStreamingCodec);
+    }
+
     private async Task SendRemoteAudioSettingsAsync(
         MachineRecord machine,
         bool? allowMicrophoneAudio,
         bool? allowSystemAudio,
-        int? remoteAudioVolumePercent)
+        int? remoteAudioVolumePercent,
+        int? directAudioBufferSamples = null,
+        int? windowsAudioBufferSamples = null,
+        string? audioStreamingCodec = null)
     {
         await SendPeerAsync(new
         {
@@ -3465,7 +3487,10 @@ public partial class MainWindow : Window
             {
                 allowMicrophoneAudio,
                 allowSystemAudio,
-                remoteAudioVolumePercent
+                remoteAudioVolumePercent,
+                directAudioBufferSamples,
+                windowsAudioBufferSamples,
+                audioStreamingCodec = OpenLinkAudioSettings.NormalizeCodec(audioStreamingCodec ?? _settings.AudioStreamingCodec)
             }
         });
 
@@ -3477,7 +3502,26 @@ public partial class MainWindow : Window
         {
             machine.AllowSystemAudio = allowSystemAudio.Value;
         }
+        if (remoteAudioVolumePercent.HasValue)
+        {
+            _settings.RemoteAudioVolumePercent = Math.Clamp(remoteAudioVolumePercent.Value, 0, 150);
+        }
+        if (directAudioBufferSamples.HasValue)
+        {
+            _settings.DirectAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(directAudioBufferSamples.Value);
+        }
+        if (windowsAudioBufferSamples.HasValue)
+        {
+            _settings.WindowsAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(windowsAudioBufferSamples.Value);
+        }
+        if (!string.IsNullOrWhiteSpace(audioStreamingCodec))
+        {
+            _settings.AudioStreamingCodec = OpenLinkAudioSettings.NormalizeCodec(audioStreamingCodec);
+        }
+        machine.UpdateAudioDiagnostics(0, _settings.DirectAudioBufferSamples, _settings.WindowsAudioBufferSamples, _settings.AudioStreamingCodec);
         MachineStore.Save(_machines);
+        OpenLinkSettingsStore.Save(_settings);
+        _audioBridge.Configure(_settings, AddLog);
 
         SetStatus($"Sent audio settings request for {machine.DisplayName}.");
     }
