@@ -39,6 +39,38 @@ internal sealed class NvdaControllerBridge
         }
     }
 
+    public bool Braille(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || !IsRunning)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (Environment.Is64BitProcess)
+            {
+                return NvdaController64.nvdaController_testIfRunning() == 0 &&
+                       NvdaController64.nvdaController_brailleMessage(text) == 0;
+            }
+
+            return NvdaController32.nvdaController_testIfRunning() == 0 &&
+                   NvdaController32.nvdaController_brailleMessage(text) == 0;
+        }
+        catch (DllNotFoundException)
+        {
+            return false;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            return false;
+        }
+        catch (BadImageFormatException)
+        {
+            return false;
+        }
+    }
+
     public void CancelSpeech()
     {
         if (!IsRunning)
@@ -73,6 +105,9 @@ internal sealed class NvdaControllerBridge
 
         [DllImport("nvdaControllerClient64.dll", CallingConvention = CallingConvention.Cdecl)]
         internal static extern int nvdaController_cancelSpeech();
+
+        [DllImport("nvdaControllerClient64.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+        internal static extern int nvdaController_brailleMessage(string text);
     }
 
     private static class NvdaController32
@@ -85,5 +120,8 @@ internal sealed class NvdaControllerBridge
 
         [DllImport("nvdaControllerClient32.dll", CallingConvention = CallingConvention.Cdecl)]
         internal static extern int nvdaController_cancelSpeech();
+
+        [DllImport("nvdaControllerClient32.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+        internal static extern int nvdaController_brailleMessage(string text);
     }
 }

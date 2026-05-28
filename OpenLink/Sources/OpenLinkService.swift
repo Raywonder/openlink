@@ -275,6 +275,9 @@ class OpenLinkService: ObservableObject {
             "localTtsRate": 1.0,
             "localTtsVolumePercent": 100.0,
             "ttsFallbackMode": "screen-reader",
+            "enableBrailleDisplaySupport": false,
+            "brailleProvider": "auto",
+            "brlttyExecutablePath": "",
             "showActivityLog": false,
             "updateChannel": "Stable",
             "localServerEnabled": false,
@@ -2219,6 +2222,7 @@ class OpenLinkService: ObservableObject {
         guard !announcement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
         DispatchQueue.main.async {
+            BrlttyBridge.shared.send(announcement)
             let element: Any
             if let mainWindow = NSApp.mainWindow {
                 element = mainWindow

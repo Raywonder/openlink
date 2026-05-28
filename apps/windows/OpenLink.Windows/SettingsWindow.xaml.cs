@@ -77,6 +77,9 @@ public partial class SettingsWindow : Window
         ShowElapsedConnectionTimeBox.IsChecked = Settings.ShowElapsedConnectionTime;
         AnnounceConnectionStrengthBox.IsChecked = Settings.AnnounceConnectionStrength;
         EnableLocalTtsHelperBox.IsChecked = Settings.EnableLocalTtsHelper;
+        EnableBrailleDisplaySupportBox.IsChecked = Settings.EnableBrailleDisplaySupport;
+        SelectComboItem(BrailleProviderBox, Settings.BrailleProvider);
+        BrlttyExecutablePathBox.Text = Settings.BrlttyExecutablePath;
         SelectTtsVoice(Settings.LocalTtsVoiceId);
         LocalTtsRateSlider.Value = Settings.LocalTtsRate;
         LocalTtsVolumeSlider.Value = Settings.LocalTtsVolumePercent;
@@ -160,6 +163,9 @@ public partial class SettingsWindow : Window
         Settings.LocalTtsRate = LocalTtsRateSlider.Value;
         Settings.LocalTtsVolumePercent = (int)LocalTtsVolumeSlider.Value;
         Settings.TtsFallbackMode = GetComboText(TtsFallbackModeBox, "screen-reader");
+        Settings.EnableBrailleDisplaySupport = EnableBrailleDisplaySupportBox.IsChecked == true;
+        Settings.BrailleProvider = GetComboText(BrailleProviderBox, "auto");
+        Settings.BrlttyExecutablePath = BrlttyExecutablePathBox.Text.Trim();
 
         Settings.CheckForUpdatesAutomatically = CheckForUpdatesAutomaticallyBox.IsChecked == true;
         Settings.DownloadUpdatesAutomatically = DownloadUpdatesAutomaticallyBox.IsChecked == true;
@@ -325,6 +331,25 @@ public partial class SettingsWindow : Window
         preview.LocalTtsVolumePercent = (int)LocalTtsVolumeSlider.Value;
         using var service = new OpenLinkTtsService(preview);
         await service.TestAsync();
+    }
+
+    private async void TestBrailleButton_Click(object sender, RoutedEventArgs e)
+    {
+        var preview = Settings.Clone();
+        preview.EnableBrailleDisplaySupport = true;
+        preview.BrailleProvider = GetComboText(BrailleProviderBox, "auto");
+        preview.BrlttyExecutablePath = BrlttyExecutablePathBox.Text.Trim();
+        var service = new BrailleDisplayService(preview);
+        var sent = await service.SendAsync("OpenLink braille display test.");
+        if (!sent)
+        {
+            System.Windows.MessageBox.Show(
+                this,
+                "OpenLink could not send the braille test. Make sure NVDA is running with a braille display, or install and start BRLTTY and try again.",
+                "Braille Display",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
     }
 
     private static void SelectComboItem(System.Windows.Controls.ComboBox comboBox, string value)

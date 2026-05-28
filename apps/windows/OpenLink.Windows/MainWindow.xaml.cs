@@ -40,6 +40,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _elapsedTimer;
     private readonly OpenLinkAudioBridge _audioBridge = new();
     private readonly OpenLinkTtsService _ttsService;
+    private readonly BrailleDisplayService _brailleDisplay;
     private readonly SoundActionPlayer _soundPlayer;
     private readonly NvdaControllerBridge _nvdaController = new();
     private readonly SemaphoreSlim _sendLock = new(1, 1);
@@ -122,6 +123,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         _soundPlayer = new SoundActionPlayer(AddLog);
         _ttsService = new OpenLinkTtsService(_settings, AddLog);
+        _brailleDisplay = new BrailleDisplayService(_settings, AddLog);
         _machines = new ObservableCollection<MachineRecord>(MachineStore.Load());
         MachinesListBox.ItemsSource = _machines;
         _trayIcon = CreateTrayIcon();
@@ -474,10 +476,13 @@ public partial class MainWindow : Window
         ApplySettingsToMainWindow();
         _audioBridge.Configure(_settings, AddLog);
         _ttsService.Configure(_settings);
+        _brailleDisplay.Configure(_settings);
         _ = SendDiagnosticEventAsync("settings_saved", outcome: "success", metadata: new
         {
             diagnosticsEnabled = _settings.EnableDiagnosticSending,
             localTtsEnabled = _settings.EnableLocalTtsHelper,
+            brailleEnabled = _settings.EnableBrailleDisplaySupport,
+            brailleProvider = _settings.BrailleProvider,
             audioAllowed = _settings.AllowAudio
         });
         ConfigureLaunchAtLogin();
@@ -962,8 +967,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        AddLog($"Remote announcement: {text}");
+        AddLog($"Remote announcement: {text}", announce: false);
         _ = _ttsService.SpeakRemoteAnnouncementAsync(text);
+        _ = _brailleDisplay.SendAsync(text);
     }
 
     private void HandleRemoteInputAck(JsonElement root, string? type)
@@ -1842,6 +1848,7 @@ public partial class MainWindow : Window
         {
             if (_nvdaController.Speak(spoken))
             {
+                _ = _brailleDisplay.SendAsync(spoken);
                 return;
             }
 
@@ -1852,6 +1859,7 @@ public partial class MainWindow : Window
                 System.Windows.Automation.AutomationNotificationProcessing.ImportantMostRecent,
                 spoken,
                 "OpenLinkLogMessage");
+            _ = _brailleDisplay.SendAsync(spoken);
         }
         catch
         {
@@ -1865,6 +1873,7 @@ public partial class MainWindow : Window
         {
             if (_nvdaController.Speak(status))
             {
+                _ = _brailleDisplay.SendAsync(status);
                 return;
             }
 
@@ -1885,6 +1894,7 @@ public partial class MainWindow : Window
                 System.Windows.Automation.AutomationNotificationProcessing.ImportantMostRecent,
                 status,
                 "OpenLinkStatus");
+            _ = _brailleDisplay.SendAsync(status);
         }
         catch
         {
@@ -2125,6 +2135,8 @@ public partial class MainWindow : Window
             fileTransferAllowed = _settings.AllowFileTransfer,
             remoteApplicationLaunchAllowed = _settings.AllowRemoteApplicationLaunch,
             diagnosticsEnabled = _settings.EnableDiagnosticSending,
+            brailleEnabled = _settings.EnableBrailleDisplaySupport,
+            brailleProvider = _settings.BrailleProvider,
             managedMachineConfirmation = "desktop-built-in",
             companionConfirmationSupported = true,
             companionPlatform = "iOS",

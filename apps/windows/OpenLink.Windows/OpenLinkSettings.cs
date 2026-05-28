@@ -70,6 +70,9 @@ public sealed class OpenLinkSettings
     public int LocalTtsVolumePercent { get; set; } = 100;
     public string TtsFallbackMode { get; set; } = "screen-reader";
     public int LocalTtsPort { get; set; } = OpenLinkTtsService.DefaultPort;
+    public bool EnableBrailleDisplaySupport { get; set; }
+    public string BrailleProvider { get; set; } = "auto";
+    public string BrlttyExecutablePath { get; set; } = "";
 
     public bool CheckForUpdatesAutomatically { get; set; } = true;
     public bool DownloadUpdatesAutomatically { get; set; } = true;
@@ -143,6 +146,9 @@ public sealed class OpenLinkSettings
             LocalTtsVolumePercent = LocalTtsVolumePercent,
             TtsFallbackMode = TtsFallbackMode,
             LocalTtsPort = LocalTtsPort,
+            EnableBrailleDisplaySupport = EnableBrailleDisplaySupport,
+            BrailleProvider = BrailleProvider,
+            BrlttyExecutablePath = BrlttyExecutablePath,
             CheckForUpdatesAutomatically = CheckForUpdatesAutomatically,
             DownloadUpdatesAutomatically = DownloadUpdatesAutomatically,
             UpdateChannel = UpdateChannel,
@@ -225,6 +231,8 @@ public static class OpenLinkSettingsStore
             settings.LocalTtsVolumePercent = Math.Clamp(settings.LocalTtsVolumePercent, 0, 100);
             settings.LocalTtsPort = settings.LocalTtsPort is < 1 or > 65535 ? OpenLinkTtsService.DefaultPort : settings.LocalTtsPort;
             settings.TtsFallbackMode = string.IsNullOrWhiteSpace(settings.TtsFallbackMode) ? "screen-reader" : settings.TtsFallbackMode;
+            settings.BrailleProvider = NormalizeBrailleProvider(settings.BrailleProvider);
+            settings.BrlttyExecutablePath = settings.BrlttyExecutablePath?.Trim() ?? "";
 
             return settings;
         }
@@ -239,6 +247,16 @@ public static class OpenLinkSettingsStore
         Directory.CreateDirectory(SettingsDirectory);
         var json = JsonSerializer.Serialize(settings, SerializerOptions);
         File.WriteAllText(SettingsPath, json);
+    }
+
+    private static string NormalizeBrailleProvider(string? provider)
+    {
+        return provider?.Trim().ToLowerInvariant() switch
+        {
+            "nvda" => "nvda",
+            "brltty" => "brltty",
+            _ => "auto"
+        };
     }
 }
 

@@ -1782,7 +1782,11 @@ struct AccessibilitySettingsTab: View {
     @AppStorage("localTtsRate") private var localTtsRate = 1.0
     @AppStorage("localTtsVolumePercent") private var localTtsVolumePercent = 100.0
     @AppStorage("ttsFallbackMode") private var ttsFallbackMode = "screen-reader"
+    @AppStorage("enableBrailleDisplaySupport") private var enableBrailleDisplaySupport = false
+    @AppStorage("brailleProvider") private var brailleProvider = "auto"
+    @AppStorage("brlttyExecutablePath") private var brlttyExecutablePath = ""
     @State private var karabinerStatus = KarabinerIntegration.shared.status()
+    @State private var brlttyStatus = BrlttyBridge.shared.status()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -1821,6 +1825,35 @@ struct AccessibilitySettingsTab: View {
                     .pickerStyle(.menu)
                     Button("Test Voice") {
                         testLocalTtsVoice()
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+
+            GroupBox("Braille Display") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Send OpenLink announcements to a braille display", isOn: $enableBrailleDisplaySupport)
+                    Picker("Braille provider", selection: $brailleProvider) {
+                        Text("Auto").tag("auto")
+                        Text("BRLTTY / BrlAPI").tag("brltty")
+                    }
+                    .pickerStyle(.menu)
+                    TextField("BRLTTY executable path", text: $brlttyExecutablePath)
+                        .textFieldStyle(.roundedBorder)
+                        .help("Optional full path to brltty. Leave blank to search common Homebrew, MacPorts, and system paths.")
+                    settingsStatusRow("BRLTTY", value: brlttyStatus.available ? "Available" : "Not found")
+                    Text(brlttyStatus.summary)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button("Refresh Braille Status") {
+                            brlttyStatus = BrlttyBridge.shared.status()
+                        }
+                        Button("Test Braille") {
+                            _ = BrlttyBridge.shared.send("OpenLink braille display test.")
+                            brlttyStatus = BrlttyBridge.shared.status()
+                        }
                     }
                 }
                 .padding(.vertical, 8)

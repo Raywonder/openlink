@@ -334,6 +334,36 @@
                     <CheckBox x:Name="EnableLocalTtsHelperBox"
                               Margin="0,0,0,8"
                               Content="Use local OpenLink TTS helper for announcements" />
+                    <CheckBox x:Name="EnableBrailleDisplaySupportBox"
+                              Margin="0,0,0,8"
+                              Content="Send OpenLink announcements to a braille display" />
+                    <Label x:Name="BrailleProviderLabel"
+                           Content="Braille provider"
+                           Target="{Binding ElementName=BrailleProviderBox}" />
+                    <ComboBox x:Name="BrailleProviderBox"
+                              Width="260"
+                              HorizontalAlignment="Left"
+                              Margin="0,0,0,8"
+                              AutomationProperties.LabeledBy="{Binding ElementName=BrailleProviderLabel}"
+                              AutomationProperties.HelpText="Auto tries NVDA braille first and then BRLTTY. BRLTTY uses the older Electron-compatible command bridge when available.">
+                        <ComboBoxItem Content="Auto, NVDA then BRLTTY" Tag="auto" />
+                        <ComboBoxItem Content="NVDA braille output" Tag="nvda" />
+                        <ComboBoxItem Content="BRLTTY / BrlAPI bridge" Tag="brltty" />
+                    </ComboBox>
+                    <Label x:Name="BrlttyExecutablePathLabel"
+                           Content="BRLTTY executable"
+                           Target="{Binding ElementName=BrlttyExecutablePathBox}" />
+                    <TextBox x:Name="BrlttyExecutablePathBox"
+                             Margin="0,0,0,8"
+                             AutomationProperties.LabeledBy="{Binding ElementName=BrlttyExecutablePathLabel}"
+                             AutomationProperties.HelpText="Optional full path to brltty.exe. Leave blank to search Program Files and PATH." />
+                    <Button x:Name="TestBrailleButton"
+                            Width="140"
+                            HorizontalAlignment="Left"
+                            Margin="0,0,0,14"
+                            Content="Test braille"
+                            Click="TestBrailleButton_Click"
+                            AutomationProperties.Name="Test braille display output" />
                     <Label x:Name="LocalTtsVoiceLabel"
                            Content="TTS voice"
                            Target="{Binding ElementName=LocalTtsVoiceBox}" />
