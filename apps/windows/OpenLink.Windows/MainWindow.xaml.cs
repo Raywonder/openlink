@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Input;
@@ -210,7 +211,10 @@ public partial class MainWindow : Window
         var message = wParam.ToInt32();
         if (nCode >= 0 && (message == WmKeydown || message == WmSyskeydown || message == WmKeyup || message == WmSyskeyup))
         {
-            var vkCode = Marshal.ReadInt32(lParam);
+            var keyboardEvent = Marshal.PtrToStructure<KbdLlHookStruct>(lParam);
+            var vkCode = (int)keyboardEvent.VkCode;
+            var scanCode = (int)keyboardEvent.ScanCode;
+            var isExtendedKey = (keyboardEvent.Flags & LlkhfExtended) != 0;
             var keyDown = message == WmKeydown || message == WmSyskeydown;
             var ctrlDown = IsControlDown(vkCode, keyDown);
             var altDown = IsAltDown(vkCode, keyDown);
@@ -326,7 +330,7 @@ public partial class MainWindow : Window
                 }
 
                 var target = _remoteInputMachine;
-                Dispatcher.BeginInvoke(() => _ = SendRemoteKeyboardInputAsync(target, vkCode, keyDown, ctrlDown, altDown, shiftDown));
+                Dispatcher.BeginInvoke(() => _ = SendRemoteKeyboardInputAsync(target, vkCode, scanCode, isExtendedKey, keyDown, ctrlDown, altDown, shiftDown));
                 return ShouldPassForwardedKeyThroughLocally(target)
                     ? CallNextHookEx(_keyboardHook, nCode, wParam, lParam)
                     : new IntPtr(1);
@@ -784,6 +788,9 @@ public partial class MainWindow : Window
             case "audio_frame":
                 HandleRemoteAudioFrame(root);
                 break;
+            case "audio_route_status":
+                HandleRemoteAudioRouteStatus(root);
+                break;
             case "input_event_ack":
             case "key_event_ack":
                 HandleRemoteInputAck(root, type);
@@ -853,6 +860,7 @@ public partial class MainWindow : Window
     {
         return type is not null &&
                (string.Equals(type, "audio_frame", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(type, "audio_route_status", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(type, "input_event_ack", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(type, "key_event_ack", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(type, "machine_event_ack", StringComparison.OrdinalIgnoreCase) ||
@@ -1534,19 +1542,22 @@ public partial class MainWindow : Window
         _remoteInputMachine = null;
     }
 
-    private async Task SendRemoteKeyboardInputAsync(MachineRecord machine, int vkCode, bool isDown, bool ctrlDown, bool altDown, bool shiftDown)
+    private async Task SendRemoteKeyboardInputAsync(MachineRecord machine, int vkCode, int scanCode, bool isExtendedKey, bool isDown, bool ctrlDown, bool altDown, bool shiftDown)
     {
         if (!_remoteInputActive || _socket?.State != WebSocketState.Open)
         {
             return;
         }
 
-        var macKeyCode = TryMapWindowsVirtualKeyToMacKeyCode(vkCode);
+        var macKeyCode = TryMapWindowsScanCodeToMacKeyCode(scanCode, isExtendedKey) ??
+            TryMapWindowsVirtualKeyToMacKeyCode(vkCode);
         if (macKeyCode is null)
         {
-            WriteRuntimeLog($"No macOS key mapping for Windows virtual key 0x{vkCode:X2}.");
+            WriteRuntimeLog($"No macOS key mapping for Windows virtual key 0x{vkCode:X2}, scan code 0x{scanCode:X2}, extended={isExtendedKey}.");
             return;
         }
+
+        var layout = DetectKeyboardLayout();
 
         try
         {
@@ -1558,6 +1569,10 @@ public partial class MainWindow : Window
                 sourcePlatform = "Windows",
                 eventType = isDown ? 10 : 11,
                 keyCode = macKeyCode.Value,
+                windowsVirtualKey = vkCode,
+                windowsScanCode = scanCode,
+                windowsExtendedKey = isExtendedKey,
+                keyboardLayout = layout,
                 flags = BuildMacModifierFlags(vkCode, ctrlDown, altDown, shiftDown),
                 timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             });
@@ -1675,6 +1690,121 @@ public partial class MainWindow : Window
         }
 
         return flags;
+    }
+
+    private static int? TryMapWindowsScanCodeToMacKeyCode(int scanCode, bool isExtendedKey)
+    {
+        if (isExtendedKey)
+        {
+            return scanCode switch
+            {
+                0x1C => 76,  // Numpad Enter
+                0x1D => 62,  // Right Control
+                0x38 => 61,  // Right Option/Alt
+                0x47 => 115, // Home
+                0x48 => 126, // Up
+                0x49 => 116, // Page Up
+                0x4B => 123, // Left
+                0x4D => 124, // Right
+                0x4F => 119, // End
+                0x50 => 125, // Down
+                0x51 => 121, // Page Down
+                0x52 => 114, // Insert/Help
+                0x53 => 117, // Forward Delete
+                0x5B => 55,  // Left Windows as Command
+                0x5C => 54,  // Right Windows as Command
+                _ => null
+            };
+        }
+
+        return scanCode switch
+        {
+            0x01 => 53,  // Escape
+            0x02 => 18,  // 1
+            0x03 => 19,  // 2
+            0x04 => 20,  // 3
+            0x05 => 21,  // 4
+            0x06 => 23,  // 5
+            0x07 => 22,  // 6
+            0x08 => 26,  // 7
+            0x09 => 28,  // 8
+            0x0A => 25,  // 9
+            0x0B => 29,  // 0
+            0x0C => 27,  // -
+            0x0D => 24,  // =
+            0x0E => 51,  // Backspace
+            0x0F => 48,  // Tab
+            0x10 => 12,  // Q
+            0x11 => 13,  // W
+            0x12 => 14,  // E
+            0x13 => 15,  // R
+            0x14 => 17,  // T
+            0x15 => 16,  // Y
+            0x16 => 32,  // U
+            0x17 => 34,  // I
+            0x18 => 31,  // O
+            0x19 => 35,  // P
+            0x1A => 33,  // [
+            0x1B => 30,  // ]
+            0x1C => 36,  // Return
+            0x1D => 59,  // Left Control
+            0x1E => 0,   // A
+            0x1F => 1,   // S
+            0x20 => 2,   // D
+            0x21 => 3,   // F
+            0x22 => 5,   // G
+            0x23 => 4,   // H
+            0x24 => 38,  // J
+            0x25 => 40,  // K
+            0x26 => 37,  // L
+            0x27 => 41,  // ;
+            0x28 => 39,  // '
+            0x29 => 50,  // `
+            0x2A => 56,  // Left Shift
+            0x2B => 42,  // Backslash
+            0x2C => 6,   // Z
+            0x2D => 7,   // X
+            0x2E => 8,   // C
+            0x2F => 9,   // V
+            0x30 => 11,  // B
+            0x31 => 45,  // N
+            0x32 => 46,  // M
+            0x33 => 43,  // ,
+            0x34 => 47,  // .
+            0x35 => 44,  // /
+            0x36 => 60,  // Right Shift
+            0x37 => 67,  // Numpad *
+            0x38 => 58,  // Left Option/Alt
+            0x39 => 49,  // Space
+            0x3A => 57,  // Caps Lock
+            0x3B => 122, // F1
+            0x3C => 120, // F2
+            0x3D => 99,  // F3
+            0x3E => 118, // F4
+            0x3F => 96,  // F5
+            0x40 => 97,  // F6
+            0x41 => 98,  // F7
+            0x42 => 100, // F8
+            0x43 => 101, // F9
+            0x44 => 109, // F10
+            0x47 => 89,  // Numpad 7
+            0x48 => 91,  // Numpad 8
+            0x49 => 92,  // Numpad 9
+            0x4A => 78,  // Numpad -
+            0x4B => 86,  // Numpad 4
+            0x4C => 87,  // Numpad 5
+            0x4D => 88,  // Numpad 6
+            0x4E => 69,  // Numpad +
+            0x4F => 83,  // Numpad 1
+            0x50 => 84,  // Numpad 2
+            0x51 => 85,  // Numpad 3
+            0x52 => 82,  // Numpad 0
+            0x53 => 65,  // Numpad decimal
+            0x56 => 42,  // ISO extra key
+            0x57 => 103, // F11
+            0x58 => 111, // F12
+            _ => null
+        };
     }
 
     private static int? TryMapWindowsVirtualKeyToMacKeyCode(int vkCode) => vkCode switch
@@ -2118,6 +2248,7 @@ public partial class MainWindow : Window
             domainUsed = EndpointNormalizer.ShareHostFor(serverUrl),
             platform = "Windows",
             screenReader = DetectLocalScreenReader(),
+            keyboard = DetectKeyboardLayout(),
             audio = new
             {
                 sampleRate = 48000,
@@ -2167,6 +2298,37 @@ public partial class MainWindow : Window
             names = activeReaders,
             primary = activeReaders.FirstOrDefault() ?? "",
             localAccessibilityRoute = activeReaders.Count > 0 ? "uia-screen-reader" : "openlink-tts"
+        };
+    }
+
+    private static object DetectKeyboardLayout()
+    {
+        var hkl = GetKeyboardLayout(0);
+        var langId = hkl.ToInt64() & 0xffff;
+        var name = new StringBuilder(9);
+        _ = GetKeyboardLayoutName(name);
+        var layoutName = name.ToString();
+        var cultureName = "unknown";
+        var displayName = "Unknown keyboard layout";
+        try
+        {
+            var culture = CultureInfo.GetCultureInfo((int)langId);
+            cultureName = culture.Name;
+            displayName = culture.DisplayName;
+        }
+        catch (CultureNotFoundException)
+        {
+        }
+
+        return new
+        {
+            hkl = $"0x{hkl.ToInt64():X}",
+            layoutName,
+            cultureName,
+            displayName,
+            mapping = "windows-scan-code-to-macos-ansi-iso",
+            fnKeyVisibleToOs = false,
+            note = "Most Windows keyboards handle Fn in firmware and do not expose it to apps. OpenLink forwards top-row F1 through F12 when Windows receives those key events."
         };
     }
 
@@ -2743,6 +2905,31 @@ public partial class MainWindow : Window
         {
             AddLog($"Remote audio frame failed: {ex.Message}");
         }
+    }
+
+    private void HandleRemoteAudioRouteStatus(JsonElement root)
+    {
+        var message = root.TryGetProperty("message", out var messageElement)
+            ? messageElement.GetString()
+            : "Remote audio route status changed.";
+        var systemStarted = root.TryGetProperty("systemAudioCaptureStarted", out var systemElement) &&
+            systemElement.ValueKind == JsonValueKind.True;
+        var microphoneStarted = root.TryGetProperty("microphoneCaptureStarted", out var microphoneElement) &&
+            microphoneElement.ValueKind == JsonValueKind.True;
+        var sourceMachineId = root.TryGetProperty("sourceMachineId", out var sourceElement)
+            ? sourceElement.GetString()
+            : null;
+        var sourceMachine = _machines.FirstOrDefault(machine =>
+            string.Equals(NormalizeMachineToken(machine.Id), NormalizeMachineToken(sourceMachineId), StringComparison.Ordinal) ||
+            string.Equals(NormalizeMachineToken(machine.MachineHostname), NormalizeMachineToken(sourceMachineId), StringComparison.Ordinal)) ??
+            _remoteInputMachine;
+
+        AddLog($"Remote audio route: {message} Microphone={(microphoneStarted ? "on" : "off")}; system audio={(systemStarted ? "on" : "off")}.", announce: false);
+        sourceMachine?.UpdateAudioDiagnostics(
+            0,
+            OpenLinkAudioSettings.ClampBufferSamples(_settings.DirectAudioBufferSamples),
+            OpenLinkAudioSettings.ClampBufferSamples(_settings.WindowsAudioBufferSamples),
+            OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec));
     }
 
     private async Task MinimizeRemoteForLocalUseAsync(MachineRecord machine)
@@ -4049,6 +4236,12 @@ public partial class MainWindow : Window
     private static extern short GetAsyncKeyState(int vKey);
 
     [DllImport("user32.dll")]
+    private static extern IntPtr GetKeyboardLayout(uint idThread);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool GetKeyboardLayoutName(StringBuilder pwszKLID);
+
+    [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
@@ -4073,6 +4266,18 @@ public partial class MainWindow : Window
     {
         ShowNormal = 1
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KbdLlHookStruct
+    {
+        public uint VkCode;
+        public uint ScanCode;
+        public uint Flags;
+        public uint Time;
+        public IntPtr DwExtraInfo;
+    }
+
+    private const uint LlkhfExtended = 0x01;
 
     [Flags]
     private enum SetWindowPosFlags

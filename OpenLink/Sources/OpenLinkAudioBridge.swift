@@ -1,5 +1,7 @@
 import AVFoundation
+import CoreMedia
 import Foundation
+import ScreenCaptureKit
 
 final class OpenLinkAudioBridge {
     static let shared = OpenLinkAudioBridge()
@@ -10,6 +12,7 @@ final class OpenLinkAudioBridge {
     private let captureEngine = AVAudioEngine()
     private let playbackEngine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
+    private let systemAudioCapture = MacSystemAudioCapture()
     private var isPlayerAttached = false
     private var isCapturing = false
     private var lastFrameTime = Date.distantPast
@@ -64,53 +67,46 @@ final class OpenLinkAudioBridge {
 
         let input = captureEngine.inputNode
         let format = input.inputFormat(forBus: 0)
-        input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: AVAudioFrameCount(captureBufferSamples), format: format) { [weak self] buffer, _ in
-            guard let self else { return }
-            self.lock.lock()
-            let captureTarget = self.currentCaptureTargetMachineId
-            let captureSink = self.currentFrameSink
-            let captureSamples = self.captureBufferSamples
-            let activeRequestedCodec = self.requestedCodec
-            let playbackSamples = self.playbackBufferSamples
-            self.lock.unlock()
+        let allowMicrophoneAudio = UserDefaults.standard.object(forKey: "allowMicrophoneAudio") as? Bool ?? true
+        if allowMicrophoneAudio {
+            input.removeTap(onBus: 0)
+            input.installTap(onBus: 0, bufferSize: AVAudioFrameCount(captureBufferSamples), format: format) { [weak self] buffer, _ in
+                guard let self else { return }
+                self.lock.lock()
+                let captureSamples = self.captureBufferSamples
+                self.lock.unlock()
 
-            guard let targetMachineId = captureTarget, let frameSink = captureSink else { return }
-            let now = Date()
-            if now.timeIntervalSince(self.lastFrameTime) < Self.frameIntervalSeconds(samples: captureSamples, sampleRate: format.sampleRate) {
-                return
+                let now = Date()
+                if now.timeIntervalSince(self.lastFrameTime) < Self.frameIntervalSeconds(samples: captureSamples, sampleRate: format.sampleRate) {
+                    return
+                }
+                self.lastFrameTime = now
+
+                guard let data = Self.stereoInt16PCMData(from: buffer) else { return }
+                self.sendAudioFrame(
+                    source: "microphone",
+                    sampleRate: Int(format.sampleRate),
+                    bitsPerSample: 16,
+                    channels: Self.transportChannels,
+                    data: data
+                )
             }
-            self.lastFrameTime = now
-
-            guard let data = Self.stereoInt16PCMData(from: buffer) else { return }
-            let activeCodec = Self.activeTransportCodec(for: activeRequestedCodec)
-            frameSink([
-                "type": "audio_frame",
-                "targetMachineId": targetMachineId,
-                "sourceMachineId": self.localMachineId(),
-                "source": "microphone",
-                "sampleRate": Int(format.sampleRate),
-                "bitsPerSample": 16,
-                "channels": Self.transportChannels,
-                "codec": activeCodec,
-                "requestedCodec": activeRequestedCodec,
-                "directAudioBufferSamples": captureSamples,
-                "playbackBufferSamples": playbackSamples,
-                "transport": "voicelink-pcm-ws",
-                "virtualDeviceName": self.virtualDeviceName,
-                "data": data.base64EncodedString()
-            ])
         }
 
         do {
-            try captureEngine.start()
+            if allowMicrophoneAudio {
+                try captureEngine.start()
+            }
             isCapturing = true
+            startSystemAudioCaptureIfAllowed()
+            sendAudioRouteStatus(message: "Mac audio routing started.", microphoneStarted: allowMicrophoneAudio, systemAudioRequested: systemAudioAllowed(), systemAudioStarted: systemAudioCapture.isRunning)
             return true
         } catch {
             input.removeTap(onBus: 0)
             isCapturing = false
             currentCaptureTargetMachineId = nil
             currentFrameSink = nil
+            systemAudioCapture.stop()
             return false
         }
     }
@@ -121,9 +117,89 @@ final class OpenLinkAudioBridge {
 
         captureEngine.inputNode.removeTap(onBus: 0)
         captureEngine.stop()
+        systemAudioCapture.stop()
         isCapturing = false
         currentCaptureTargetMachineId = nil
         currentFrameSink = nil
+    }
+
+    private func startSystemAudioCaptureIfAllowed() {
+        guard systemAudioAllowed() else {
+            sendAudioRouteStatus(message: "Mac system audio routing is disabled in OpenLink settings.", microphoneStarted: true, systemAudioRequested: false, systemAudioStarted: false)
+            return
+        }
+
+        if #available(macOS 13.0, *) {
+            systemAudioCapture.start { [weak self] event in
+                switch event {
+                case .status(let started, let message):
+                    self?.sendAudioRouteStatus(message: message, microphoneStarted: true, systemAudioRequested: true, systemAudioStarted: started)
+                case .frame(let sampleRate, let channels, let data):
+                    self?.sendAudioFrame(
+                        source: "system",
+                        sampleRate: sampleRate,
+                        bitsPerSample: 16,
+                        channels: channels,
+                        data: data
+                    )
+                }
+            }
+        } else {
+            sendAudioRouteStatus(message: "Mac system audio routing needs macOS 13 or later.", microphoneStarted: true, systemAudioRequested: true, systemAudioStarted: false)
+        }
+    }
+
+    private func systemAudioAllowed() -> Bool {
+        UserDefaults.standard.object(forKey: "allowSystemAudio") as? Bool ?? true
+    }
+
+    private func sendAudioFrame(source: String, sampleRate: Int, bitsPerSample: Int, channels: Int, data: Data) {
+        lock.lock()
+        let targetMachineId = currentCaptureTargetMachineId
+        let frameSink = currentFrameSink
+        let captureSamples = captureBufferSamples
+        let activeRequestedCodec = requestedCodec
+        let playbackSamples = playbackBufferSamples
+        lock.unlock()
+
+        guard let targetMachineId, let frameSink else { return }
+        let activeCodec = Self.activeTransportCodec(for: activeRequestedCodec)
+        frameSink([
+            "type": "audio_frame",
+            "targetMachineId": targetMachineId,
+            "sourceMachineId": localMachineId(),
+            "source": source,
+            "sampleRate": sampleRate,
+            "bitsPerSample": bitsPerSample,
+            "channels": channels,
+            "codec": activeCodec,
+            "requestedCodec": activeRequestedCodec,
+            "directAudioBufferSamples": captureSamples,
+            "playbackBufferSamples": playbackSamples,
+            "transport": "voicelink-pcm-ws",
+            "virtualDeviceName": virtualDeviceName,
+            "data": data.base64EncodedString()
+        ])
+    }
+
+    private func sendAudioRouteStatus(message: String, microphoneStarted: Bool, systemAudioRequested: Bool, systemAudioStarted: Bool) {
+        lock.lock()
+        let targetMachineId = currentCaptureTargetMachineId
+        let frameSink = currentFrameSink
+        lock.unlock()
+
+        guard let targetMachineId, let frameSink else { return }
+        frameSink([
+            "type": "audio_route_status",
+            "targetMachineId": targetMachineId,
+            "sourceMachineId": localMachineId(),
+            "sourcePlatform": "macOS",
+            "microphoneCaptureStarted": microphoneStarted,
+            "systemAudioRequested": systemAudioRequested,
+            "systemAudioCaptureStarted": systemAudioStarted,
+            "systemAudioProvider": "ScreenCaptureKit",
+            "message": message
+        ])
     }
 
     func play(frame json: [String: Any]) {
@@ -229,6 +305,130 @@ final class OpenLinkAudioBridge {
         return data
     }
 
+    fileprivate static func stereoInt16PCMData(from sampleBuffer: CMSampleBuffer) -> (data: Data, sampleRate: Int, channels: Int)? {
+        guard
+            let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+            let streamDescriptionPointer = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
+        else {
+            return nil
+        }
+
+        let streamDescription = streamDescriptionPointer.pointee
+        let sampleRate = Int(streamDescription.mSampleRate > 0 ? streamDescription.mSampleRate : 48_000)
+        let sourceChannels = max(1, Int(streamDescription.mChannelsPerFrame))
+        let frameCount = CMSampleBufferGetNumSamples(sampleBuffer)
+        if frameCount <= 0 {
+            return nil
+        }
+
+        let maximumBuffers = max(1, sourceChannels)
+        let bufferList = AudioBufferList.allocate(maximumBuffers: maximumBuffers)
+        defer { free(bufferList.unsafeMutablePointer) }
+        let bufferListSize = MemoryLayout<AudioBufferList>.size + ((maximumBuffers - 1) * MemoryLayout<AudioBuffer>.size)
+        var blockBuffer: CMBlockBuffer?
+        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: nil,
+            bufferListOut: bufferList.unsafeMutablePointer,
+            bufferListSize: bufferListSize,
+            blockBufferAllocator: kCFAllocatorDefault,
+            blockBufferMemoryAllocator: kCFAllocatorDefault,
+            flags: 0,
+            blockBufferOut: &blockBuffer
+        )
+        guard status == noErr else {
+            return nil
+        }
+
+        let buffers = UnsafeMutableAudioBufferListPointer(bufferList.unsafeMutablePointer)
+        guard !buffers.isEmpty else {
+            return nil
+        }
+
+        let formatFlags = streamDescription.mFormatFlags
+        let isFloat = (formatFlags & kAudioFormatFlagIsFloat) != 0
+        let isSignedInteger = (formatFlags & kAudioFormatFlagIsSignedInteger) != 0
+        let bitsPerChannel = Int(streamDescription.mBitsPerChannel)
+        let bytesPerFrame = max(1, Int(streamDescription.mBytesPerFrame))
+        let isNonInterleaved = (formatFlags & kAudioFormatFlagIsNonInterleaved) != 0 || buffers.count > 1
+        var data = Data(capacity: frameCount * transportChannels * MemoryLayout<Int16>.size)
+
+        for frame in 0..<frameCount {
+            let left = sampleValue(
+                buffers: buffers,
+                frame: frame,
+                channel: 0,
+                sourceChannels: sourceChannels,
+                isNonInterleaved: isNonInterleaved,
+                isFloat: isFloat,
+                isSignedInteger: isSignedInteger,
+                bitsPerChannel: bitsPerChannel,
+                bytesPerFrame: bytesPerFrame
+            )
+            let right = sampleValue(
+                buffers: buffers,
+                frame: frame,
+                channel: min(1, sourceChannels - 1),
+                sourceChannels: sourceChannels,
+                isNonInterleaved: isNonInterleaved,
+                isFloat: isFloat,
+                isSignedInteger: isSignedInteger,
+                bitsPerChannel: bitsPerChannel,
+                bytesPerFrame: bytesPerFrame
+            )
+            for sample in [left, right] {
+                var intSample = Int16(max(-1.0, min(1.0, sample)) * Float(Int16.max)).littleEndian
+                withUnsafeBytes(of: &intSample) { bytes in
+                    data.append(contentsOf: bytes)
+                }
+            }
+        }
+
+        return (data, sampleRate, transportChannels)
+    }
+
+    private static func sampleValue(
+        buffers: UnsafeMutableAudioBufferListPointer,
+        frame: Int,
+        channel: Int,
+        sourceChannels: Int,
+        isNonInterleaved: Bool,
+        isFloat: Bool,
+        isSignedInteger: Bool,
+        bitsPerChannel: Int,
+        bytesPerFrame: Int
+    ) -> Float {
+        let bufferIndex = isNonInterleaved ? min(channel, buffers.count - 1) : 0
+        guard
+            buffers.indices.contains(bufferIndex),
+            let data = buffers[bufferIndex].mData
+        else {
+            return 0
+        }
+
+        if isFloat, bitsPerChannel == 32 {
+            let values = data.assumingMemoryBound(to: Float.self)
+            let index = isNonInterleaved ? frame : (frame * sourceChannels) + channel
+            return values[index]
+        }
+
+        if isSignedInteger, bitsPerChannel == 16 {
+            let values = data.assumingMemoryBound(to: Int16.self)
+            let index = isNonInterleaved ? frame : (frame * sourceChannels) + channel
+            return Float(Int16(littleEndian: values[index])) / Float(Int16.max)
+        }
+
+        if isSignedInteger, bitsPerChannel == 32 {
+            let values = data.assumingMemoryBound(to: Int32.self)
+            let index = isNonInterleaved ? frame : (frame * sourceChannels) + channel
+            return Float(Int32(littleEndian: values[index])) / Float(Int32.max)
+        }
+
+        let byteOffset = isNonInterleaved ? frame * max(1, bitsPerChannel / 8) : (frame * bytesPerFrame) + (channel * max(1, bitsPerChannel / 8))
+        let bytes = data.advanced(by: byteOffset).assumingMemoryBound(to: UInt8.self)
+        return (Float(bytes.pointee) - 128.0) / 128.0
+    }
+
     private static func stereoInt16PCMData(from data: Data, channels: Int) -> Data {
         if channels == transportChannels {
             return data
@@ -280,5 +480,89 @@ final class OpenLinkAudioBridge {
         }
 
         return buffer
+    }
+}
+
+@available(macOS 13.0, *)
+private final class MacSystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
+    enum Event {
+        case status(started: Bool, message: String)
+        case frame(sampleRate: Int, channels: Int, data: Data)
+    }
+
+    private var stream: SCStream?
+    private let queue = DispatchQueue(label: "fm.tappedin.openlink.system-audio")
+    private var eventSink: ((Event) -> Void)?
+    private(set) var isRunning = false
+
+    func start(eventSink: @escaping (Event) -> Void) {
+        self.eventSink = eventSink
+        if isRunning {
+            eventSink(.status(started: true, message: "Mac system audio capture is already running."))
+            return
+        }
+
+        Task {
+            await startAsync()
+        }
+    }
+
+    func stop() {
+        let activeStream = stream
+        stream = nil
+        isRunning = false
+        Task {
+            try? await activeStream?.stopCapture()
+        }
+    }
+
+    private func startAsync() async {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            guard let display = content.displays.first else {
+                isRunning = false
+                eventSink?(.status(started: false, message: "Mac system audio capture could not find a display to attach to."))
+                return
+            }
+
+            let filter = SCContentFilter(display: display, excludingWindows: [])
+            let configuration = SCStreamConfiguration()
+            configuration.capturesAudio = true
+            configuration.excludesCurrentProcessAudio = true
+            configuration.sampleRate = 48_000
+            configuration.channelCount = 2
+            configuration.width = 2
+            configuration.height = 2
+            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 2)
+            configuration.showsCursor = false
+
+            let newStream = SCStream(filter: filter, configuration: configuration, delegate: self)
+            try newStream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
+            try await newStream.startCapture()
+            stream = newStream
+            isRunning = true
+            eventSink?(.status(started: true, message: "Mac system audio capture started with ScreenCaptureKit."))
+        } catch {
+            stream = nil
+            isRunning = false
+            eventSink?(.status(started: false, message: "Mac system audio capture failed: \(error.localizedDescription)"))
+        }
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        isRunning = false
+        eventSink?(.status(started: false, message: "Mac system audio capture stopped: \(error.localizedDescription)"))
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .audio,
+              sampleBuffer.isValid,
+              CMSampleBufferDataIsReady(sampleBuffer),
+              let converted = OpenLinkAudioBridge.stereoInt16PCMData(from: sampleBuffer)
+        else {
+            return
+        }
+
+        eventSink?(.frame(sampleRate: converted.sampleRate, channels: converted.channels, data: converted.data))
     }
 }
