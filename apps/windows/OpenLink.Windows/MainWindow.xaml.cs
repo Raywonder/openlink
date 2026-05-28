@@ -1459,7 +1459,7 @@ public partial class MainWindow : Window
         var macKeyCode = TryMapWindowsVirtualKeyToMacKeyCode(vkCode);
         if (macKeyCode is null)
         {
-            AddLog($"No macOS key mapping for Windows virtual key 0x{vkCode:X2}.");
+            AddLog($"No macOS key mapping for Windows virtual key 0x{vkCode:X2}.", announce: false);
             return;
         }
 
@@ -1486,16 +1486,8 @@ public partial class MainWindow : Window
 
     private static bool ShouldKeepKeyLocal(int vkCode, bool ctrlDown, bool altDown, bool shiftDown)
     {
-        if (vkCode == VkLWin || vkCode == VkRWin)
-        {
-            return true;
-        }
-
-        if (altDown && vkCode == VkTab)
-        {
-            return true;
-        }
-
+        // During Start Using, only OpenLink safety controls stay local.
+        // Normal navigation and app-switching keys belong to the controlled machine.
         if (ctrlDown && altDown && shiftDown && vkCode == VkEscape)
         {
             return true;
@@ -1506,7 +1498,9 @@ public partial class MainWindow : Window
 
     private bool ShouldPassForwardedKeyThroughLocally(MachineRecord machine)
     {
-        return _settings.AllowKeyboardCoUse || machine.AllowKeyboardCoUse;
+        // Start Using is exclusive remote control. Co-use is reserved for explicit
+        // swap/co-use modes so a normal remote-control session cannot leak keys locally.
+        return false;
     }
 
     private void HandleCtrlAltDeleteDuringRemoteControl(MachineRecord machine)
@@ -2514,7 +2508,7 @@ public partial class MainWindow : Window
             fullKeyboardControl = true,
             transmitKeyboard = true,
             captureKeyboard = true,
-            keyboardCoUseAllowed = machine.AllowKeyboardCoUse,
+            keyboardCoUseAllowed = false,
             microphoneAudioAllowed = true,
             systemAudioAllowed = true,
             transmitMicrophoneAudio = true,

@@ -29,7 +29,7 @@ public sealed class OpenLinkSettings
     public bool AllowAudio { get; set; } = true;
     public bool AllowDropInAccess { get; set; }
     public bool AllowSwapControl { get; set; } = true;
-    public bool AllowKeyboardCoUse { get; set; } = true;
+    public bool AllowKeyboardCoUse { get; set; }
     public bool CtrlAltDeleteGuardEnabled { get; set; } = true;
     public int CtrlAltDeleteRemotePressCount { get; set; } = 2;
     public int CtrlAltDeleteLocalLockPressCount { get; set; } = 3;
@@ -38,8 +38,8 @@ public sealed class OpenLinkSettings
     public bool AllowSystemAudio { get; set; } = true;
     public int RemoteAudioVolumePercent { get; set; } = 100;
     public int LocalAudioCaptureVolumePercent { get; set; } = 100;
-    public int DirectAudioBufferSamples { get; set; } = 512;
-    public int WindowsAudioBufferSamples { get; set; } = 512;
+    public int DirectAudioBufferSamples { get; set; } = 1024;
+    public int WindowsAudioBufferSamples { get; set; } = 1024;
     public string AudioStreamingCodec { get; set; } = "pcm_s16le";
     public bool EnableAsioAudioDriver { get; set; }
     public string AsioDriverName { get; set; } = "";
@@ -208,6 +208,11 @@ public static class OpenLinkSettingsStore
             settings.LocalAudioCaptureVolumePercent = Math.Clamp(settings.LocalAudioCaptureVolumePercent, 0, 150);
             settings.DirectAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(settings.DirectAudioBufferSamples);
             settings.WindowsAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(settings.WindowsAudioBufferSamples);
+            if (settings.DirectAudioBufferSamples < 1024 && settings.WindowsAudioBufferSamples < 1024)
+            {
+                settings.DirectAudioBufferSamples = 1024;
+                settings.WindowsAudioBufferSamples = 1024;
+            }
             settings.AudioStreamingCodec = OpenLinkAudioSettings.NormalizeCodec(settings.AudioStreamingCodec);
             settings.CtrlAltDeleteRemotePressCount = Math.Clamp(settings.CtrlAltDeleteRemotePressCount <= 0 ? 2 : settings.CtrlAltDeleteRemotePressCount, 1, 5);
             settings.CtrlAltDeleteLocalLockPressCount = Math.Clamp(settings.CtrlAltDeleteLocalLockPressCount <= 0 ? 3 : settings.CtrlAltDeleteLocalLockPressCount, 1, 5);

@@ -21,6 +21,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
     private IWavePlayer? _remotePlaybackSession;
     private BufferedWaveProvider? _remotePlaybackBuffer;
     private WaveFormat? _remotePlaybackFormat;
+    private bool _remotePlaybackStarted;
     private string _remotePlaybackDriverKey = "waveout";
     private Func<OpenLinkAudioFrame, Task>? _frameSink;
     private long _lastMicrophoneFrameTicks;
@@ -100,6 +101,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
             _remotePlaybackSession = null;
             _remotePlaybackBuffer = null;
             _remotePlaybackFormat = null;
+            _remotePlaybackStarted = false;
         }
 
         if (_remotePlaybackSession is not null)
@@ -253,6 +255,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
                 : ConvertPcm16ToStereo(frame.Payload, frame.Channels);
             EnsureRemotePlayback(new WaveFormat(frame.SampleRate, frame.BitsPerSample, TransportChannels));
             _remotePlaybackBuffer?.AddSamples(payload, 0, payload.Length);
+            TryStartRemotePlayback(frame.SampleRate);
             StatusText = BuildStatus();
         }
         catch (Exception ex)
@@ -333,6 +336,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
         {
             _remotePlaybackSession.Stop();
             _remotePlaybackSession.Dispose();
+            _remotePlaybackStarted = false;
         }
 
         _remotePlaybackFormat = format;
@@ -344,7 +348,30 @@ public sealed class OpenLinkAudioBridge : IDisposable
         _remotePlaybackSession = CreatePlaybackSession(format);
         _remotePlaybackSession.Init(_remotePlaybackBuffer);
         _remotePlaybackSession.Volume = _remotePlaybackVolume;
+        _remotePlaybackStarted = false;
+    }
+
+    private void TryStartRemotePlayback(int sampleRate)
+    {
+        if (_remotePlaybackStarted ||
+            _remotePlaybackSession is null ||
+            _remotePlaybackBuffer is null ||
+            _remotePlaybackFormat is null)
+        {
+            return;
+        }
+
+        var bytesPerSampleFrame = Math.Max(1, _remotePlaybackFormat.BlockAlign);
+        var targetBytes = Math.Max(
+            bytesPerSampleFrame,
+            (int)(sampleRate * bytesPerSampleFrame * PrebufferDuration(sampleRate).TotalSeconds));
+        if (_remotePlaybackBuffer.BufferedBytes < targetBytes)
+        {
+            return;
+        }
+
         _remotePlaybackSession.Play();
+        _remotePlaybackStarted = true;
     }
 
     private IWavePlayer CreatePlaybackSession(WaveFormat format)
@@ -383,13 +410,19 @@ public sealed class OpenLinkAudioBridge : IDisposable
     private TimeSpan PlaybackBufferDuration(int sampleRate)
     {
         var milliseconds = SamplesToMilliseconds(_windowsAudioBufferSamples, sampleRate);
-        return TimeSpan.FromMilliseconds(Math.Clamp(milliseconds * 4, 20.0, 250.0));
+        return TimeSpan.FromMilliseconds(Math.Clamp(milliseconds * 6, 80.0, 500.0));
+    }
+
+    private TimeSpan PrebufferDuration(int sampleRate)
+    {
+        var milliseconds = SamplesToMilliseconds(_windowsAudioBufferSamples, sampleRate);
+        return TimeSpan.FromMilliseconds(Math.Clamp(milliseconds * 2, 40.0, 180.0));
     }
 
     private int WindowsDesiredLatencyMilliseconds(int sampleRate)
     {
         var bufferMilliseconds = SamplesToMilliseconds(_windowsAudioBufferSamples, sampleRate);
-        return (int)Math.Round(Math.Clamp(bufferMilliseconds * 2, 16.0, 200.0));
+        return (int)Math.Round(Math.Clamp(bufferMilliseconds * 3, 60.0, 300.0));
     }
 
     private static double SamplesToMilliseconds(int samples, int sampleRate)
