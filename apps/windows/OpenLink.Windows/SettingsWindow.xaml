@@ -132,6 +132,33 @@
                     <CheckBox x:Name="AllowKeyboardCoUseBox"
                               Margin="0,0,0,8"
                               Content="Allow both keyboards while sharing control" />
+                    <CheckBox x:Name="CtrlAltDeleteGuardEnabledBox"
+                              Margin="0,0,0,8"
+                              Content="Guard Control Alt Delete during remote control" />
+                    <Label Content="Control Alt Delete action for controlled machine" />
+                    <ComboBox x:Name="CtrlAltDeleteRemotePressCountBox"
+                              Margin="0,0,0,8"
+                              AutomationProperties.Name="Control Alt Delete action for controlled machine">
+                        <ComboBoxItem Content="Second press sends Lock to controlled machine" Tag="2" />
+                        <ComboBoxItem Content="First press sends Lock to controlled machine" Tag="1" />
+                        <ComboBoxItem Content="Third press sends Lock to controlled machine" Tag="3" />
+                    </ComboBox>
+                    <Label Content="Control Alt Delete action for local Windows lock screen" />
+                    <ComboBox x:Name="CtrlAltDeleteLocalLockPressCountBox"
+                              Margin="0,0,0,8"
+                              AutomationProperties.Name="Control Alt Delete action for local Windows lock screen">
+                        <ComboBoxItem Content="Third press locks local Windows" Tag="3" />
+                        <ComboBoxItem Content="Second press locks local Windows" Tag="2" />
+                        <ComboBoxItem Content="Fourth press locks local Windows" Tag="4" />
+                    </ComboBox>
+                    <Label Content="After local Windows unlock" />
+                    <ComboBox x:Name="CtrlAltDeleteUnlockActionBox"
+                              Margin="0,0,0,8"
+                              AutomationProperties.Name="After local Windows unlock">
+                        <ComboBoxItem Content="Return to controlled device" Tag="return-to-remote" />
+                        <ComboBoxItem Content="Stay connected in background" Tag="stay-connected-background" />
+                        <ComboBoxItem Content="Disconnect remote session" Tag="disconnect" />
+                    </ComboBox>
                     <CheckBox x:Name="AutoConnectTrustedMachinesBox"
                               Margin="0,0,0,8"
                               Content="Auto-connect trusted machines" />

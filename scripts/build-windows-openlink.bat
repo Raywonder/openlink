@@ -25,6 +25,13 @@ if exist "%ROOT%\apps\windows\OpenLink.Windows\Assets" (
   if %ERRORLEVEL% GEQ 8 exit /b %ERRORLEVEL%
 )
 
+if exist "%ROOT%\remote-desktop\native\win64\nvdaControllerClient64.dll" (
+  copy /Y "%ROOT%\remote-desktop\native\win64\nvdaControllerClient64.dll" "%PUBLISH_DIR%\nvdaControllerClient64.dll" >nul
+)
+if exist "%ROOT%\remote-desktop\native\win32\nvdaControllerClient32.dll" (
+  copy /Y "%ROOT%\remote-desktop\native\win32\nvdaControllerClient32.dll" "%PUBLISH_DIR%\nvdaControllerClient32.dll" >nul
+)
+
 if exist "%PF86%\Inno Setup 6\ISCC.exe" set "ISCC_EXE=%PF86%\Inno Setup 6\ISCC.exe"
 if not defined ISCC_EXE if exist "%PF64%\Inno Setup 6\ISCC.exe" set "ISCC_EXE=%PF64%\Inno Setup 6\ISCC.exe"
 

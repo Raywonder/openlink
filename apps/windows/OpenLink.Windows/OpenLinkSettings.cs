@@ -30,6 +30,10 @@ public sealed class OpenLinkSettings
     public bool AllowDropInAccess { get; set; }
     public bool AllowSwapControl { get; set; } = true;
     public bool AllowKeyboardCoUse { get; set; } = true;
+    public bool CtrlAltDeleteGuardEnabled { get; set; } = true;
+    public int CtrlAltDeleteRemotePressCount { get; set; } = 2;
+    public int CtrlAltDeleteLocalLockPressCount { get; set; } = 3;
+    public string CtrlAltDeleteUnlockAction { get; set; } = "return-to-remote";
     public bool AllowMicrophoneAudio { get; set; } = true;
     public bool AllowSystemAudio { get; set; } = true;
     public int RemoteAudioVolumePercent { get; set; } = 100;
@@ -97,6 +101,10 @@ public sealed class OpenLinkSettings
             AllowDropInAccess = AllowDropInAccess,
             AllowSwapControl = AllowSwapControl,
             AllowKeyboardCoUse = AllowKeyboardCoUse,
+            CtrlAltDeleteGuardEnabled = CtrlAltDeleteGuardEnabled,
+            CtrlAltDeleteRemotePressCount = CtrlAltDeleteRemotePressCount,
+            CtrlAltDeleteLocalLockPressCount = CtrlAltDeleteLocalLockPressCount,
+            CtrlAltDeleteUnlockAction = CtrlAltDeleteUnlockAction,
             AllowMicrophoneAudio = AllowMicrophoneAudio,
             AllowSystemAudio = AllowSystemAudio,
             RemoteAudioVolumePercent = RemoteAudioVolumePercent,
@@ -192,6 +200,12 @@ public static class OpenLinkSettingsStore
 
             settings.RemoteAudioVolumePercent = Math.Clamp(settings.RemoteAudioVolumePercent, 0, 150);
             settings.LocalAudioCaptureVolumePercent = Math.Clamp(settings.LocalAudioCaptureVolumePercent, 0, 150);
+            settings.CtrlAltDeleteRemotePressCount = Math.Clamp(settings.CtrlAltDeleteRemotePressCount <= 0 ? 2 : settings.CtrlAltDeleteRemotePressCount, 1, 5);
+            settings.CtrlAltDeleteLocalLockPressCount = Math.Clamp(settings.CtrlAltDeleteLocalLockPressCount <= 0 ? 3 : settings.CtrlAltDeleteLocalLockPressCount, 1, 5);
+            if (string.IsNullOrWhiteSpace(settings.CtrlAltDeleteUnlockAction))
+            {
+                settings.CtrlAltDeleteUnlockAction = "return-to-remote";
+            }
             settings.AsioLatencyMilliseconds = Math.Clamp(settings.AsioLatencyMilliseconds <= 0 ? 20 : settings.AsioLatencyMilliseconds, 5, 200);
             settings.LocalTtsRate = Math.Clamp(settings.LocalTtsRate <= 0 ? 1.0 : settings.LocalTtsRate, 0.5, 2.0);
             settings.LocalTtsVolumePercent = Math.Clamp(settings.LocalTtsVolumePercent, 0, 100);

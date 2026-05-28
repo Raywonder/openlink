@@ -38,6 +38,10 @@ public partial class SettingsWindow : Window
         AllowDropInAccessBox.IsChecked = Settings.AllowDropInAccess;
         AllowSwapControlBox.IsChecked = Settings.AllowSwapControl;
         AllowKeyboardCoUseBox.IsChecked = Settings.AllowKeyboardCoUse;
+        CtrlAltDeleteGuardEnabledBox.IsChecked = Settings.CtrlAltDeleteGuardEnabled;
+        SelectComboItem(CtrlAltDeleteRemotePressCountBox, Settings.CtrlAltDeleteRemotePressCount.ToString());
+        SelectComboItem(CtrlAltDeleteLocalLockPressCountBox, Settings.CtrlAltDeleteLocalLockPressCount.ToString());
+        SelectComboItem(CtrlAltDeleteUnlockActionBox, Settings.CtrlAltDeleteUnlockAction);
         AllowMicrophoneAudioBox.IsChecked = Settings.AllowMicrophoneAudio;
         AllowSystemAudioBox.IsChecked = Settings.AllowSystemAudio;
         RemoteAudioVolumeSlider.Value = Settings.RemoteAudioVolumePercent;
@@ -110,6 +114,10 @@ public partial class SettingsWindow : Window
         Settings.AllowDropInAccess = AllowDropInAccessBox.IsChecked == true;
         Settings.AllowSwapControl = AllowSwapControlBox.IsChecked == true;
         Settings.AllowKeyboardCoUse = AllowKeyboardCoUseBox.IsChecked == true;
+        Settings.CtrlAltDeleteGuardEnabled = CtrlAltDeleteGuardEnabledBox.IsChecked == true;
+        Settings.CtrlAltDeleteRemotePressCount = GetComboInt(CtrlAltDeleteRemotePressCountBox, 2);
+        Settings.CtrlAltDeleteLocalLockPressCount = GetComboInt(CtrlAltDeleteLocalLockPressCountBox, 3);
+        Settings.CtrlAltDeleteUnlockAction = GetComboText(CtrlAltDeleteUnlockActionBox, "return-to-remote");
         Settings.AllowMicrophoneAudio = AllowMicrophoneAudioBox.IsChecked == true;
         Settings.AllowSystemAudio = AllowSystemAudioBox.IsChecked == true;
         Settings.RemoteAudioVolumePercent = (int)RemoteAudioVolumeSlider.Value;
@@ -320,5 +328,10 @@ public partial class SettingsWindow : Window
         return comboBox.SelectedItem is ComboBoxItem item
             ? item.Tag?.ToString() ?? item.Content?.ToString() ?? fallback
             : string.IsNullOrWhiteSpace(comboBox.Text) ? fallback : comboBox.Text.Trim();
+    }
+
+    private static int GetComboInt(System.Windows.Controls.ComboBox comboBox, int fallback)
+    {
+        return int.TryParse(GetComboText(comboBox, fallback.ToString()), out var value) ? value : fallback;
     }
 }

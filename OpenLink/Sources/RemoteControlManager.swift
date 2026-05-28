@@ -28,6 +28,7 @@ class RemoteControlManager: ObservableObject {
     private var lastMousePosition: CGPoint = .zero
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var lastVoiceOverEchoAt = Date.distantPast
 
     // Clipboard monitoring
     private var clipboardTimer: Timer?
@@ -1136,16 +1137,23 @@ class RemoteControlManager: ObservableObject {
             let bundlePath = Bundle.main.bundlePath
             let executablePath = Bundle.main.executablePath ?? ""
             let processName = ProcessInfo.processInfo.processName
+            let appIdentity = currentAppIdentity(bundlePath: bundlePath, executablePath: executablePath)
             let blockedMessage = remoteInputBlockedMessage(
                 accessibilityTrusted: accessibilityTrusted,
-                karabinerStatus: karabinerStatus
+                karabinerStatus: karabinerStatus,
+                appIdentity: appIdentity
             )
             let permissionAction = accessibilityTrusted
                 ? "Open OpenLink settings and enable remote input forwarding for trusted sessions."
-                : "Open System Settings, then Privacy and Security, then enable OpenLink in Accessibility and Input Monitoring. If screen sharing is needed, enable Screen Recording too."
+                : appIdentity.permissionAction
+            let permissionRecoveryCommand = appIdentity.permissionHelperPath.map { "\($0) --open" } ?? "/Applications/OpenLink.app/Contents/Resources/openlink-macos-permission-helper.sh --open"
+            let permissionResetCommand = appIdentity.permissionHelperPath.map { "\($0) --reset-stale" } ?? "/Applications/OpenLink.app/Contents/Resources/openlink-macos-permission-helper.sh --reset-stale"
             isRemoteControlActive = canReceiveInput
             isReceivingControl = canReceiveInput
             screenSharingEnabled = (json["screenSharingAllowed"] as? Bool) ?? screenSharingEnabled
+            if canReceiveInput {
+                announceWithVoiceOver("OpenLink remote keyboard control connected. VoiceOver AppleScript assist is ready.")
+            }
             return [
                 "type": "start_interaction_ack",
                 "requestId": json["requestId"] as? String ?? "",
@@ -1162,10 +1170,14 @@ class RemoteControlManager: ObservableObject {
                 "diagnosticBundlePath": bundlePath,
                 "diagnosticExecutablePath": executablePath,
                 "diagnosticProcessName": processName,
+                "diagnosticIsAppBundle": appIdentity.isAppBundle,
+                "diagnosticExpectedBundlePath": appIdentity.expectedBundlePath,
+                "diagnosticIdentityWarning": appIdentity.warning,
                 "permissionAction": permissionAction,
-                "permissionRecoveryCommand": "/Applications/OpenLink.app/Contents/Resources/openlink-macos-permission-helper.sh --open",
-                "permissionResetCommand": "/Applications/OpenLink.app/Contents/Resources/openlink-macos-permission-helper.sh --reset-stale",
+                "permissionRecoveryCommand": permissionRecoveryCommand,
+                "permissionResetCommand": permissionResetCommand,
                 "permissionAlternatives": [
+                    appIdentity.warning,
                     "If the Mac user can interact locally, ask them to approve OpenLink in Accessibility, Input Monitoring, and Screen Recording.",
                     "If the Mac user cannot interact locally but an admin has shell access, run the OpenLink permission helper to open the right panes or reset stale prompts.",
                     "Karabiner-Elements can improve future virtual-HID keyboard reliability once its driver extension is enabled, but OpenLink still needs macOS Accessibility trust for the current CGEvent input path.",
@@ -1222,16 +1234,61 @@ class RemoteControlManager: ObservableObject {
         inputForwardingEnabled && AXIsProcessTrusted()
     }
 
-    private func remoteInputBlockedMessage(accessibilityTrusted: Bool, karabinerStatus: KarabinerStatus) -> String {
+    private func remoteInputBlockedMessage(accessibilityTrusted: Bool, karabinerStatus: KarabinerStatus, appIdentity: AppIdentityDiagnostics) -> String {
         if !inputForwardingEnabled {
             return "OpenLink on this Mac has remote input forwarding disabled. Accessibility can be approved and control will still be blocked until OpenLink remote input forwarding is enabled for trusted sessions."
         }
 
         if !accessibilityTrusted {
-            return "OpenLink on this Mac is not trusted for Accessibility yet. A macOS permission prompt was requested. Enable the same OpenLink app in Accessibility and Input Monitoring, or run the bundled OpenLink permission helper from an admin shell, then choose Start Using again. \(karabinerStatus.summary)"
+            return "OpenLink on this Mac is not trusted for Accessibility yet. \(appIdentity.warning) A macOS permission prompt was requested. Enable the same OpenLink app in Accessibility and Input Monitoring, or run the bundled OpenLink permission helper from an admin shell, then choose Start Using again. \(karabinerStatus.summary)"
         }
 
         return "OpenLink on this Mac cannot receive remote input yet. Check OpenLink remote input settings and macOS privacy approvals, then choose Start Using again."
+    }
+
+    private struct AppIdentityDiagnostics {
+        let isAppBundle: Bool
+        let expectedBundlePath: String
+        let permissionHelperPath: String?
+        let warning: String
+        let permissionAction: String
+    }
+
+    private func currentAppIdentity(bundlePath: String, executablePath: String) -> AppIdentityDiagnostics {
+        let expectedBundlePath = "/Applications/OpenLink.app"
+        let isAppBundle = bundlePath.hasSuffix(".app") && executablePath.contains(".app/Contents/MacOS/")
+        let helperCandidate = "\(bundlePath)/Contents/Resources/openlink-macos-permission-helper.sh"
+        let helperPath = FileManager.default.isExecutableFile(atPath: helperCandidate)
+            ? helperCandidate
+            : nil
+
+        if !isAppBundle {
+            return AppIdentityDiagnostics(
+                isAppBundle: false,
+                expectedBundlePath: expectedBundlePath,
+                permissionHelperPath: helperPath,
+                warning: "This OpenLink process is not running from a normal .app bundle. macOS Privacy may show another OpenLink entry as enabled while this executable remains untrusted. Running path: \(executablePath).",
+                permissionAction: "Quit this process, launch \(expectedBundlePath), then enable that exact OpenLink entry in Accessibility and Input Monitoring. If duplicate OpenLink entries appear, run the permission helper reset command and approve the current app again."
+            )
+        }
+
+        if bundlePath != expectedBundlePath {
+            return AppIdentityDiagnostics(
+                isAppBundle: true,
+                expectedBundlePath: expectedBundlePath,
+                permissionHelperPath: helperPath,
+                warning: "OpenLink is running from \(bundlePath), not \(expectedBundlePath). macOS Privacy is path and signing sensitive, so an enabled duplicate OpenLink entry may not match this build.",
+                permissionAction: "Enable the OpenLink entry for \(bundlePath) in Accessibility and Input Monitoring, or replace \(expectedBundlePath) with the signed current build and launch it from Applications."
+            )
+        }
+
+        return AppIdentityDiagnostics(
+            isAppBundle: true,
+            expectedBundlePath: expectedBundlePath,
+            permissionHelperPath: helperPath,
+            warning: "OpenLink is running from the expected app bundle. If macOS still says Accessibility is missing, remove duplicate OpenLink entries or run the reset-stale permission helper, then approve OpenLink again.",
+            permissionAction: "Open System Settings, then Privacy and Security, then enable OpenLink in Accessibility and Input Monitoring. If screen sharing is needed, enable Screen Recording too."
+        )
     }
 
     private func accessibilityTrustSnapshot() -> (direct: Bool, afterPrompt: Bool) {
@@ -1394,6 +1451,7 @@ class RemoteControlManager: ObservableObject {
                         event.flags = CGEventFlags(rawValue: flags)
                     }
                     event.post(tap: .cghidEventTap)
+                    echoVoiceOverLastPhraseAfterKey()
                     return true
                 }
             }
@@ -1422,6 +1480,41 @@ class RemoteControlManager: ObservableObject {
         }
 
         return false
+    }
+
+    private func echoVoiceOverLastPhraseAfterKey() {
+        guard isVoiceOverRunning() else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastVoiceOverEchoAt) > 0.25 else { return }
+        lastVoiceOverEchoAt = now
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.08) {
+            self.runVoiceOverAppleScript("tell application \"VoiceOver\" to output last phrase")
+        }
+    }
+
+    private func announceWithVoiceOver(_ text: String) {
+        guard isVoiceOverRunning() else { return }
+        let escaped = text
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        runVoiceOverAppleScript("tell application \"VoiceOver\" to output \"\(escaped)\"")
+    }
+
+    private func runVoiceOverAppleScript(_ script: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        do {
+            try process.run()
+        } catch {
+            // VoiceOver AppleScript assist is best-effort; CGEvent remains the primary path.
+        }
+    }
+
+    private func isVoiceOverRunning() -> Bool {
+        NSWorkspace.shared.runningApplications.contains { app in
+            app.bundleIdentifier == "com.apple.VoiceOver" || app.localizedName == "VoiceOver"
+        }
     }
 
     private func normalizeLegacyKeyEvent(_ json: [String: Any]) -> [String: Any]? {

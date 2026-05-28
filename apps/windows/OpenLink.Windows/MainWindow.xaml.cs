@@ -14,6 +14,7 @@ using System.Media;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using Forms = System.Windows.Forms;
+using DrawingPoint = System.Drawing.Point;
 
 namespace OpenLink.Windows;
 
@@ -40,6 +41,7 @@ public partial class MainWindow : Window
     private readonly OpenLinkAudioBridge _audioBridge = new();
     private readonly OpenLinkTtsService _ttsService;
     private readonly SoundActionPlayer _soundPlayer;
+    private readonly NvdaControllerBridge _nvdaController = new();
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly Dictionary<string, MachineDetailsWindow> _machineDetailsWindows = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HttpClient HealthClient = new() { Timeout = TimeSpan.FromSeconds(5) };
@@ -65,6 +67,10 @@ public partial class MainWindow : Window
     private bool _controllerActionsMenuOpen;
     private Forms.ContextMenuStrip? _controllerActionsMenu;
     private bool _controllerHotkeyChordDown;
+    private int _ctrlAltDeletePressCount;
+    private DateTimeOffset _lastCtrlAltDeletePress = DateTimeOffset.MinValue;
+    private bool _returnFromLocalLockPending;
+    private Forms.Form? _controllerMenuOwner;
     private IntPtr _windowHandle;
     private IntPtr _keyboardHook;
     private LowLevelKeyboardProc? _keyboardHookProc;
@@ -91,6 +97,7 @@ public partial class MainWindow : Window
     private const int VkRShift = 0xA1;
     private const int VkTab = 0x09;
     private const int VkEscape = 0x1B;
+    private const int VkDelete = 0x2E;
     private const int VkLWin = 0x5B;
     private const int VkRWin = 0x5C;
     private const int VkOem102 = 0xE2;
@@ -127,6 +134,7 @@ public partial class MainWindow : Window
         Loaded += MainWindow_Loaded;
         SourceInitialized += MainWindow_SourceInitialized;
         Closing += MainWindow_Closing;
+        SystemEvents.SessionSwitch += SystemEvents_SessionSwitch;
         Closed += (_, _) =>
         {
             if (_windowHandle != IntPtr.Zero)
@@ -139,9 +147,11 @@ public partial class MainWindow : Window
                 UnhookWindowsHookEx(_keyboardHook);
             }
             _trayIcon.Dispose();
+            _controllerMenuOwner?.Dispose();
             _audioBridge.Dispose();
             _ttsService.Dispose();
             _sendLock.Dispose();
+            SystemEvents.SessionSwitch -= SystemEvents_SessionSwitch;
         };
     }
 
@@ -170,7 +180,10 @@ public partial class MainWindow : Window
         else if (msg == WmHotkey && wParam.ToInt32() == ControllerActionsShiftHotkeyId)
         {
             handled = true;
-            ShowMachinesAndSettingsSurface();
+            if (!_remoteInputActive && !_remoteInputPending)
+            {
+                ShowMachinesAndSettingsSurface();
+            }
         }
 
         return IntPtr.Zero;
@@ -216,6 +229,15 @@ public partial class MainWindow : Window
             }
             if (controllerKey && ctrlDown && shiftDown)
             {
+                if (_remoteInputActive || _remoteInputPending)
+                {
+                    if (!keyDown)
+                    {
+                        _controllerHotkeyChordDown = false;
+                    }
+                    return new IntPtr(1);
+                }
+
                 if (keyDown && !_controllerHotkeyChordDown)
                 {
                     _controllerHotkeyChordDown = true;
@@ -233,11 +255,21 @@ public partial class MainWindow : Window
             }
             if (_remoteInputActive && _remoteInputMachine is not null)
             {
-                if (keyDown && vkCode == VkEscape && ctrlDown && altDown)
+                if (_settings.CtrlAltDeleteGuardEnabled && ctrlDown && altDown && vkCode == VkDelete)
+                {
+                    if (keyDown)
+                    {
+                        Dispatcher.BeginInvoke(() => HandleCtrlAltDeleteDuringRemoteControl(_remoteInputMachine));
+                    }
+
+                    return new IntPtr(1);
+                }
+
+                if (keyDown && vkCode == VkEscape && ctrlDown && altDown && shiftDown)
                 {
                     Dispatcher.BeginInvoke(() =>
                     {
-                        StopRemoteInputForwarding("Control Alt Escape safety release");
+                        StopRemoteInputForwarding("Control Alt Shift Escape safety release");
                         SetStatus("Remote keyboard forwarding stopped. Keyboard returned to this computer.");
                         QueueControllerActionsMenu();
                     });
@@ -257,7 +289,7 @@ public partial class MainWindow : Window
 
             if (_remoteInputActive && _remoteInputMachine is not null)
             {
-                if (ShouldKeepKeyLocal(vkCode, ctrlDown, altDown))
+                if (ShouldKeepKeyLocal(vkCode, ctrlDown, altDown, shiftDown))
                 {
                     return CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
                 }
@@ -270,7 +302,9 @@ public partial class MainWindow : Window
 
                 var target = _remoteInputMachine;
                 Dispatcher.BeginInvoke(() => _ = SendRemoteKeyboardInputAsync(target, vkCode, keyDown, ctrlDown, altDown, shiftDown));
-                return new IntPtr(1);
+                return ShouldPassForwardedKeyThroughLocally(target)
+                    ? CallNextHookEx(_keyboardHook, nCode, wParam, lParam)
+                    : new IntPtr(1);
             }
         }
 
@@ -772,7 +806,15 @@ public partial class MainWindow : Window
 
     private static bool ShouldSuppressServerLog(string? type)
     {
-        return string.Equals(type, "audio_frame", StringComparison.OrdinalIgnoreCase);
+        return type is not null &&
+               (string.Equals(type, "audio_frame", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(type, "input_event_ack", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(type, "key_event_ack", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(type, "machine_event_ack", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(type, "machine_connect_ack", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(type, "diagnostic_event_ack", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(type, "machine_presence", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(type, "presence", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string SummarizeServerMessage(JsonElement root, string? type)
@@ -1371,7 +1413,13 @@ public partial class MainWindow : Window
         _remoteInputPending = false;
         _remoteInputActive = true;
         AddLog($"Remote keyboard forwarding enabled for {_remoteInputMachine.DisplayName} ({_remoteInputMachine.Platform}).");
-        SetStatus(message ?? $"Keyboard is now being sent to {_remoteInputMachine.DisplayName}. Press Control Alt Backslash for controller actions. Press Control Alt Escape to return keyboard to this computer.");
+        var screenReaderMessage = BuildScreenReaderConnectionMessage(_remoteInputMachine);
+        if (!string.IsNullOrWhiteSpace(screenReaderMessage))
+        {
+            AddLog(screenReaderMessage);
+            _ = _ttsService.SpeakStatusAsync(screenReaderMessage);
+        }
+        SetStatus(message ?? $"Keyboard is now being sent to {_remoteInputMachine.DisplayName}. Press Control Alt Backslash for controller actions. Press Control Alt Shift Escape to return keyboard to this computer.");
         PlaySound(SoundAction.Connect);
         HideOpenLinkWindow();
     }
@@ -1431,7 +1479,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private static bool ShouldKeepKeyLocal(int vkCode, bool ctrlDown, bool altDown)
+    private static bool ShouldKeepKeyLocal(int vkCode, bool ctrlDown, bool altDown, bool shiftDown)
     {
         if (vkCode == VkLWin || vkCode == VkRWin)
         {
@@ -1443,7 +1491,7 @@ public partial class MainWindow : Window
             return true;
         }
 
-        if (ctrlDown && altDown && vkCode == VkEscape)
+        if (ctrlDown && altDown && shiftDown && vkCode == VkEscape)
         {
             return true;
         }
@@ -1451,18 +1499,87 @@ public partial class MainWindow : Window
         return false;
     }
 
+    private bool ShouldPassForwardedKeyThroughLocally(MachineRecord machine)
+    {
+        return _settings.AllowKeyboardCoUse || machine.AllowKeyboardCoUse;
+    }
+
+    private void HandleCtrlAltDeleteDuringRemoteControl(MachineRecord machine)
+    {
+        var now = DateTimeOffset.UtcNow;
+        _ctrlAltDeletePressCount = (now - _lastCtrlAltDeletePress) <= TimeSpan.FromSeconds(4)
+            ? _ctrlAltDeletePressCount + 1
+            : 1;
+        _lastCtrlAltDeletePress = now;
+
+        if (_ctrlAltDeletePressCount == 1)
+        {
+            SetStatus($"Control Alt Delete is guarded by OpenLink. Press it {_settings.CtrlAltDeleteRemotePressCount} times for {machine.DisplayName}. Press it {_settings.CtrlAltDeleteLocalLockPressCount} times for this Windows lock screen. Control Alt Shift Escape returns keyboard to this computer.");
+            return;
+        }
+
+        if (_ctrlAltDeletePressCount == _settings.CtrlAltDeleteRemotePressCount)
+        {
+            _ = SendRemoteMachineActionAsync(machine, "lock_machine", null);
+            SetStatus($"Sent lock request to {machine.DisplayName}. Control Alt Delete is still guarded on this computer.");
+            return;
+        }
+
+        if (_ctrlAltDeletePressCount >= _settings.CtrlAltDeleteLocalLockPressCount)
+        {
+            _returnFromLocalLockPending = true;
+            _ctrlAltDeletePressCount = 0;
+            SetStatus("Locking this Windows computer. OpenLink will apply the selected return action after sign in.");
+            LockWorkStation();
+        }
+    }
+
+    private void SystemEvents_SessionSwitch(object sender, SessionSwitchEventArgs e)
+    {
+        if (e.Reason != SessionSwitchReason.SessionUnlock || !_returnFromLocalLockPending)
+        {
+            return;
+        }
+
+        _returnFromLocalLockPending = false;
+        Dispatcher.BeginInvoke(() => ApplyCtrlAltDeleteUnlockActionAsync());
+    }
+
+    private async Task ApplyCtrlAltDeleteUnlockActionAsync()
+    {
+        var machine = _remoteInputMachine;
+        if (machine is null)
+        {
+            SetStatus("Windows sign in complete. No remote device is currently controlled.");
+            return;
+        }
+
+        switch (_settings.CtrlAltDeleteUnlockAction)
+        {
+            case "stay-connected-background":
+                await MinimizeRemoteForLocalUseAsync(machine);
+                break;
+            case "disconnect":
+                await DisconnectFromDeviceAsync(machine);
+                break;
+            default:
+                SetStatus($"Windows sign in complete. Returning keyboard and audio focus to {machine.DisplayName}.");
+                break;
+        }
+    }
+
     private static ulong BuildMacModifierFlags(int vkCode, bool ctrlDown, bool altDown, bool shiftDown)
     {
         ulong flags = 0;
-        if (shiftDown || vkCode == VkShift)
+        if (shiftDown || vkCode == VkShift || vkCode == VkLShift || vkCode == VkRShift)
         {
             flags |= MacShiftFlag;
         }
-        if (altDown || vkCode == VkMenu)
+        if (altDown || vkCode == VkMenu || vkCode == VkLMenu || vkCode == VkRMenu)
         {
             flags |= MacAlternateFlag;
         }
-        if (ctrlDown || vkCode == VkControl)
+        if (ctrlDown || vkCode == VkControl || vkCode == VkLControl || vkCode == VkRControl)
         {
             // Windows Ctrl maps to macOS Command for normal shortcut parity.
             flags |= MacCommandFlag;
@@ -1527,9 +1644,24 @@ public partial class MainWindow : Window
         0x09 => 48, // Tab
         0x20 => 49, // Space
         0xC0 => 50, // `
-        VkShift => 56,
-        VkControl => 55,
-        VkMenu => 58,
+        0x60 => 82, // Numpad 0
+        0x61 => 83, // Numpad 1
+        0x62 => 84, // Numpad 2
+        0x63 => 85, // Numpad 3
+        0x64 => 86, // Numpad 4
+        0x65 => 87, // Numpad 5
+        0x66 => 88, // Numpad 6
+        0x67 => 89, // Numpad 7
+        0x68 => 91, // Numpad 8
+        0x69 => 92, // Numpad 9
+        0x6D => 78, // Numpad minus
+        0x6B => 69, // Numpad plus
+        0x6E => 65, // Numpad decimal
+        0x6F => 75, // Numpad divide
+        0x6A => 67, // Numpad multiply
+        VkShift or VkLShift or VkRShift => 56,
+        VkControl or VkLControl or VkRControl => 55,
+        VkMenu or VkLMenu or VkRMenu => 58,
         0x1B => 53, // Escape
         0x08 => 51, // Delete/backspace
         0x25 => 123, // Left
@@ -1670,6 +1802,11 @@ public partial class MainWindow : Window
 
         try
         {
+            if (_nvdaController.Speak(spoken))
+            {
+                return;
+            }
+
             var peer = System.Windows.Automation.Peers.UIElementAutomationPeer.FromElement(StatusTextBlock)
                 ?? System.Windows.Automation.Peers.UIElementAutomationPeer.CreatePeerForElement(StatusTextBlock);
             peer?.RaiseNotificationEvent(
@@ -1688,6 +1825,11 @@ public partial class MainWindow : Window
     {
         try
         {
+            if (_nvdaController.Speak(status))
+            {
+                return;
+            }
+
             var peer = System.Windows.Automation.Peers.UIElementAutomationPeer.FromElement(StatusTextBlock)
                 ?? System.Windows.Automation.Peers.UIElementAutomationPeer.CreatePeerForElement(StatusTextBlock);
             if (peer is null)
@@ -1856,6 +1998,7 @@ public partial class MainWindow : Window
             aliases = GetLocalMachineAliases(),
             domainUsed = EndpointNormalizer.ShareHostFor(serverUrl),
             platform = "Windows",
+            screenReader = DetectLocalScreenReader(),
             lastSessionId = _activeSessionId
         };
     }
@@ -1868,6 +2011,44 @@ public partial class MainWindow : Window
             "dom-pc-laptop",
             "Dom PC Laptop"
         };
+    }
+
+    private static object DetectLocalScreenReader()
+    {
+        var activeReaders = new List<string>();
+        foreach (var reader in new[] { "nvda", "jfw", "narrator", "supernova", "zoomtext" })
+        {
+            if (Process.GetProcessesByName(reader).Length > 0)
+            {
+                activeReaders.Add(reader switch
+                {
+                    "nvda" => "NVDA",
+                    "jfw" => "JAWS",
+                    "narrator" => "Narrator",
+                    "supernova" => "SuperNova",
+                    "zoomtext" => "ZoomText",
+                    _ => reader
+                });
+            }
+        }
+
+        return new
+        {
+            enabled = activeReaders.Count > 0,
+            names = activeReaders,
+            primary = activeReaders.FirstOrDefault() ?? "",
+            localAccessibilityRoute = activeReaders.Count > 0 ? "uia-screen-reader" : "openlink-tts"
+        };
+    }
+
+    private static string BuildScreenReaderConnectionMessage(MachineRecord machine)
+    {
+        var readerInfo = DetectLocalScreenReader();
+        var primaryProperty = readerInfo.GetType().GetProperty("primary");
+        var primary = primaryProperty?.GetValue(readerInfo)?.ToString();
+        return string.IsNullOrWhiteSpace(primary)
+            ? $"Connected to {machine.DisplayName}. No local Windows screen reader was detected, so OpenLink local TTS will be used for remote accessibility announcements when enabled."
+            : $"Connected to {machine.DisplayName}. Local screen reader detected: {primary}. OpenLink accessibility announcements are enabled for the remote session.";
     }
 
     private object CreateConnectionPolicy()
@@ -2956,15 +3137,17 @@ public partial class MainWindow : Window
                 HideOpenLinkWindow();
             }
         };
-        if (IsVisible && WindowState != WindowState.Minimized)
-        {
-            SetForegroundWindow(_windowHandle);
-        }
+        var owner = EnsureControllerMenuOwner();
+        owner.Show();
+        owner.Activate();
+        SetForegroundWindow(owner.Handle);
 
         var position = GetControllerMenuPosition();
-        menu.Show(position);
+        menu.Show(owner, owner.PointToClient(position));
         menu.BeginInvoke(new Action(() =>
         {
+            SetForegroundWindow(owner.Handle);
+            owner.Activate();
             menu.Focus();
             if (menu.Items.Count > 0)
             {
@@ -3099,6 +3282,29 @@ public partial class MainWindow : Window
         return new System.Drawing.Point(
             Math.Clamp(cursorPosition.X, screenArea.Left + 8, screenArea.Right - 8),
             Math.Clamp(cursorPosition.Y, screenArea.Top + 8, screenArea.Bottom - 8));
+    }
+
+    private Forms.Form EnsureControllerMenuOwner()
+    {
+        if (_controllerMenuOwner is { IsDisposed: false })
+        {
+            return _controllerMenuOwner;
+        }
+
+        _controllerMenuOwner = new Forms.Form
+        {
+            FormBorderStyle = Forms.FormBorderStyle.None,
+            ShowInTaskbar = false,
+            StartPosition = Forms.FormStartPosition.Manual,
+            Size = new System.Drawing.Size(1, 1),
+            Location = new DrawingPoint(-32000, -32000),
+            Opacity = 0,
+            TopMost = true,
+            Text = "OpenLink Controller Actions"
+        };
+        _controllerMenuOwner.AccessibleName = "OpenLink controller actions owner";
+        _controllerMenuOwner.AccessibleDescription = "Keeps OpenLink controller actions focused for keyboard and screen reader navigation.";
+        return _controllerMenuOwner;
     }
 
     private async void QueueControllerActionsMenu()
