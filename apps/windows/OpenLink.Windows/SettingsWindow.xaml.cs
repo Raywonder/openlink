@@ -59,6 +59,7 @@ public partial class SettingsWindow : Window
         TamperProtectionEnabledBox.IsChecked = Settings.TamperProtectionEnabled;
 
         AnnounceStatusChangesBox.IsChecked = Settings.AnnounceStatusChanges;
+        ShowActivityLogBox.IsChecked = Settings.ShowActivityLog;
         DetailedScreenReaderMessagesBox.IsChecked = Settings.DetailedScreenReaderMessages;
         SoundAlertsBox.IsChecked = Settings.SoundAlerts;
         ReduceMotionBox.IsChecked = Settings.ReduceMotion;
@@ -130,6 +131,7 @@ public partial class SettingsWindow : Window
         Settings.TamperProtectionEnabled = TamperProtectionEnabledBox.IsChecked == true;
 
         Settings.AnnounceStatusChanges = AnnounceStatusChangesBox.IsChecked == true;
+        Settings.ShowActivityLog = ShowActivityLogBox.IsChecked == true;
         Settings.DetailedScreenReaderMessages = DetailedScreenReaderMessagesBox.IsChecked == true;
         Settings.SoundAlerts = SoundAlertsBox.IsChecked == true;
         Settings.ReduceMotion = ReduceMotionBox.IsChecked == true;

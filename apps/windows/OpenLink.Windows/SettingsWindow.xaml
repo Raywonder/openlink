@@ -245,6 +245,9 @@
                     <CheckBox x:Name="AnnounceStatusChangesBox"
                               Margin="0,0,0,8"
                               Content="Announce connection and hosting status changes" />
+                    <CheckBox x:Name="ShowActivityLogBox"
+                              Margin="0,0,0,8"
+                              Content="Show activity log in the main window" />
                     <CheckBox x:Name="DetailedScreenReaderMessagesBox"
                               Margin="0,0,0,8"
                               Content="Use detailed screen reader messages" />

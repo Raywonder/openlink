@@ -52,6 +52,7 @@ public sealed class OpenLinkSettings
     public bool TamperProtectionEnabled { get; set; }
 
     public bool AnnounceStatusChanges { get; set; } = true;
+    public bool ShowActivityLog { get; set; }
     public bool DetailedScreenReaderMessages { get; set; } = true;
     public bool SoundAlerts { get; set; } = true;
     public bool ReduceMotion { get; set; }
@@ -117,6 +118,7 @@ public sealed class OpenLinkSettings
             RequireApprovalForNewDevices = RequireApprovalForNewDevices,
             TamperProtectionEnabled = TamperProtectionEnabled,
             AnnounceStatusChanges = AnnounceStatusChanges,
+            ShowActivityLog = ShowActivityLog,
             DetailedScreenReaderMessages = DetailedScreenReaderMessages,
             SoundAlerts = SoundAlerts,
             ReduceMotion = ReduceMotion,

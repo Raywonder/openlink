@@ -1172,7 +1172,18 @@ public partial class MainWindow : Window
         _sessionActive = true;
         UpdateConnectedUiState();
         PlaySound(SoundAction.Connect);
-        SetStatus($"Remote keyboard and audio control accepted from {remoteMachine?.DisplayName ?? "another OpenLink machine"}. Use Control Alt Backslash for local OpenLink actions.");
+        var acceptedMessage = $"Remote keyboard and audio control accepted from {remoteMachine?.DisplayName ?? "another OpenLink machine"}. Use Control Alt Backslash for local OpenLink actions.";
+        SetStatus(acceptedMessage);
+        _ = SendPeerAsync(new
+        {
+            type = "tts_announcement",
+            targetMachineId = GetSourceMachineId(root),
+            sourceMachineId = Environment.MachineName,
+            sourcePlatform = "Windows",
+            priority = "assertive",
+            interrupt = true,
+            text = $"OpenLink is connected to {Environment.MachineName}. Remote audio and system announcements are ready."
+        });
         HideToTrayForActiveSession();
         _ = SendDiagnosticEventAsync("start_interaction", remoteMachine, "accepted");
     }
@@ -1619,6 +1630,7 @@ public partial class MainWindow : Window
         ServerCombo.Text = string.IsNullOrWhiteSpace(_settings.DefaultServerUrl)
             ? EndpointNormalizer.CanonicalWebSocketUrl
             : EndpointNormalizer.NormalizeWebSocketUrl(_settings.DefaultServerUrl, _settings.CustomSignalingServerAccessEnabled);
+        LogListBox.Visibility = _settings.ShowActivityLog ? Visibility.Visible : Visibility.Collapsed;
         _ttsService.Configure(_settings);
         RebuildTrayMenu();
     }
@@ -1638,8 +1650,37 @@ public partial class MainWindow : Window
         AnnounceStatusToScreenReader(status, previousAccessibleName, nextAccessibleName);
         if (_settings.AnnounceStatusChanges)
         {
-            AddLog(status);
+            AddLog(status, announce: false);
             _ = _ttsService.SpeakStatusAsync(status);
+        }
+    }
+
+    private void AnnounceMessageToScreenReader(string message)
+    {
+        if (!_settings.AnnounceStatusChanges)
+        {
+            return;
+        }
+
+        var spoken = SanitizeLogLine(message);
+        if (string.IsNullOrWhiteSpace(spoken))
+        {
+            return;
+        }
+
+        try
+        {
+            var peer = System.Windows.Automation.Peers.UIElementAutomationPeer.FromElement(StatusTextBlock)
+                ?? System.Windows.Automation.Peers.UIElementAutomationPeer.CreatePeerForElement(StatusTextBlock);
+            peer?.RaiseNotificationEvent(
+                System.Windows.Automation.AutomationNotificationKind.ActionCompleted,
+                System.Windows.Automation.AutomationNotificationProcessing.ImportantMostRecent,
+                spoken,
+                "OpenLinkLogMessage");
+        }
+        catch
+        {
+            // Screen reader announcement is best-effort; logs still persist.
         }
     }
 
@@ -1671,9 +1712,18 @@ public partial class MainWindow : Window
         }
     }
 
-    private void AddLog(string message)
+    private void AddLog(string message) => AddLog(message, announce: true);
+
+    private void AddLog(string message, bool announce)
     {
-        LogListBox.Items.Insert(0, $"[{DateTime.Now:T}] {message}");
+        if (_settings.ShowActivityLog)
+        {
+            LogListBox.Items.Insert(0, message);
+        }
+        if (announce)
+        {
+            AnnounceMessageToScreenReader(message);
+        }
         WriteRuntimeLog(message);
     }
 

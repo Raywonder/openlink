@@ -161,6 +161,7 @@ class OpenLinkService: ObservableObject {
     @Published var lastLatencyMs: Int?
     @Published var connectionStartedAt: Date?
     @Published var activeMachineName: String?
+    @Published var runtimeLogMessages: [String] = []
 
     // Settings
     @Published var discoveryEnabled = true
@@ -271,6 +272,7 @@ class OpenLinkService: ObservableObject {
             "localTtsRate": 1.0,
             "localTtsVolumePercent": 100.0,
             "ttsFallbackMode": "screen-reader",
+            "showActivityLog": false,
             "updateChannel": "Stable",
             "localServerEnabled": false,
             "localServerPort": "8765"
@@ -1254,6 +1256,12 @@ class OpenLinkService: ObservableObject {
         OpenLinkAudioBridge.shared.startCapture(targetMachineId: controllerMachineId) { [weak self] frame in
             self?.sendWebSocketResponse(frame, serverId: serverId, broadcast: respondWithBroadcast)
         }
+        sendControllerAnnouncement(
+            "OpenLink audio is connected to \(localStableMachineName()). System voice announcements are ready.",
+            originalMessage: json,
+            serverId: serverId,
+            broadcast: respondWithBroadcast
+        )
     }
 
     private func sendControllerAnnouncement(_ text: String, originalMessage: [String: Any], serverId: String, broadcast: Bool) {
@@ -1604,6 +1612,13 @@ class OpenLinkService: ObservableObject {
             .replacingOccurrences(of: "\r", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
         let redacted = Self.redactLogSecrets(safeMessage)
+        DispatchQueue.main.async {
+            self.runtimeLogMessages.insert(redacted, at: 0)
+            if self.runtimeLogMessages.count > 80 {
+                self.runtimeLogMessages.removeLast(self.runtimeLogMessages.count - 80)
+            }
+            self.postAccessibilityAnnouncement(title: "", body: redacted)
+        }
         let logURL = URL(fileURLWithPath: runtimeLogPath)
         do {
             try FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)

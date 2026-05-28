@@ -514,6 +514,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
 
 struct OpenLinkMainWindowView: View {
     @StateObject private var service = OpenLinkService.shared
+    @AppStorage("showActivityLog") private var showActivityLog = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -609,6 +610,21 @@ struct OpenLinkMainWindowView: View {
                             }
                         }
                         .frame(minHeight: 300)
+                    }
+
+                    if showActivityLog {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Activity Log")
+                                .font(.headline)
+                            List(service.runtimeLogMessages, id: \.self) { message in
+                                Text(message)
+                                    .font(.caption)
+                                    .lineLimit(2)
+                                    .accessibilityLabel(message)
+                            }
+                            .frame(minHeight: 120)
+                            .accessibilityLabel("OpenLink activity log")
+                        }
                     }
                 }
                 .padding()
@@ -1321,6 +1337,7 @@ struct GeneralSettingsTab: View {
     @AppStorage("showConnectionNotifications") private var showConnectionNotifications = true
     @AppStorage("showElapsedConnectionTime") private var showElapsedConnectionTime = true
     @AppStorage("announceConnectionStrength") private var announceConnectionStrength = true
+    @AppStorage("showActivityLog") private var showActivityLog = false
     @AppStorage("enableDiagnosticSending") private var enableDiagnosticSending = true
     @AppStorage("openLinkBackendUrl") private var openLinkBackendUrl = OpenLinkService.canonicalWebSocketURL
     @AppStorage("customSignalingServerAccessEnabled") private var customSignalingServerAccessEnabled = false
@@ -1756,6 +1773,7 @@ struct AccessibilitySettingsTab: View {
                     Toggle("Show device connection notifications", isOn: $showConnectionNotifications)
                     Toggle("Show elapsed connection time", isOn: $showElapsedConnectionTime)
                     Toggle("Announce connection strength before connecting", isOn: $announceConnectionStrength)
+                    Toggle("Show activity log in the dashboard", isOn: $showActivityLog)
                 }
                 .padding(.vertical, 8)
             }
