@@ -216,6 +216,7 @@ class OpenLinkService: ObservableObject {
     private var discoveryTimer: Timer?
     private var serviceHealthTimer: Timer?
     private var lastServiceOnline: Bool?
+    private var localSignalSessionId: String = ""
 
     // Paths
     private let configPath = NSHomeDirectory() + "/.openlink/config.json"
@@ -823,6 +824,23 @@ class OpenLinkService: ObservableObject {
         #endif
     }
 
+    private func stableLocalSignalSessionId() -> String {
+        if !localSignalSessionId.isEmpty {
+            return localSignalSessionId
+        }
+
+        let key = "localSignalSessionId"
+        if let existing = UserDefaults.standard.string(forKey: key), !existing.isEmpty {
+            localSignalSessionId = existing
+            return existing
+        }
+
+        let generated = "mac-\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(8))"
+        UserDefaults.standard.set(generated, forKey: key)
+        localSignalSessionId = generated
+        return generated
+    }
+
     private static func canonicalMachineToken(_ value: String) -> String {
         value
             .lowercased()
@@ -923,20 +941,56 @@ class OpenLinkService: ObservableObject {
         // Start receiving messages
         receiveWebSocketMessages(serverId: server.id)
 
-        // Send handshake
-        let handshake: [String: Any] = [
-            "type": "handshake",
-            "clientId": getClientId(),
-            "clientName": localStableMachineName(),
-            "machineInfo": localMachineInfo(domainUsed: url.host ?? "openlink.tappedin.fm"),
-            "connectionPolicy": globalConnectionPolicy()
-        ]
+        // Register the local Mac exactly like the Windows host path. The signal
+        // server keeps routed target presence for create_session; a legacy
+        // handshake alone can leave this Mac visible locally but offline to peers.
+        let machineInfo = localMachineInfo(domainUsed: url.host ?? "openlink.tappedin.fm")
+        let handshake: [String: Any]
+        if isLocalRegistration {
+            handshake = [
+                "type": "create_session",
+                "sessionId": stableLocalSignalSessionId(),
+                "password": "",
+                "machineInfo": machineInfo,
+                "connectionPolicy": globalConnectionPolicy(),
+                "hostInfo": [
+                    "machineId": localStableMachineId(),
+                    "machineName": localStableMachineName(),
+                    "os": "macOS",
+                    "app": "OpenLink",
+                    "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.26",
+                    "permissions": [
+                        "remoteControl": allowRemoteControl,
+                        "clipboard": UserDefaults.standard.bool(forKey: "allowClipboardSync"),
+                        "fileTransfer": UserDefaults.standard.bool(forKey: "allowFileTransfer"),
+                        "audio": UserDefaults.standard.bool(forKey: "allowAudio"),
+                        "dropIn": UserDefaults.standard.bool(forKey: "allowDropInAccess"),
+                        "swapControl": UserDefaults.standard.bool(forKey: "allowSwapControl"),
+                        "keyboardCoUse": false,
+                        "microphoneAudio": UserDefaults.standard.bool(forKey: "allowMicrophoneAudio"),
+                        "systemAudio": UserDefaults.standard.bool(forKey: "allowSystemAudio")
+                    ]
+                ]
+            ]
+        } else {
+            handshake = [
+                "type": "handshake",
+                "clientId": getClientId(),
+                "clientName": localStableMachineName(),
+                "machineInfo": machineInfo,
+                "connectionPolicy": globalConnectionPolicy()
+            ]
+        }
 
         if let data = try? JSONSerialization.data(withJSONObject: handshake),
            let string = String(data: data, encoding: .utf8) {
-            task.send(.string(string)) { _ in }
+            task.send(.string(string)) { [weak self] error in
+                if let error {
+                    self?.runtimeLog("failed to send signaling registration for \(server.id): \(error.localizedDescription)")
+                }
+            }
         }
-        runtimeLog("sent handshake for \(server.id) localMachineId=\(localStableMachineId()) aliases=\(Array(localMachineIdentityTokens()).joined(separator: ","))")
+        runtimeLog("sent \(handshake["type"] as? String ?? "handshake") for \(server.id) localMachineId=\(localStableMachineId()) aliases=\(Array(localMachineIdentityTokens()).joined(separator: ","))")
         sendDiagnosticEvent("signaling_connected", serverId: server.id, outcome: "success", metadata: [
             "endpoint": url.host ?? "openlink.tappedin.fm",
             "transport": "websocket"
