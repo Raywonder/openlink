@@ -798,6 +798,19 @@ public partial class MainWindow : Window
                 var message = root.TryGetProperty("message", out var messageElement)
                     ? messageElement.GetString()
                     : root.TryGetProperty("error", out var errorElement) ? errorElement.GetString() : "Unknown server error";
+                var targetMachineId = root.TryGetProperty("targetMachineId", out var serverErrorTargetElement)
+                    ? serverErrorTargetElement.GetString()
+                    : null;
+                var requestId = root.TryGetProperty("requestId", out var serverErrorRequestElement)
+                    ? serverErrorRequestElement.GetString()
+                    : null;
+                if (IsTransientTargetOfflineError(message, targetMachineId, requestId))
+                {
+                    AddLog($"Signal routing temporarily lost for {(_remoteInputMachine?.DisplayName ?? targetMachineId ?? "remote machine")}; keeping the session alive while OpenLink presence refreshes.");
+                    SetStatus($"OpenLink is refreshing the route to {(_remoteInputMachine?.DisplayName ?? "the remote machine")}. The machine may still be online; keyboard stays on this computer until it confirms control.", announce: false);
+                    _ = SendDiagnosticEventAsync("server_error", outcome: "transient_target_offline", metadata: new { errorType = type, message, targetMachineId, requestId });
+                    break;
+                }
                 SetStatus($"Server error: {message}");
                 PlaySound(SoundAction.Error);
                 StopRemoteInputForwarding($"server error: {message}", announce: false);
@@ -909,6 +922,26 @@ public partial class MainWindow : Window
         }
 
         return values;
+    }
+
+    private bool IsTransientTargetOfflineError(string? message, string? targetMachineId, string? requestId)
+    {
+        if (string.IsNullOrWhiteSpace(message) ||
+            !message.Contains("Target machine not found or offline", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var matchesPendingTarget = _remoteInputMachine is not null &&
+            (string.IsNullOrWhiteSpace(targetMachineId) ||
+             string.Equals(_remoteInputMachine.Id, targetMachineId, StringComparison.OrdinalIgnoreCase));
+        var matchesPendingRequest = string.IsNullOrWhiteSpace(requestId) ||
+            string.IsNullOrWhiteSpace(_remoteInputRequestId) ||
+            string.Equals(_remoteInputRequestId, requestId, StringComparison.Ordinal);
+
+        return (_remoteInputPending || _remoteInputActive || matchesPendingTarget) &&
+            matchesPendingTarget &&
+            matchesPendingRequest;
     }
 
     private void HandleRemoteTtsAnnouncement(JsonElement root)
@@ -1368,7 +1401,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(20), token);
+            await Task.Delay(TimeSpan.FromSeconds(45), token);
         }
         catch (OperationCanceledException)
         {

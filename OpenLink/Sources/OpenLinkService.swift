@@ -213,6 +213,8 @@ class OpenLinkService: ObservableObject {
     private var listener: NWListener?
     private var connections: [String: NWConnection] = [:]
     private var webSocketTasks: [String: URLSessionWebSocketTask] = [:]
+    private var webSocketHeartbeatTimers: [String: Timer] = [:]
+    private var reconnectingWebSocketIds: Set<String> = []
     private var discoveryTimer: Timer?
     private var serviceHealthTimer: Timer?
     private var lastServiceOnline: Bool?
@@ -342,6 +344,11 @@ class OpenLinkService: ObservableObject {
             task.cancel(with: .normalClosure, reason: nil)
         }
         webSocketTasks.removeAll()
+        for (_, timer) in webSocketHeartbeatTimers {
+            timer.invalidate()
+        }
+        webSocketHeartbeatTimers.removeAll()
+        reconnectingWebSocketIds.removeAll()
 
         // Stop discovery
         discoveryTimer?.invalidate()
@@ -998,6 +1005,7 @@ class OpenLinkService: ObservableObject {
 
         updateServerOnlineStatus(serverId: server.id, isOnline: true)
         if isLocalRegistration {
+            startWebSocketHeartbeat(for: server, machineInfo: machineInfo)
             refreshLocalMachinePresence()
         } else {
             markMachineConnected(id: server.id, sessionId: nil)
@@ -1060,6 +1068,8 @@ class OpenLinkService: ObservableObject {
                 self?.runtimeLog("websocket receive failed for \(serverId): \(error.localizedDescription)")
                 self?.updateServerOnlineStatus(serverId: serverId, isOnline: false)
                 self?.webSocketTasks.removeValue(forKey: serverId)
+                self?.stopWebSocketHeartbeat(for: serverId)
+                self?.scheduleLocalSignalingReconnectIfNeeded(serverId: serverId, reason: error.localizedDescription)
                 self?.sendDiagnosticEvent("signaling_receive_failed", serverId: serverId, outcome: "error", metadata: [
                     "error": error.localizedDescription
                 ])
@@ -1074,6 +1084,13 @@ class OpenLinkService: ObservableObject {
         }
 
         switch type {
+        case "connected":
+            runtimeLog("signaling connected serverId=\(serverId) connectionId=\(json["connectionId"] as? String ?? "unknown") version=\(json["version"] as? String ?? "unknown")")
+        case "session_created", "host_session_ok", "host-session-ok", "handshake_ack", "pong":
+            updateServerOnlineStatus(serverId: serverId, isOnline: true)
+            if type != "pong" {
+                runtimeLog("received \(type) for \(serverId)")
+            }
         case "remote_command":
             let result = processRemoteCommand(json["command"] as? String ?? "", parameters: json)
             sendWebSocketResponse(result, serverId: serverId)
@@ -1422,6 +1439,68 @@ class OpenLinkService: ObservableObject {
         }
 
         return preferredWebSocketTaskId(for: serverId)
+    }
+
+    private func startWebSocketHeartbeat(for server: PairedServer, machineInfo: [String: Any]) {
+        stopWebSocketHeartbeat(for: server.id)
+        let timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            self?.sendWebSocketHeartbeat(server: server, machineInfo: machineInfo)
+        }
+        webSocketHeartbeatTimers[server.id] = timer
+        RunLoop.main.add(timer, forMode: .common)
+        sendWebSocketHeartbeat(server: server, machineInfo: machineInfo)
+    }
+
+    private func stopWebSocketHeartbeat(for serverId: String) {
+        webSocketHeartbeatTimers[serverId]?.invalidate()
+        webSocketHeartbeatTimers.removeValue(forKey: serverId)
+    }
+
+    private func sendWebSocketHeartbeat(server: PairedServer, machineInfo: [String: Any]) {
+        guard let task = webSocketTasks[server.id] else {
+            stopWebSocketHeartbeat(for: server.id)
+            scheduleLocalSignalingReconnectIfNeeded(serverId: server.id, reason: "missing websocket task")
+            return
+        }
+
+        let payload: [String: Any] = [
+            "type": "ping",
+            "machineInfo": machineInfo,
+            "connectionPolicy": globalConnectionPolicy(),
+            "timestamp": Int(Date().timeIntervalSince1970 * 1000)
+        ]
+
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let string = String(data: data, encoding: .utf8) else {
+            return
+        }
+
+        task.send(.string(string)) { [weak self] error in
+            guard let error else { return }
+            DispatchQueue.main.async {
+                self?.runtimeLog("websocket heartbeat failed for \(server.id): \(error.localizedDescription)")
+                self?.webSocketTasks.removeValue(forKey: server.id)
+                self?.stopWebSocketHeartbeat(for: server.id)
+                self?.scheduleLocalSignalingReconnectIfNeeded(serverId: server.id, reason: error.localizedDescription)
+            }
+        }
+    }
+
+    private func scheduleLocalSignalingReconnectIfNeeded(serverId: String, reason: String) {
+        let localId = localStableMachineId()
+        guard serverId == localId, isRunning, !reconnectingWebSocketIds.contains(serverId) else {
+            return
+        }
+
+        reconnectingWebSocketIds.insert(serverId)
+        runtimeLog("scheduling local signaling reconnect for \(serverId): \(reason)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self else { return }
+            self.reconnectingWebSocketIds.remove(serverId)
+            if self.isRunning && self.webSocketTasks[serverId] == nil {
+                self.ensureLocalSignalingConnection()
+            }
+        }
     }
 
     private func sendDiagnosticEvent(_ eventName: String, machine: OpenLinkMachine? = nil, serverId: String? = nil, outcome: String = "info", metadata: [String: Any] = [:]) {

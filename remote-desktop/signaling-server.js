@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const OPENLINK_SIGNALING_VERSION = '1.7.20-handshake-routing';
+const OPENLINK_SIGNALING_VERSION = '1.7.21-presence-heartbeat';
 const CONTROL_DIAGNOSTICS_DIR = process.env.OPENLINK_DIAGNOSTICS_DIR || path.join(__dirname, 'telemetry');
 const CONTROL_DIAGNOSTICS_FILE = path.join(CONTROL_DIAGNOSTICS_DIR, 'openlink-control-events.jsonl');
 
@@ -1347,6 +1347,9 @@ class OpenLinkSignalingServerV2 {
             case 'ping':
                 connection.lastPing = Date.now();
                 connection.lastActivity = new Date().toISOString();
+                if (data.machineInfo || data.hostInfo || data.clientInfo) {
+                    this.registerMachine(connectionId, data.machineInfo || data.hostInfo || data.clientInfo);
+                }
                 connection.ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
                 break;
 
