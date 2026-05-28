@@ -164,7 +164,7 @@ public sealed class OpenLinkUpdater
         }
 
         File.Move(tempPath, targetPath);
-        WritePendingUpdate(manifest.Version);
+        WritePendingUpdate(manifest.Version, manifest.ResolvedReleaseNotes);
         _announce("Update downloaded. OpenLink will install the update and restart.");
         StartInstallerAfterExit(updatesDir, targetPath, "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS");
         System.Windows.Application.Current.Dispatcher.Invoke(() =>
@@ -175,15 +175,13 @@ public sealed class OpenLinkUpdater
 
     private bool ConfirmUpdate(UpdateManifest manifest)
     {
-        var notes = manifest.ResolvedReleaseNotes;
-        var message = string.IsNullOrWhiteSpace(notes)
-            ? $"OpenLink {manifest.Version} is available. Install it now?"
-            : $"OpenLink {manifest.Version} is available.\n\n{notes}\n\nInstall it now?";
-        return System.Windows.MessageBox.Show(
-            message,
-            "OpenLink Update Available",
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Information) == System.Windows.MessageBoxResult.Yes;
+        var accepted = false;
+        System.Windows.Application.Current.Dispatcher.Invoke(() =>
+        {
+            var dialog = new WhatIsNewDialog(manifest.Version, manifest.ResolvedReleaseNotes, updatePrompt: true);
+            accepted = dialog.ShowDialog() == true;
+        });
+        return accepted;
     }
 
     private static void StartInstallerAfterExit(string updatesDir, string installerPath, string installerArguments)
@@ -287,12 +285,14 @@ if (Test-Path -LiteralPath $InstalledAppPath) {
         return Regex.Replace(value.Trim(), @"[^0-9A-Fa-f]", "").ToLowerInvariant();
     }
 
-    private static void WritePendingUpdate(string version)
+    private static void WritePendingUpdate(string version, string releaseNotes)
     {
         try
         {
             Directory.CreateDirectory(OpenLinkSettingsStore.SettingsDirectory);
             File.WriteAllText(Path.Combine(OpenLinkSettingsStore.SettingsDirectory, "pending-update-success.txt"), version);
+            File.WriteAllText(Path.Combine(OpenLinkSettingsStore.SettingsDirectory, "last-whats-new-version.txt"), version);
+            File.WriteAllText(Path.Combine(OpenLinkSettingsStore.SettingsDirectory, "last-whats-new-notes.txt"), releaseNotes);
         }
         catch
         {

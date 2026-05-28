@@ -19,6 +19,15 @@ namespace OpenLink.Windows;
 
 public partial class MainWindow : Window
 {
+    private const string CurrentWhatIsNewNotes =
+        """
+        - Screen-reader readouts now use native UI Automation live-region events on Windows and NSAccessibility announcements on macOS.
+        - OpenLink now shows a tCast-style What is New dialog after updates and keeps release notes available from the File menu.
+        - macOS Settings now opens in a real foreground window and can be reopened from the app menu.
+        - Trusted or owned devices can request remote OpenLink settings, while guest settings requests require local approval.
+        - macOS keyboard permission recovery messages now include the bundled helper and clearer approval steps.
+        """;
+
     private ClientWebSocket? _socket;
     private CancellationTokenSource? _socketCancellation;
     private OpenLinkSettings _settings = OpenLinkSettingsStore.Load();
@@ -482,6 +491,11 @@ public partial class MainWindow : Window
     private void CheckUpdatesMenuItem_Click(object sender, RoutedEventArgs e)
     {
         _ = CheckForUpdatesAsync(interactive: true);
+    }
+
+    private void WhatIsNewMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        ShowWhatIsNewDialog(GetLastWhatIsNewVersion(), GetLastWhatIsNewNotes());
     }
 
     private void QuitMenuItem_Click(object sender, RoutedEventArgs e)
@@ -1611,12 +1625,52 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(version))
             {
                 SetStatus($"OpenLink updated to {version}.");
+                ShowWhatIsNewDialog(version, GetLastWhatIsNewNotes());
             }
         }
         catch
         {
             // A stale marker should not interrupt startup.
         }
+    }
+
+    private void ShowWhatIsNewDialog(string version, string notes)
+    {
+        var dialog = new WhatIsNewDialog(version, notes)
+        {
+            Owner = this
+        };
+        dialog.ShowDialog();
+    }
+
+    private static string GetLastWhatIsNewVersion()
+    {
+        var path = Path.Combine(OpenLinkSettingsStore.SettingsDirectory, "last-whats-new-version.txt");
+        if (File.Exists(path))
+        {
+            var version = File.ReadAllText(path).Trim();
+            if (!string.IsNullOrWhiteSpace(version))
+            {
+                return version;
+            }
+        }
+
+        return typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "1.7.24";
+    }
+
+    private static string GetLastWhatIsNewNotes()
+    {
+        var path = Path.Combine(OpenLinkSettingsStore.SettingsDirectory, "last-whats-new-notes.txt");
+        if (File.Exists(path))
+        {
+            var notes = File.ReadAllText(path).Trim();
+            if (!string.IsNullOrWhiteSpace(notes))
+            {
+                return notes;
+            }
+        }
+
+        return CurrentWhatIsNewNotes;
     }
 
     private void StartAudioBridge(string reason)

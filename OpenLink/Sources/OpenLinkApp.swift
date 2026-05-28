@@ -16,17 +16,28 @@ struct OpenLinkApp: App {
                 }
                 .keyboardShortcut(",", modifiers: [.command])
             }
+            CommandMenu("File") {
+                Button("What is New") {
+                    openWhatIsNew()
+                }
+            }
         }
     }
 }
 
 extension Notification.Name {
     static let openOpenLinkSettingsWindow = Notification.Name("openOpenLinkSettingsWindow")
+    static let openOpenLinkWhatIsNewWindow = Notification.Name("openOpenLinkWhatIsNewWindow")
 }
 
 private func openOpenLinkSettings() {
     NSApplication.shared.activate(ignoringOtherApps: true)
     NotificationCenter.default.post(name: .openOpenLinkSettingsWindow, object: nil)
+}
+
+private func openWhatIsNew() {
+    NSApplication.shared.activate(ignoringOtherApps: true)
+    NotificationCenter.default.post(name: .openOpenLinkWhatIsNewWindow, object: nil)
 }
 
 private func minimizeOpenLinkMainWindow() {
@@ -47,10 +58,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)
         NotificationCenter.default.addObserver(self, selector: #selector(openSettingsWindowFromNotification(_:)), name: .openOpenLinkSettingsWindow, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(openWhatIsNewWindowFromNotification(_:)), name: .openOpenLinkWhatIsNewWindow, object: nil)
         setupMenuBar()
         OpenLinkService.shared.start()
         configureMacLaunchAtLogin(UserDefaults.standard.bool(forKey: "launchAtLogin"))
         OpenLinkUpdater.shared.checkAutomatically()
+        showPendingWhatIsNewIfNeeded()
         if !UserDefaults.standard.bool(forKey: "startMinimizedStatusMenu") {
             showMainWindow()
         }
@@ -177,6 +190,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
             action: #selector(openSettingsFromMenu(_:)),
             to: menu,
             help: "Opens OpenLink settings."
+        )
+        addActionItem(
+            "What is New",
+            action: #selector(openWhatIsNewFromMenu(_:)),
+            to: menu,
+            help: "Opens the latest OpenLink release notes."
         )
         addActionItem(
             "Quit OpenLink",
@@ -441,8 +460,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         openOpenLinkSettings()
     }
 
+    @objc private func openWhatIsNewFromMenu(_ sender: NSMenuItem) {
+        openWhatIsNew()
+    }
+
     @objc private func openSettingsWindowFromNotification(_ notification: Notification) {
         showSettingsWindow()
+    }
+
+    @objc private func openWhatIsNewWindowFromNotification(_ notification: Notification) {
+        showWhatIsNewWindow()
+    }
+
+    private func showWhatIsNewWindow() {
+        WhatIsNewWindowController(
+            version: WhatIsNewWindowController.lastVersion(),
+            releaseNotes: WhatIsNewWindowController.lastNotes()
+        ).showWindow()
+    }
+
+    private func showPendingWhatIsNewIfNeeded() {
+        guard let pending = WhatIsNewWindowController.consumePendingInstallNotice() else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            WhatIsNewWindowController(version: pending.version, releaseNotes: pending.notes).showWindow()
+        }
     }
 
     @objc private func quitFromMenu(_ sender: NSMenuItem) {

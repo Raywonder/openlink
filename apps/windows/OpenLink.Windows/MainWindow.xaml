@@ -27,6 +27,7 @@
               KeyboardNavigation.TabNavigation="None">
             <MenuItem Header="_File">
                 <MenuItem Header="_Settings" Click="SettingsButton_Click" />
+                <MenuItem Header="_What is New" Click="WhatIsNewMenuItem_Click" />
                 <MenuItem Header="Check for _Updates" Click="CheckUpdatesMenuItem_Click" />
                 <Separator />
                 <MenuItem Header="_Minimize to Tray" Click="QuitMenuItem_Click" />

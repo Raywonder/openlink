@@ -21,12 +21,16 @@ struct OpenLinkUpdateManifest: Decodable {
     }
 
     let version: String
+    let notes: String?
+    let releaseNotes: String?
     let downloadURL: String?
     let sha256: String?
     let platforms: [String: Platform]?
 
     enum CodingKeys: String, CodingKey {
         case version
+        case notes
+        case releaseNotes = "release_notes"
         case downloadURL = "download_url"
         case sha256
         case platforms
@@ -47,6 +51,13 @@ struct OpenLinkUpdateManifest: Decodable {
 
     var macSha256: String? {
         platforms?["macos-x64"]?.sha256 ?? platforms?["macos"]?.sha256 ?? platforms?["mac"]?.sha256 ?? sha256
+    }
+
+    var resolvedReleaseNotes: String {
+        if let releaseNotes, !releaseNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return releaseNotes
+        }
+        return notes ?? ""
     }
 }
 
@@ -81,6 +92,13 @@ final class OpenLinkUpdater {
             }
 
             await announce("OpenLink \(manifest.version) is available.", interactive: true)
+            if interactive {
+                let shouldInstall = await confirmUpdate(manifest)
+                guard shouldInstall else {
+                    await announce("OpenLink update postponed.", interactive: true)
+                    return
+                }
+            }
             guard interactive || UserDefaults.standard.bool(forKey: "installUpdatesAutomatically") else { return }
             try await downloadAndInstall(manifest)
         } catch {
@@ -133,6 +151,7 @@ final class OpenLinkUpdater {
         }
         try FileManager.default.moveItem(at: tempURL, to: target)
         try verifyChecksumIfNeeded(fileURL: target, expected: manifest.macSha256)
+        try writePendingWhatIsNew(version: manifest.version, notes: manifest.resolvedReleaseNotes)
         try stageAndRunInstaller(downloadURL: target, version: manifest.version)
     }
 
@@ -209,5 +228,22 @@ sleep 2
         let alert = NSAlert()
         alert.messageText = message
         alert.runModal()
+    }
+
+    @MainActor
+    private func confirmUpdate(_ manifest: OpenLinkUpdateManifest) -> Bool {
+        let dialog = WhatIsNewWindowController(
+            version: manifest.version,
+            releaseNotes: manifest.resolvedReleaseNotes,
+            updatePrompt: true
+        )
+        return dialog.runModal() == .alertFirstButtonReturn
+    }
+
+    private func writePendingWhatIsNew(version: String, notes: String) throws {
+        let directory = updatesDirectory.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try version.write(to: directory.appendingPathComponent("last-whats-new-version.txt"), atomically: true, encoding: .utf8)
+        try notes.write(to: directory.appendingPathComponent("last-whats-new-notes.txt"), atomically: true, encoding: .utf8)
     }
 }
