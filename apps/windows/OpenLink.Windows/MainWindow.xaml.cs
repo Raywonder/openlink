@@ -319,7 +319,7 @@ public partial class MainWindow : Window
 
         if (_settings.StartMinimizedToTrayOnLaunch)
         {
-            Hide();
+            HideOpenLinkWindow();
         }
     }
 
@@ -505,7 +505,7 @@ public partial class MainWindow : Window
         HideToTrayForActiveSession();
         if (IsVisible)
         {
-            Hide();
+            HideOpenLinkWindow();
         }
         _trayIcon.ShowBalloonTip(2500, "OpenLink", "OpenLink is minimized to the tray. Use the tray menu to quit.", Forms.ToolTipIcon.Info);
     }
@@ -1330,7 +1330,7 @@ public partial class MainWindow : Window
         AddLog($"Remote keyboard forwarding enabled for {_remoteInputMachine.DisplayName} ({_remoteInputMachine.Platform}).");
         SetStatus(message ?? $"Keyboard is now being sent to {_remoteInputMachine.DisplayName}. Press Control Alt Backslash for controller actions. Press Control Alt Escape to return keyboard to this computer.");
         PlaySound(SoundAction.Connect);
-        Hide();
+        HideOpenLinkWindow();
     }
 
     private void StopRemoteInputForwarding(string? reason = null)
@@ -2859,7 +2859,7 @@ public partial class MainWindow : Window
             }
             if (hasRemoteSession)
             {
-                Hide();
+                HideOpenLinkWindow();
             }
         };
         if (IsVisible && WindowState != WindowState.Minimized)
@@ -3059,7 +3059,7 @@ public partial class MainWindow : Window
         _controllerActionsMenuOpen = false;
         if (_remoteInputActive || _remoteInputPending)
         {
-            Hide();
+            HideOpenLinkWindow();
         }
     }
 
@@ -3252,7 +3252,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        Hide();
+        HideOpenLinkWindow();
         _trayIcon.ShowBalloonTip(4000, "OpenLink", $"Connected. Press Control Alt Backslash for controller actions. Escape closes that menu and keeps OpenLink in the tray.", Forms.ToolTipIcon.Info);
     }
 
@@ -3343,9 +3343,16 @@ public partial class MainWindow : Window
 
     private void ShowFromTray()
     {
+        ShowInTaskbar = true;
         Show();
         WindowState = WindowState.Normal;
         Activate();
+    }
+
+    private void HideOpenLinkWindow()
+    {
+        ShowInTaskbar = false;
+        Hide();
     }
 
     private async Task ConnectToLastAutoConnectMachineAsync()
@@ -3467,7 +3474,7 @@ public partial class MainWindow : Window
         }
 
         e.Cancel = true;
-        Hide();
+        HideOpenLinkWindow();
         _trayIcon.ShowBalloonTip(2000, "OpenLink", "OpenLink is still running. Use the tray menu to disconnect or quit.", Forms.ToolTipIcon.Info);
     }
 

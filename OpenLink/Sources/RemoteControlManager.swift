@@ -1128,10 +1128,18 @@ class RemoteControlManager: ObservableObject {
 
         switch type {
         case "start_interaction":
-            let accessibilityTrusted = requestAccessibilityTrustPromptIfNeeded()
+            let trustSnapshot = accessibilityTrustSnapshot()
+            let accessibilityTrusted = trustSnapshot.afterPrompt
             let canReceiveInput = inputForwardingEnabled && accessibilityTrusted
+            let karabinerStatus = KarabinerIntegration.shared.status()
             let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.openlink.app"
-            let blockedMessage = remoteInputBlockedMessage(accessibilityTrusted: accessibilityTrusted)
+            let bundlePath = Bundle.main.bundlePath
+            let executablePath = Bundle.main.executablePath ?? ""
+            let processName = ProcessInfo.processInfo.processName
+            let blockedMessage = remoteInputBlockedMessage(
+                accessibilityTrusted: accessibilityTrusted,
+                karabinerStatus: karabinerStatus
+            )
             let permissionAction = accessibilityTrusted
                 ? "Open OpenLink settings and enable remote input forwarding for trusted sessions."
                 : "Open System Settings, then Privacy and Security, then enable OpenLink in Accessibility and Input Monitoring. If screen sharing is needed, enable Screen Recording too."
@@ -1145,13 +1153,22 @@ class RemoteControlManager: ObservableObject {
                 "receivingControl": canReceiveInput,
                 "inputForwardingEnabled": inputForwardingEnabled,
                 "accessibilityTrusted": accessibilityTrusted,
+                "accessibilityTrustedBeforePrompt": trustSnapshot.direct,
+                "accessibilityTrustPromptResult": trustSnapshot.afterPrompt,
                 "inputMonitoringMayBeRequired": inputForwardingEnabled && !accessibilityTrusted,
+                "keyboardDriver": "macos-cgevent",
+                "karabinerVirtualHID": karabinerStatus.dictionary,
+                "diagnosticBundleIdentifier": bundleIdentifier,
+                "diagnosticBundlePath": bundlePath,
+                "diagnosticExecutablePath": executablePath,
+                "diagnosticProcessName": processName,
                 "permissionAction": permissionAction,
                 "permissionRecoveryCommand": "/Applications/OpenLink.app/Contents/Resources/openlink-macos-permission-helper.sh --open",
                 "permissionResetCommand": "/Applications/OpenLink.app/Contents/Resources/openlink-macos-permission-helper.sh --reset-stale",
                 "permissionAlternatives": [
                     "If the Mac user can interact locally, ask them to approve OpenLink in Accessibility, Input Monitoring, and Screen Recording.",
                     "If the Mac user cannot interact locally but an admin has shell access, run the OpenLink permission helper to open the right panes or reset stale prompts.",
+                    "Karabiner-Elements can improve future virtual-HID keyboard reliability once its driver extension is enabled, but OpenLink still needs macOS Accessibility trust for the current CGEvent input path.",
                     "Silent approval of these macOS permissions requires an admin-managed PPPC/MDM profile for \(bundleIdentifier); normal apps and scripts cannot grant them by themselves.",
                     "As a fallback, use another approved remote-access path such as NVDA Remote or local SSH to complete the approval."
                 ],
@@ -1205,26 +1222,26 @@ class RemoteControlManager: ObservableObject {
         inputForwardingEnabled && AXIsProcessTrusted()
     }
 
-    private func remoteInputBlockedMessage(accessibilityTrusted: Bool) -> String {
+    private func remoteInputBlockedMessage(accessibilityTrusted: Bool, karabinerStatus: KarabinerStatus) -> String {
         if !inputForwardingEnabled {
             return "OpenLink on this Mac has remote input forwarding disabled. Accessibility can be approved and control will still be blocked until OpenLink remote input forwarding is enabled for trusted sessions."
         }
 
         if !accessibilityTrusted {
-            return "OpenLink on this Mac is not trusted for Accessibility yet. A macOS permission prompt was requested. Enable the same OpenLink app in Accessibility and Input Monitoring, or run the bundled OpenLink permission helper from an admin shell, then choose Start Using again."
+            return "OpenLink on this Mac is not trusted for Accessibility yet. A macOS permission prompt was requested. Enable the same OpenLink app in Accessibility and Input Monitoring, or run the bundled OpenLink permission helper from an admin shell, then choose Start Using again. \(karabinerStatus.summary)"
         }
 
         return "OpenLink on this Mac cannot receive remote input yet. Check OpenLink remote input settings and macOS privacy approvals, then choose Start Using again."
     }
 
-    private func requestAccessibilityTrustPromptIfNeeded() -> Bool {
+    private func accessibilityTrustSnapshot() -> (direct: Bool, afterPrompt: Bool) {
         if AXIsProcessTrusted() {
-            return true
+            return (true, true)
         }
 
         let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         let options = [promptKey: true] as CFDictionary
-        return AXIsProcessTrustedWithOptions(options)
+        return (false, AXIsProcessTrustedWithOptions(options))
     }
 
     private func sendMessage(_ message: [String: Any], completion: @escaping (Bool) -> Void) {
@@ -1271,10 +1288,13 @@ class RemoteControlManager: ObservableObject {
             handleRemoteCommand(json)
         case "start_interaction", "pause_interaction", "controller_disconnect", "disconnect_user", "input_event", "key_event":
             if let response = handleSignalingMessage(json) {
-                if type == "start_interaction", let controllerMachineId = controllerMachineId(from: json) {
+                let success = (response["success"] as? Bool) ?? true
+                if type == "start_interaction", success, let controllerMachineId = controllerMachineId(from: json) {
                     OpenLinkAudioBridge.shared.startCapture(targetMachineId: controllerMachineId) { [weak self] frame in
                         self?.sendMessage(frame) { _ in }
                     }
+                } else if type == "start_interaction", !success {
+                    OpenLinkAudioBridge.shared.stopCapture()
                 } else if type == "pause_interaction" || type == "controller_disconnect" || type == "disconnect_user" {
                     OpenLinkAudioBridge.shared.stopCapture()
                 }

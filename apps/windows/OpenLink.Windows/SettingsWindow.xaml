@@ -132,6 +132,35 @@
                     <CheckBox x:Name="AllowKeyboardCoUseBox"
                               Margin="0,0,0,8"
                               Content="Allow both keyboards while sharing control" />
+                    <CheckBox x:Name="AutoConnectTrustedMachinesBox"
+                              Margin="0,0,0,8"
+                              Content="Auto-connect trusted machines" />
+                    <CheckBox x:Name="AllowRemoteApplicationLaunchBox"
+                              Margin="0,0,0,8"
+                              Content="Allow trusted machines to list, focus, quit, and relaunch apps" />
+                    <CheckBox x:Name="AllowRemoteSettingsManagementBox"
+                              Margin="0,0,0,8"
+                              Content="Allow remote settings management" />
+                    <CheckBox x:Name="AllowTrustedOwnerRemoteSettingsChangesBox"
+                              Margin="0,0,0,8"
+                              Content="Trusted or owned devices can open settings quietly" />
+                    <CheckBox x:Name="RequireApprovalForGuestRemoteSettingsChangesBox"
+                              Margin="0,0,0,8"
+                              Content="Guest settings requests require local approval" />
+                    <CheckBox x:Name="LockLocalSettingsDuringRemoteOwnerSessionBox"
+                              Margin="0,0,0,8"
+                              Content="Lock local settings while an owner is connected" />
+                    <CheckBox x:Name="RequireApprovalForNewDevicesBox"
+                              Margin="0,0,0,8"
+                              Content="Ask before allowing a new device" />
+                    <CheckBox x:Name="TamperProtectionEnabledBox"
+                              Content="Tamper detection: block local quit during owned remote sessions" />
+                </StackPanel>
+            </TabItem>
+
+            <TabItem Header="Audio">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="14">
                     <CheckBox x:Name="AllowMicrophoneAudioBox"
                               Margin="0,0,0,8"
                               Content="Allow microphone audio" />
@@ -167,7 +196,15 @@
                     <ComboBox x:Name="AsioDriverBox"
                               Margin="0,0,0,8"
                               IsEditable="False"
-                              AutomationProperties.LabeledBy="{Binding ElementName=AsioDriverLabel}" />
+                              AutomationProperties.Name="ASIO driver"
+                              AutomationProperties.HelpText="Choose the ASIO or ASIO4ALL driver for low-latency remote playback. Choose System default audio driver to use normal Windows audio."
+                              AutomationProperties.LabeledBy="{Binding ElementName=AsioDriverLabel}">
+                        <ComboBox.ItemContainerStyle>
+                            <Style TargetType="{x:Type ComboBoxItem}">
+                                <Setter Property="AutomationProperties.Name" Value="{Binding Content, RelativeSource={RelativeSource Self}}" />
+                            </Style>
+                        </ComboBox.ItemContainerStyle>
+                    </ComboBox>
                     <Label x:Name="AsioLatencyLabel"
                            Content="ASIO latency"
                            Target="{Binding ElementName=AsioLatencySlider}" />
@@ -193,30 +230,14 @@
                     <CheckBox x:Name="UseVoiceLinkAudioFallbackBox"
                               Margin="0,0,0,8"
                               Content="Use VoiceLink audio fallback if native audio cannot connect" />
-                    <CheckBox x:Name="AutoConnectTrustedMachinesBox"
-                              Margin="0,0,0,8"
-                              Content="Auto-connect trusted machines" />
-                    <CheckBox x:Name="AllowRemoteApplicationLaunchBox"
-                              Margin="0,0,0,8"
-                              Content="Allow trusted machines to list, focus, quit, and relaunch apps" />
-                    <CheckBox x:Name="AllowRemoteSettingsManagementBox"
-                              Margin="0,0,0,8"
-                              Content="Allow remote settings management" />
-                    <CheckBox x:Name="AllowTrustedOwnerRemoteSettingsChangesBox"
-                              Margin="0,0,0,8"
-                              Content="Trusted or owned devices can open settings quietly" />
-                    <CheckBox x:Name="RequireApprovalForGuestRemoteSettingsChangesBox"
-                              Margin="0,0,0,8"
-                              Content="Guest settings requests require local approval" />
-                    <CheckBox x:Name="LockLocalSettingsDuringRemoteOwnerSessionBox"
-                              Margin="0,0,0,8"
-                              Content="Lock local settings while an owner is connected" />
-                    <CheckBox x:Name="RequireApprovalForNewDevicesBox"
-                              Margin="0,0,0,8"
-                              Content="Ask before allowing a new device" />
-                    <CheckBox x:Name="TamperProtectionEnabledBox"
-                              Content="Tamper detection: block local quit during owned remote sessions" />
+                    <Label x:Name="VoiceLinkAudioFallbackLabel"
+                           Content="VoiceLink audio fallback"
+                           Target="{Binding ElementName=VoiceLinkAudioFallbackBox}" />
+                    <TextBox x:Name="VoiceLinkAudioFallbackBox"
+                             Margin="0,0,0,8"
+                             AutomationProperties.LabeledBy="{Binding ElementName=VoiceLinkAudioFallbackLabel}" />
                 </StackPanel>
+                </ScrollViewer>
             </TabItem>
 
             <TabItem Header="Accessibility">
@@ -330,7 +351,6 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <Label x:Name="UpdateManifestLabel"
@@ -362,15 +382,6 @@
                               Grid.Column="1"
                               Content="Enable local private server when entitled" />
 
-                    <Label x:Name="VoiceLinkAudioFallbackLabel"
-                           Grid.Row="3"
-                           Grid.Column="0"
-                           Content="VoiceLink audio fallback"
-                           Target="{Binding ElementName=VoiceLinkAudioFallbackBox}" />
-                    <TextBox x:Name="VoiceLinkAudioFallbackBox"
-                             Grid.Row="3"
-                             Grid.Column="1"
-                             AutomationProperties.LabeledBy="{Binding ElementName=VoiceLinkAudioFallbackLabel}" />
                 </Grid>
             </TabItem>
         </TabControl>

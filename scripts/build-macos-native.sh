@@ -3,14 +3,42 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="$REPO_ROOT/dist/native-macos"
+
+for env_file in \
+    "$REPO_ROOT/.env" \
+    "$HOME/dev/appstore/voicelink/macos_signing.env" \
+    "$HOME/dev/appstore/voicelink/ios_build_keychain.env" \
+    "$HOME/dev/appstore/.env" \
+    "$HOME/dev/local-mac-secrets.env"
+do
+    if [[ -f "$env_file" ]]; then
+        set -a
+        # shellcheck disable=SC1090
+        source "$env_file" >/dev/null 2>&1 || true
+        set +a
+    fi
+done
+
 SIGN_IDENTITY="${OPENLINK_MACOS_SIGN_IDENTITY:-}"
-SIGN_KEYCHAIN="${OPENLINK_MACOS_KEYCHAIN:-}"
+SIGN_KEYCHAIN="${OPENLINK_MACOS_KEYCHAIN:-$HOME/Library/Keychains/tcast-build.keychain-db}"
 PROVISIONING_PROFILE="${OPENLINK_MACOS_PROVISIONING_PROFILE:-}"
 ENTITLEMENTS="${OPENLINK_MACOS_ENTITLEMENTS:-$REPO_ROOT/packaging/macos-openlink.entitlements}"
 INSTALL_LOCAL="${OPENLINK_INSTALL_LOCAL:-0}"
 LAUNCH_LOCAL="${OPENLINK_LAUNCH_LOCAL:-0}"
 
 mkdir -p "$OUT_DIR"
+
+if [[ -n "${MACOS_SIGNING_KEYCHAIN_PASSWORD:-}" && -n "$SIGN_KEYCHAIN" && -f "$SIGN_KEYCHAIN" ]]; then
+    security unlock-keychain -p "$MACOS_SIGNING_KEYCHAIN_PASSWORD" "$SIGN_KEYCHAIN" >/dev/null
+fi
+
+if [[ -z "$SIGN_IDENTITY" && -n "$SIGN_KEYCHAIN" && -f "$SIGN_KEYCHAIN" ]]; then
+    SIGN_IDENTITY="$(
+        security find-identity -v -p codesigning "$SIGN_KEYCHAIN" 2>/dev/null |
+        awk -F '"' '/Developer ID Application:/ { print $1; exit }' |
+        awk '{ print $2 }'
+    )"
+fi
 
 bundle_app() {
     local name="$1"

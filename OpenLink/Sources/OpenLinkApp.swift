@@ -1,5 +1,6 @@
 import SwiftUI
 import ServiceManagement
+import AppKit
 
 @main
 struct OpenLinkApp: App {
@@ -584,7 +585,7 @@ struct OpenLinkMainWindowView: View {
                         Table(service.machines) {
                             TableColumn("Device") { machine in
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(machine.displayName)
+                                    Text(service.isCurrentMachine(machine) ? "\(machine.displayName) (This Mac)" : machine.displayName)
                                         .fontWeight(.medium)
                                     Text(machine.machineHostname)
                                         .font(.caption)
@@ -592,7 +593,7 @@ struct OpenLinkMainWindowView: View {
                                 }
                             }
                             TableColumn("Status") { machine in
-                                Label(machine.isOnline ? "Online" : "Offline", systemImage: machine.isOnline ? "checkmark.circle.fill" : "circle")
+                                Label(machineStatusText(machine), systemImage: machine.isOnline ? "checkmark.circle.fill" : "circle")
                                     .foregroundStyle(machine.isOnline ? .green : .secondary)
                             }
                             TableColumn("Domain") { machine in
@@ -626,6 +627,13 @@ struct OpenLinkMainWindowView: View {
             return "Online and waiting for a connection"
         }
         return "Stopped"
+    }
+
+    private func machineStatusText(_ machine: OpenLinkMachine) -> String {
+        if service.isCurrentMachine(machine) {
+            return service.isRunning ? "This Mac, online" : "This Mac, stopped"
+        }
+        return machine.isOnline ? "Online" : "Offline"
     }
 
     private var activeDomainText: String {
@@ -1127,8 +1135,11 @@ enum OpenLinkSettingsSection: String, CaseIterable, Identifiable {
     case general = "General"
     case connection = "Connection"
     case machines = "Devices"
+    case permissions = "Permissions"
     case audio = "Audio"
     case accessibility = "Accessibility"
+    case updates = "Updates"
+    case advanced = "Advanced"
     case security = "Security"
 
     var id: String { rawValue }
@@ -1138,8 +1149,11 @@ enum OpenLinkSettingsSection: String, CaseIterable, Identifiable {
         case .general: "gearshape"
         case .connection: "antenna.radiowaves.left.and.right"
         case .machines: "desktopcomputer"
+        case .permissions: "checkmark.shield"
         case .audio: "speaker.wave.2"
         case .accessibility: "accessibility"
+        case .updates: "arrow.triangle.2.circlepath"
+        case .advanced: "slider.horizontal.3"
         case .security: "lock.shield"
         }
     }
@@ -1204,10 +1218,16 @@ struct SettingsView: View {
             ConnectionSettingsTab()
         case .machines:
             MachinesSettingsTab()
+        case .permissions:
+            PermissionsSettingsTab()
         case .audio:
             AudioSettingsTab()
         case .accessibility:
             AccessibilitySettingsTab()
+        case .updates:
+            UpdatesSettingsTab()
+        case .advanced:
+            AdvancedSettingsTab()
         case .security:
             SecuritySettingsTab()
         }
@@ -1291,8 +1311,11 @@ struct MachineActionPanel: View {
 struct GeneralSettingsTab: View {
     @AppStorage("launchAtLogin") private var launchAtLogin = true
     @AppStorage("startMinimizedStatusMenu") private var startMinimizedStatusMenu = true
+    @AppStorage("minimizeToTrayOnClose") private var minimizeToTrayOnClose = true
     @AppStorage("autoReconnectOnLaunch") private var autoReconnectOnLaunch = true
     @AppStorage("autoStartInteractionOnConnect") private var autoStartInteractionOnConnect = true
+    @AppStorage("startHostingOnLaunch") private var startHostingOnLaunch = false
+    @AppStorage("copyLinkWhenHostingStarts") private var copyLinkWhenHostingStarts = true
     @AppStorage("showInDock") private var showInDock = false
     @AppStorage("showOnlineOfflineNotifications") private var showOnlineOfflineNotifications = true
     @AppStorage("showConnectionNotifications") private var showConnectionNotifications = true
@@ -1314,6 +1337,9 @@ struct GeneralSettingsTab: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Toggle("Launch at login", isOn: $launchAtLogin)
                     Toggle("Start minimized to status menu", isOn: $startMinimizedStatusMenu)
+                    Toggle("Minimize to status menu when closing", isOn: $minimizeToTrayOnClose)
+                    Toggle("Start hosting when OpenLink opens", isOn: $startHostingOnLaunch)
+                    Toggle("Copy hosting link when hosting starts", isOn: $copyLinkWhenHostingStarts)
                     Toggle("Auto-reconnect trusted machines on launch", isOn: $autoReconnectOnLaunch)
                     Toggle("Start using a device immediately after connecting", isOn: $autoStartInteractionOnConnect)
                     Toggle("Show in Dock", isOn: $showInDock)
@@ -1419,9 +1445,31 @@ struct ConnectionSettingsTab: View {
     @StateObject private var service = OpenLinkService.shared
     @AppStorage("serverPort") private var serverPort = 3000
     @AppStorage("discoveryTimeout") private var discoveryTimeout = 10.0
+    @AppStorage("sessionPrefix") private var sessionPrefix = "mac"
+    @AppStorage("customSignalingServerAccessEnabled") private var customSignalingServerAccessEnabled = false
+    @AppStorage("openLinkBackendUrl") private var openLinkBackendUrl = OpenLinkService.canonicalWebSocketURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
+            GroupBox("Default Server") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("Default server", selection: defaultServerBinding) {
+                        ForEach(OpenLinkService.approvedWebSocketURLs, id: \.self) { url in
+                            Text(url).tag(url)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    TextField("Session prefix", text: $sessionPrefix)
+                        .textFieldStyle(.roundedBorder)
+                    Toggle("Show custom signal server field when entitled", isOn: $customSignalingServerAccessEnabled)
+                    if customSignalingServerAccessEnabled {
+                        TextField("Custom signal server URL", text: $openLinkBackendUrl)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+
             // Connection Mode section
             GroupBox("Connection Mode") {
                 Picker("Mode", selection: $service.connectionMode) {
@@ -1467,6 +1515,17 @@ struct ConnectionSettingsTab: View {
             Spacer()
         }
         .padding()
+    }
+
+    private var defaultServerBinding: Binding<String> {
+        Binding(
+            get: {
+                OpenLinkService.isApprovedDefaultWebSocketURL(openLinkBackendUrl)
+                    ? openLinkBackendUrl
+                    : OpenLinkService.canonicalWebSocketURL
+            },
+            set: { openLinkBackendUrl = $0 }
+        )
     }
 }
 
@@ -1605,19 +1664,34 @@ struct MachinesSettingsTab: View {
 }
 
 struct AudioSettingsTab: View {
+    @AppStorage("allowAudio") private var allowAudio = true
+    @AppStorage("allowMicrophoneAudio") private var allowMicrophoneAudio = true
+    @AppStorage("allowSystemAudio") private var allowSystemAudio = true
+    @AppStorage("remoteAudioVolumePercent") private var remoteAudioVolumePercent = 100.0
+    @AppStorage("localAudioCaptureVolumePercent") private var localAudioCaptureVolumePercent = 100.0
     @AppStorage("autoMuteRemoteAudio") private var autoMuteRemoteAudio = false
     @AppStorage("muteRemoteAudioWhenInactive") private var muteRemoteAudioWhenInactive = true
     @AppStorage("autoMutedProcesses") private var autoMutedProcesses = "VoiceOver, Music"
+    @AppStorage("useVoiceLinkAudioFallback") private var useVoiceLinkAudioFallback = true
+    @AppStorage("voiceLinkAudioFallbackUrl") private var voiceLinkAudioFallbackUrl = "wss://voicelink.tappedin.fm/openlink/audio"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             GroupBox("Remote Audio") {
                 VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Allow remote audio", isOn: $allowAudio)
+                    Toggle("Allow microphone audio", isOn: $allowMicrophoneAudio)
+                    Toggle("Allow system audio", isOn: $allowSystemAudio)
+                    SliderRow(title: "Remote audio volume", value: $remoteAudioVolumePercent, range: 0...150, step: 10, suffix: "%")
+                    SliderRow(title: "Local audio capture volume", value: $localAudioCaptureVolumePercent, range: 0...150, step: 10, suffix: "%")
                     Toggle("Ask controlled computer to auto-mute audio on connect", isOn: $autoMuteRemoteAudio)
                     Toggle("Mute remote audio when connection is minimized for local use", isOn: $muteRemoteAudioWhenInactive)
                     TextField("Auto-muted process names", text: $autoMutedProcesses)
                         .textFieldStyle(.roundedBorder)
                         .accessibilityLabel("Auto-muted process names")
+                    Toggle("Use VoiceLink audio fallback if native audio cannot connect", isOn: $useVoiceLinkAudioFallback)
+                    TextField("VoiceLink audio fallback URL", text: $voiceLinkAudioFallbackUrl)
+                        .textFieldStyle(.roundedBorder)
                 }
                 .padding(.vertical, 8)
             }
@@ -1654,20 +1728,85 @@ struct AudioSettingsTab: View {
 }
 
 struct AccessibilitySettingsTab: View {
+    @AppStorage("announceStatusChanges") private var announceStatusChanges = true
+    @AppStorage("detailedScreenReaderMessages") private var detailedScreenReaderMessages = true
+    @AppStorage("soundAlerts") private var soundAlerts = true
+    @AppStorage("reduceMotion") private var reduceMotion = false
     @AppStorage("showOnlineOfflineNotifications") private var showOnlineOfflineNotifications = true
     @AppStorage("showConnectionNotifications") private var showConnectionNotifications = true
     @AppStorage("showElapsedConnectionTime") private var showElapsedConnectionTime = true
     @AppStorage("announceConnectionStrength") private var announceConnectionStrength = true
     @AppStorage("enableDiagnosticSending") private var enableDiagnosticSending = true
+    @AppStorage("enableLocalTtsHelper") private var enableLocalTtsHelper = false
+    @AppStorage("localTtsVoiceId") private var localTtsVoiceId = ""
+    @AppStorage("localTtsRate") private var localTtsRate = 1.0
+    @AppStorage("localTtsVolumePercent") private var localTtsVolumePercent = 100.0
+    @AppStorage("ttsFallbackMode") private var ttsFallbackMode = "screen-reader"
+    @State private var karabinerStatus = KarabinerIntegration.shared.status()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             GroupBox("Announcements") {
                 VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Announce connection and hosting status changes", isOn: $announceStatusChanges)
+                    Toggle("Use detailed screen reader messages", isOn: $detailedScreenReaderMessages)
+                    Toggle("Play sound alerts", isOn: $soundAlerts)
+                    Toggle("Reduce motion and animation", isOn: $reduceMotion)
                     Toggle("Show online and offline notifications", isOn: $showOnlineOfflineNotifications)
                     Toggle("Show device connection notifications", isOn: $showConnectionNotifications)
                     Toggle("Show elapsed connection time", isOn: $showElapsedConnectionTime)
                     Toggle("Announce connection strength before connecting", isOn: $announceConnectionStrength)
+                }
+                .padding(.vertical, 8)
+            }
+
+            GroupBox("Local TTS Helper") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Use local OpenLink TTS helper for announcements", isOn: $enableLocalTtsHelper)
+                    Picker("TTS voice", selection: $localTtsVoiceId) {
+                        Text("System default").tag("")
+                        ForEach(NSSpeechSynthesizer.availableVoices, id: \.self) { voice in
+                            Text(Self.voiceName(for: voice)).tag(voice.rawValue)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    SliderRow(title: "Speech rate", value: $localTtsRate, range: 0.5...2.0, step: 0.1, suffix: "x")
+                    SliderRow(title: "TTS volume", value: $localTtsVolumePercent, range: 0...100, step: 10, suffix: "%")
+                    Picker("TTS fallback", selection: $ttsFallbackMode) {
+                        Text("Screen reader").tag("screen-reader")
+                        Text("Browser or app speech").tag("browser")
+                        Text("Silent").tag("silent")
+                    }
+                    .pickerStyle(.menu)
+                    Button("Test Voice") {
+                        testLocalTtsVoice()
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+
+            GroupBox("Keyboard Input Driver") {
+                VStack(alignment: .leading, spacing: 12) {
+                    settingsStatusRow("Current input path", value: "macOS CGEvent")
+                    settingsStatusRow("Karabiner-Elements", value: karabinerStatus.isInstalled ? "Installed" : "Not installed")
+                    settingsStatusRow("Karabiner virtual HID driver", value: karabinerStatus.isReady ? "Enabled" : "Not ready")
+                    Text(karabinerStatus.summary)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("OpenLink keeps CGEvent as the active stable keyboard path for now. Karabiner virtual HID is detected here so it can be used as an optional lower-level driver path after the Mac permissions and control handshake are stable.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button("Refresh Keyboard Driver Status") {
+                            karabinerStatus = KarabinerIntegration.shared.status()
+                        }
+                        Button("Open Karabiner-Elements") {
+                            KarabinerIntegration.shared.openKarabinerApp()
+                        }
+                        .disabled(!karabinerStatus.isInstalled)
+                    }
                 }
                 .padding(.vertical, 8)
             }
@@ -1685,6 +1824,158 @@ struct AccessibilitySettingsTab: View {
             Spacer()
         }
         .padding()
+    }
+
+    private func settingsStatusRow(_ label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private static func voiceName(for voice: NSSpeechSynthesizer.VoiceName) -> String {
+        let attributes = NSSpeechSynthesizer.attributes(forVoice: voice)
+        return attributes[NSSpeechSynthesizer.VoiceAttributeKey.name] as? String ?? voice.rawValue
+    }
+
+    private func testLocalTtsVoice() {
+        let voice = localTtsVoiceId.isEmpty ? nil : NSSpeechSynthesizer.VoiceName(rawValue: localTtsVoiceId)
+        let speaker = NSSpeechSynthesizer(voice: voice)
+        speaker?.rate = Float(180.0 * localTtsRate)
+        speaker?.volume = Float(localTtsVolumePercent / 100.0)
+        speaker?.startSpeaking("OpenLink local TTS helper is ready for remote announcements.")
+    }
+}
+
+struct PermissionsSettingsTab: View {
+    @StateObject private var service = OpenLinkService.shared
+    @AppStorage("allowClipboardSync") private var allowClipboardSync = true
+    @AppStorage("allowFileTransfer") private var allowFileTransfer = true
+    @AppStorage("allowAudio") private var allowAudio = true
+    @AppStorage("allowDropInAccess") private var allowDropInAccess = false
+    @AppStorage("allowSwapControl") private var allowSwapControl = true
+    @AppStorage("allowKeyboardCoUse") private var allowKeyboardCoUse = true
+    @AppStorage("autoConnectTrustedMachines") private var autoConnectTrustedMachines = true
+    @AppStorage("allowRemoteApplicationLaunch") private var allowRemoteApplicationLaunch = true
+    @AppStorage("requireApprovalForNewDevices") private var requireApprovalForNewDevices = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            GroupBox("Session Permissions") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Allow remote control after approval", isOn: $service.allowRemoteControl)
+                    Toggle("Allow clipboard sync", isOn: $allowClipboardSync)
+                    Toggle("Allow file transfer", isOn: $allowFileTransfer)
+                    Toggle("Allow remote audio", isOn: $allowAudio)
+                    Toggle("Allow trusted machines to drop in", isOn: $allowDropInAccess)
+                    Toggle("Allow swap control with trusted machines", isOn: $allowSwapControl)
+                    Toggle("Allow both keyboards while sharing control", isOn: $allowKeyboardCoUse)
+                    Toggle("Auto-connect trusted machines", isOn: $autoConnectTrustedMachines)
+                    Toggle("Allow trusted machines to list, focus, quit, and relaunch apps", isOn: $allowRemoteApplicationLaunch)
+                    Toggle("Ask before allowing a new device", isOn: $requireApprovalForNewDevices)
+                }
+                .padding(.vertical, 8)
+            }
+
+            Text("These are the Mac defaults for new trusted sessions. Per-device policies still live in the Devices tab and are sent with the connection handshake.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+        }
+        .padding()
+    }
+}
+
+struct UpdatesSettingsTab: View {
+    @AppStorage("checkForUpdatesAutomatically") private var checkForUpdatesAutomatically = true
+    @AppStorage("installUpdatesAutomatically") private var installUpdatesAutomatically = true
+    @AppStorage("updateChannel") private var updateChannel = "Stable"
+    @AppStorage("updateManifestUrl") private var updateManifestUrl = OpenLinkUpdater.cloudUpdateManifestURL
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            GroupBox("Updates") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Check for updates automatically", isOn: $checkForUpdatesAutomatically)
+                    Toggle("Download and install updates automatically when safe", isOn: $installUpdatesAutomatically)
+                    Picker("Update channel", selection: $updateChannel) {
+                        Text("Stable").tag("Stable")
+                        Text("Beta").tag("Beta")
+                    }
+                    .pickerStyle(.segmented)
+                    TextField("Update manifest URL", text: $updateManifestUrl)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Check for Updates Now") {
+                        Task { await OpenLinkUpdater.shared.check(interactive: true) }
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+            Spacer()
+        }
+        .padding()
+    }
+}
+
+struct AdvancedSettingsTab: View {
+    @AppStorage("localServerEnabled") private var localServerEnabled = false
+    @AppStorage("localServerPort") private var localServerPort = "8765"
+    @AppStorage("customSignalingServerAccessEnabled") private var customSignalingServerAccessEnabled = false
+    @AppStorage("openLinkBackendUrl") private var openLinkBackendUrl = OpenLinkService.canonicalWebSocketURL
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            GroupBox("Local Server") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Enable local private server when entitled", isOn: $localServerEnabled)
+                    TextField("Local server port", text: $localServerPort)
+                        .textFieldStyle(.roundedBorder)
+                }
+                .padding(.vertical, 8)
+            }
+
+            GroupBox("Advanced Signaling") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Enable custom signal server settings", isOn: $customSignalingServerAccessEnabled)
+                    TextField("Signal server URL", text: $openLinkBackendUrl)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!customSignalingServerAccessEnabled)
+                    Text("Normal client builds use approved OpenLink servers. Custom server fields are only for entitled private signal-server installs.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 8)
+            }
+            Spacer()
+        }
+        .padding()
+    }
+}
+
+struct SliderRow: View {
+    let title: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+    let suffix: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("\(title): \(formattedValue)\(suffix)")
+            Slider(value: $value, in: range, step: step)
+        }
+    }
+
+    private var formattedValue: String {
+        if step >= 1 {
+            return "\(Int(value))"
+        }
+        return String(format: "%.1f", value)
     }
 }
 

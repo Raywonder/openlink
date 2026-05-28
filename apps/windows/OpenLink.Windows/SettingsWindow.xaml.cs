@@ -263,10 +263,20 @@ public partial class SettingsWindow : Window
     private void LoadAsioDrivers()
     {
         AsioDriverBox.Items.Clear();
-        AsioDriverBox.Items.Add(new ComboBoxItem { Content = "" });
+        AsioDriverBox.Items.Add(new ComboBoxItem
+        {
+            Content = "System default audio driver",
+            Tag = "",
+            ToolTip = "Use normal Windows audio instead of ASIO."
+        });
         foreach (var driverName in OpenLinkAudioBridge.GetAsioDriverNames())
         {
-            AsioDriverBox.Items.Add(new ComboBoxItem { Content = driverName });
+            AsioDriverBox.Items.Add(new ComboBoxItem
+            {
+                Content = driverName,
+                Tag = driverName,
+                ToolTip = driverName
+            });
         }
     }
 
@@ -292,7 +302,8 @@ public partial class SettingsWindow : Window
     {
         foreach (var item in comboBox.Items.OfType<ComboBoxItem>())
         {
-            if (string.Equals(item.Content?.ToString(), value, StringComparison.OrdinalIgnoreCase))
+            var itemValue = item.Tag?.ToString() ?? item.Content?.ToString();
+            if (string.Equals(itemValue, value, StringComparison.OrdinalIgnoreCase))
             {
                 comboBox.SelectedItem = item;
                 return;
@@ -305,7 +316,7 @@ public partial class SettingsWindow : Window
     private static string GetComboText(System.Windows.Controls.ComboBox comboBox, string fallback)
     {
         return comboBox.SelectedItem is ComboBoxItem item
-            ? item.Content?.ToString() ?? fallback
+            ? item.Tag?.ToString() ?? item.Content?.ToString() ?? fallback
             : string.IsNullOrWhiteSpace(comboBox.Text) ? fallback : comboBox.Text.Trim();
     }
 }

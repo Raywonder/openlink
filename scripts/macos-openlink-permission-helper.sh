@@ -11,11 +11,15 @@ OpenLink macOS permission helper
 Usage:
   openlink-macos-permission-helper.sh --open
   openlink-macos-permission-helper.sh --status
+  openlink-macos-permission-helper.sh --karabiner-status
+  openlink-macos-permission-helper.sh --karabiner-open
   openlink-macos-permission-helper.sh --reset-stale
 
 What this can do:
   - Open the exact macOS Privacy panes for Accessibility, Input Monitoring,
     Screen Recording, Screen & System Audio Recording, and Remote Desktop.
+  - Check whether Karabiner-Elements and its virtual HID driver are available
+    as an optional keyboard reliability assist.
   - Report whether the current OpenLink process is trusted for Accessibility
     and show OpenLink-related TCC rows when readable.
   - Reset stale Accessibility/Input Monitoring/Screen Recording/Remote Desktop
@@ -72,6 +76,40 @@ EOF
     done
 }
 
+karabiner_status() {
+    local cli="/Library/Application Support/org.pqrs/Karabiner-Elements/bin/karabiner_cli"
+    local virtual_hid_client="/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice/Applications/Karabiner-DriverKit-VirtualHIDDeviceClient.app/Contents/MacOS/Karabiner-DriverKit-VirtualHIDDeviceClient"
+    if [[ -x "${cli}" ]]; then
+        echo "Karabiner-Elements CLI: installed"
+        "${cli}" --version || true
+    else
+        echo "Karabiner-Elements CLI: not installed"
+    fi
+
+    if [[ -x "${virtual_hid_client}" ]]; then
+        echo "Karabiner virtual HID client: installed"
+    else
+        echo "Karabiner virtual HID client: not found"
+    fi
+
+    echo
+    echo "Karabiner virtual HID driver extension:"
+    systemextensionsctl list 2>/dev/null | grep -i "org.pqrs.Karabiner-DriverKit-VirtualHIDDevice\|Karabiner" || echo "No Karabiner virtual HID extension was reported by systemextensionsctl."
+
+    cat <<'EOF'
+
+OpenLink note:
+  Karabiner virtual HID may become a lower-level keyboard assist path after the
+  DriverKit extension and virtual HID client are installed and enabled. It does
+  not grant OpenLink Accessibility, Input Monitoring, Screen Recording, Remote
+  Desktop, or System Audio access.
+EOF
+}
+
+karabiner_open() {
+    open -b org.pqrs.Karabiner-Elements || open "/Applications/Karabiner-Elements.app" || open "/Applications" || true
+}
+
 reset_stale() {
     echo "Resetting stale macOS TCC entries for ${BUNDLE_ID}. This does not grant permission; it allows macOS to prompt again."
     tccutil reset Accessibility "${BUNDLE_ID}" || true
@@ -88,6 +126,12 @@ case "${1:---help}" in
         ;;
     --status)
         status
+        ;;
+    --karabiner-status)
+        karabiner_status
+        ;;
+    --karabiner-open)
+        karabiner_open
         ;;
     --reset-stale)
         reset_stale
