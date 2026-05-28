@@ -236,6 +236,10 @@ public partial class MainWindow : Window
                 Dispatcher.BeginInvoke(CloseControllerActionsMenuSilently);
                 return new IntPtr(1);
             }
+            if (_controllerActionsMenuOpen)
+            {
+                return CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
+            }
 
             if (_remoteInputActive && _remoteInputMachine is not null)
             {
@@ -1181,7 +1185,7 @@ public partial class MainWindow : Window
             System.Windows.Clipboard.SetText(_activeLink);
         }
 
-        SetStatus($"Hosting. Session {_activeSessionId}. {ConnectionShortcutHelp}");
+        SetStatus($"OpenLink online and waiting for a remote connection. Session {_activeSessionId}. {ConnectionShortcutHelp}");
         _ = SendDiagnosticEventAsync("hosting_started", outcome: "success", metadata: new
         {
             sessionId = _activeSessionId ?? "",
@@ -1966,6 +1970,24 @@ public partial class MainWindow : Window
 
     private bool IsConnectableMachine(MachineRecord machine) => !IsLocalMachine(machine);
 
+    private MachineRecord? GetActiveRemoteMachine()
+    {
+        if ((_remoteInputActive || _remoteInputPending) && _remoteInputMachine is { } remoteMachine && IsConnectableMachine(remoteMachine))
+        {
+            return remoteMachine;
+        }
+
+        if (string.IsNullOrWhiteSpace(_activeMachineName))
+        {
+            return null;
+        }
+
+        return _machines.FirstOrDefault(machine =>
+            IsConnectableMachine(machine) &&
+            machine.IsOnline &&
+            string.Equals(_activeMachineName, machine.DisplayName, StringComparison.OrdinalIgnoreCase));
+    }
+
     private bool IsActiveRemoteSessionFor(MachineRecord machine)
     {
         if (!IsConnectableMachine(machine))
@@ -2011,25 +2033,17 @@ public partial class MainWindow : Window
             return false;
         }
 
-        SetStatus($"Cannot {action} {machine.DisplayName}; this is the current device. Select another machine.");
+        SetStatus($"This is the local OpenLink device. It is online and waiting for a connection, but it cannot {action} itself. Choose a remote device instead.");
         MachinesListBox.Focus();
         return true;
     }
 
     private MachineRecord? FindControlledSideMachine()
     {
-        var local = _machines.FirstOrDefault(item =>
-            item.IsOnline &&
-            (string.Equals(item.Id, Environment.MachineName, StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(item.MachineHostname, Environment.MachineName, StringComparison.OrdinalIgnoreCase)));
+        var activeRemote = GetActiveRemoteMachine();
 
-        if (local is not null)
-        {
-            return local;
-        }
-
-        return _sessionActive
-            ? _machines.FirstOrDefault(item => item.IsOnline) ?? SelectedMachine
+        return activeRemote is not null
+            ? activeRemote
             : null;
     }
 
@@ -2116,9 +2130,9 @@ public partial class MainWindow : Window
         MachineStore.Save(_machines);
         SetStatus($"Disconnect requested for {machine.DisplayName}.");
         NotifyDeviceConnection(Environment.MachineName, machine.DisplayName, false);
-        if (!_machines.Any(item => item.IsOnline))
+        if (GetActiveRemoteMachine() is null)
         {
-            _sessionActive = false;
+            _sessionActive = _socket?.State == WebSocketState.Open;
             StopRemoteInputForwarding();
             _audioBridge.Stop();
             UpdateConnectedUiState();
@@ -2143,8 +2157,8 @@ public partial class MainWindow : Window
         MachineStore.Save(_machines);
         SetStatus($"Disconnected from {machine.DisplayName}.");
         NotifyDeviceConnection(Environment.MachineName, machine.DisplayName, false);
-        _sessionActive = _machines.Any(item => item.IsOnline);
-        if (!_sessionActive)
+        _sessionActive = _socket?.State == WebSocketState.Open || GetActiveRemoteMachine() is not null;
+        if (GetActiveRemoteMachine() is null)
         {
             StopRemoteInputForwarding();
             _audioBridge.Stop();
@@ -2606,10 +2620,10 @@ public partial class MainWindow : Window
 
         if (connected)
         {
-            _activeMachineName = local.DisplayName;
-            local.TouchConnected(_activeSessionId);
+            local.IsOnline = true;
+            local.LastSessionId = string.IsNullOrWhiteSpace(_activeSessionId) ? local.LastSessionId : _activeSessionId;
         }
-        else if (_hostingStartedAt is not null)
+        else
         {
             local.TouchDisconnected();
         }
@@ -2631,6 +2645,8 @@ public partial class MainWindow : Window
 
     private void RebuildTrayMenu()
     {
+        var activeRemoteMachine = GetActiveRemoteMachine();
+        var hasActiveRemoteSession = activeRemoteMachine is not null;
         var menu = new Forms.ContextMenuStrip();
         menu.AccessibleName = "OpenLink tray menu";
         menu.AccessibleDescription = "OpenLink connection status and actions";
@@ -2638,12 +2654,12 @@ public partial class MainWindow : Window
         AddTrayMenuItem(menu, $"Keyboard help: {ConnectionShortcutHelp}", "Keyboard shortcuts for connection actions", (_, _) => ShowFromTray());
         AddTrayMenuItem(menu, $"Health status: {StripStatusPrefix(_serviceHealthText)}", "Refresh connection health", (_, _) => _ = RefreshServiceHealthAsync());
         AddTrayMenuItem(menu, $"Signal status: {StripStatusPrefix(_connectionStrengthText)}", "Refresh signal strength", (_, _) => _ = RefreshServiceHealthAsync());
-        if (_sessionActive && _settings.ShowElapsedConnectionTime)
+        if (hasActiveRemoteSession && _settings.ShowElapsedConnectionTime)
         {
             AddTrayMenuItem(menu, $"Elapsed time: {GetElapsedConnectionText()}", "Elapsed connection time", (_, _) => ShowFromTray());
         }
         menu.Items.Add(new Forms.ToolStripSeparator());
-        if (!_sessionActive)
+        if (!hasActiveRemoteSession)
         {
             AddTrayMenuItem(menu, "Show OpenLink", "Open the main OpenLink window", (_, _) => ShowFromTray());
             var lastConnectableMachine = GetLastConnectableMachine();
@@ -2670,9 +2686,9 @@ public partial class MainWindow : Window
             AddTrayMenuItem(menu, "OpenLink actions", "Connection actions", (_, _) => { }, enabled: false);
         }
 
-        var activeMachine = SelectedMachine is { } selected && IsConnectableMachine(selected)
+        var activeMachine = activeRemoteMachine ?? (SelectedMachine is { } selected && IsConnectableMachine(selected)
             ? selected
-            : _machines.FirstOrDefault(item => item.IsOnline && IsConnectableMachine(item));
+            : _machines.FirstOrDefault(item => item.IsOnline && IsConnectableMachine(item)));
         if (activeMachine is not null)
         {
             AddTrayMenuItem(menu, $"Start Using {activeMachine.DisplayName}", "Start full keyboard control and remote audio for the selected machine", (_, _) => _ = StartUsingMachineAsync(activeMachine));
@@ -2764,7 +2780,7 @@ public partial class MainWindow : Window
             System.Windows.Application.Current.Shutdown();
         });
             _trayIcon.ContextMenuStrip = menu;
-        var tooltip = _sessionActive ? GetElapsedConnectionText() : _serviceHealthText;
+        var tooltip = hasActiveRemoteSession ? GetElapsedConnectionText() : GetTraySessionStatusText();
         _trayIcon.Text = tooltip.Length > 63 ? tooltip[..63] : tooltip;
     }
 
@@ -3201,18 +3217,22 @@ public partial class MainWindow : Window
 
     private string GetTraySessionStatusText()
     {
-        if (_sessionActive)
+        if (_remoteInputActive && GetActiveRemoteMachine() is { } controllingMachine)
         {
-            var machineName = string.IsNullOrWhiteSpace(_activeMachineName) ? "a remote machine" : _activeMachineName;
-            return $"Session status: connected to {machineName}";
+            return $"OpenLink status: controlling {controllingMachine.DisplayName}";
+        }
+
+        if (GetActiveRemoteMachine() is { } activeRemoteMachine)
+        {
+            return $"OpenLink status: connected to {activeRemoteMachine.DisplayName}";
         }
 
         if (_socket?.State == WebSocketState.Open)
         {
-            return "Session status: hosting";
+            return "OpenLink status: online, active, waiting for a connection. Click here to connect to a remote device.";
         }
 
-        return "Session status: not connected";
+        return "OpenLink status: waiting for a connection. Click here to connect to a remote device.";
     }
 
     private static string StripStatusPrefix(string text)
@@ -3239,9 +3259,10 @@ public partial class MainWindow : Window
 
     private void UpdateConnectedUiState()
     {
-        SettingsButton.Visibility = _sessionActive ? Visibility.Collapsed : Visibility.Visible;
-        SessionTextBox.IsEnabled = !_sessionActive;
-        ServerCombo.IsEnabled = !_sessionActive;
+        var hasActiveRemoteSession = GetActiveRemoteMachine() is not null;
+        SettingsButton.Visibility = hasActiveRemoteSession ? Visibility.Collapsed : Visibility.Visible;
+        SessionTextBox.IsEnabled = _socket?.State != WebSocketState.Open;
+        ServerCombo.IsEnabled = _socket?.State != WebSocketState.Open;
         RebuildTrayMenu();
     }
 
@@ -3253,7 +3274,10 @@ public partial class MainWindow : Window
         }
 
         HideOpenLinkWindow();
-        _trayIcon.ShowBalloonTip(4000, "OpenLink", $"Connected. Press Control Alt Backslash for controller actions. Escape closes that menu and keeps OpenLink in the tray.", Forms.ToolTipIcon.Info);
+        var message = GetActiveRemoteMachine() is null
+            ? "OpenLink is online and waiting for a connection. Use the tray menu to connect to a remote device."
+            : "Connected. Press Control Alt Backslash for controller actions. Escape closes that menu and keeps OpenLink in the tray.";
+        _trayIcon.ShowBalloonTip(4000, "OpenLink", message, Forms.ToolTipIcon.Info);
     }
 
     private async Task RefreshServiceHealthAsync(bool showTransitionNotifications = true)
@@ -3404,13 +3428,21 @@ public partial class MainWindow : Window
 
     private string GetElapsedConnectionText()
     {
+        var activeRemoteMachine = GetActiveRemoteMachine();
+        if (activeRemoteMachine is null)
+        {
+            return _socket?.State == WebSocketState.Open
+                ? "OpenLink online, active, waiting for a connection"
+                : "OpenLink waiting for a connection";
+        }
+
         if (_hostingStartedAt is null)
         {
             return "Connected time unknown";
         }
 
         var elapsed = DateTimeOffset.Now - _hostingStartedAt.Value;
-        var machineName = string.IsNullOrWhiteSpace(_activeMachineName) ? "current machine" : _activeMachineName;
+        var machineName = activeRemoteMachine.DisplayName;
         if (elapsed.TotalHours >= 1)
         {
             return $"Connected to {machineName} for {(int)elapsed.TotalHours}h {elapsed.Minutes}m";
