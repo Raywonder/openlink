@@ -138,6 +138,11 @@
                     Margin="0,0,8,0"
                     Content="Restart"
                     Click="RestartMachine_Click" />
+            <Button x:Name="ShutdownMachineButton"
+                    MinWidth="96"
+                    Margin="0,0,8,0"
+                    Content="Shut Down"
+                    Click="ShutdownMachine_Click" />
             <Button x:Name="LockMachineButton"
                     MinWidth="96"
                     Margin="0,0,8,0"

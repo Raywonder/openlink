@@ -7,7 +7,8 @@ final class WhatIsNewWindowController {
     - OpenLink now shows a tCast-style What is New dialog after updates and keeps release notes available from the File menu.
     - macOS Settings now opens in a real foreground window and can be reopened from the app menu.
     - Trusted or owned devices can request remote OpenLink settings, while guest settings requests require local approval.
-    - macOS keyboard permission recovery messages now include the bundled helper and clearer approval steps.
+    - Ctrl Alt Backslash now waits for the key chord to release before opening controller actions, so the menu stays open for arrow-key navigation.
+    - Controller and machine menus now include local Settings, remote Settings, running apps and processes, audio controls, volume presets, lock, restart, shut down, and log out.
     """
 
     private let version: String
@@ -72,7 +73,7 @@ final class WhatIsNewWindowController {
             return value
         }
 
-        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.24"
+        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.25"
     }
 
     static func lastNotes() -> String {

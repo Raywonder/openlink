@@ -155,6 +155,7 @@ public partial class MachineDetailsWindow : Window
     private void ForceQuitApplication_Click(object sender, RoutedEventArgs e) => _ = RunApplicationActionAsync("force_quit_application", SelectedApplication);
     private void QuitAndReopenApplication_Click(object sender, RoutedEventArgs e) => _ = RunApplicationActionAsync("quit_reopen_application", SelectedApplication);
     private void RestartMachine_Click(object sender, RoutedEventArgs e) => _ = RunApplicationActionAsync("restart_machine", null);
+    private void ShutdownMachine_Click(object sender, RoutedEventArgs e) => _ = RunApplicationActionAsync("shutdown_machine", null);
     private void LockMachine_Click(object sender, RoutedEventArgs e) => _ = RunApplicationActionAsync("lock_machine", null);
     private void LogoutMachine_Click(object sender, RoutedEventArgs e) => _ = RunApplicationActionAsync("logout_machine", null);
 
@@ -190,6 +191,7 @@ public partial class MachineDetailsWindow : Window
         }
 
         RestartMachineButton.Visibility = Visibility.Collapsed;
+        ShutdownMachineButton.Visibility = Visibility.Collapsed;
         LogoutMachineButton.Visibility = Visibility.Collapsed;
         LockMachineButton.Content = "Lock This Device";
         System.Windows.Automation.AutomationProperties.SetName(LockMachineButton, "Lock this device");
@@ -223,6 +225,7 @@ public partial class MachineDetailsWindow : Window
                 LockWorkStation();
                 break;
             case "restart_machine":
+            case "shutdown_machine":
             case "logout_machine":
                 System.Windows.MessageBox.Show(this, "Restart and log out requests are sent to the trusted remote machine. Local restart/log out is not performed from this dialog.", "OpenLink", MessageBoxButton.OK, MessageBoxImage.Information);
                 break;

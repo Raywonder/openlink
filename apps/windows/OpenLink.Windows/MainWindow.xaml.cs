@@ -25,7 +25,8 @@ public partial class MainWindow : Window
         - OpenLink now shows a tCast-style What is New dialog after updates and keeps release notes available from the File menu.
         - macOS Settings now opens in a real foreground window and can be reopened from the app menu.
         - Trusted or owned devices can request remote OpenLink settings, while guest settings requests require local approval.
-        - macOS keyboard permission recovery messages now include the bundled helper and clearer approval steps.
+        - Ctrl Alt Backslash now waits for the key chord to release before opening controller actions, so the menu stays open for arrow-key navigation.
+        - Controller and machine menus now include local Settings, remote Settings, running apps and processes, audio controls, volume presets, lock, restart, shut down, and log out.
         """;
 
     private ClientWebSocket? _socket;
@@ -916,6 +917,7 @@ public partial class MainWindow : Window
 
         if (!string.Equals(action, "list_applications", StringComparison.OrdinalIgnoreCase))
         {
+            HandleRemoteMachineControlAction(root, action);
             return;
         }
 
@@ -930,6 +932,88 @@ public partial class MainWindow : Window
             applications
         });
         SetStatus($"Sent {applications.Count} running applications to the controlling OpenLink machine.");
+    }
+
+    private void HandleRemoteMachineControlAction(JsonElement root, string? action)
+    {
+        var trustedOwner = root.TryGetProperty("trustedOwner", out var trustedOwnerElement) &&
+            trustedOwnerElement.ValueKind == JsonValueKind.True;
+        var accepted = trustedOwner && _settings.AllowRemoteApplicationLaunch;
+        var message = accepted
+            ? $"Remote {action?.Replace('_', ' ')} accepted by {Environment.MachineName}."
+            : $"Remote {action?.Replace('_', ' ')} is not allowed on {Environment.MachineName}.";
+
+        if (accepted)
+        {
+            switch (action)
+            {
+                case "set_audio_settings":
+                    ApplyRemoteAudioSettings(root);
+                    break;
+                case "lock_machine":
+                    LockWorkStation();
+                    break;
+                case "restart_machine":
+                    Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 0") { UseShellExecute = false });
+                    break;
+                case "shutdown_machine":
+                    Process.Start(new ProcessStartInfo("shutdown.exe", "/s /t 0") { UseShellExecute = false });
+                    break;
+                case "logout_machine":
+                    Process.Start(new ProcessStartInfo("shutdown.exe", "/l") { UseShellExecute = false });
+                    break;
+                default:
+                    accepted = false;
+                    message = $"Remote {action?.Replace('_', ' ')} is not supported on {Environment.MachineName}.";
+                    break;
+            }
+        }
+
+        _ = SendPeerAsync(new
+        {
+            type = "machine_management_action_ack",
+            action,
+            targetMachineId = GetSourceMachineId(root),
+            sourceMachineId = Environment.MachineName,
+            success = accepted,
+            message,
+            trustedOwner
+        });
+
+        SetStatus(message);
+    }
+
+    private void ApplyRemoteAudioSettings(JsonElement root)
+    {
+        if (!root.TryGetProperty("audioSettings", out var audioSettings) ||
+            audioSettings.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        if (audioSettings.TryGetProperty("allowMicrophoneAudio", out var microphoneElement) &&
+            (microphoneElement.ValueKind == JsonValueKind.True || microphoneElement.ValueKind == JsonValueKind.False))
+        {
+            _settings.AllowMicrophoneAudio = microphoneElement.GetBoolean();
+        }
+        if (audioSettings.TryGetProperty("allowSystemAudio", out var systemAudioElement) &&
+            (systemAudioElement.ValueKind == JsonValueKind.True || systemAudioElement.ValueKind == JsonValueKind.False))
+        {
+            _settings.AllowSystemAudio = systemAudioElement.GetBoolean();
+        }
+        if (audioSettings.TryGetProperty("remoteAudioVolumePercent", out var remoteVolumeElement) &&
+            remoteVolumeElement.TryGetInt32(out var remoteVolume))
+        {
+            _settings.RemoteAudioVolumePercent = Math.Clamp(remoteVolume, 0, 150);
+        }
+        if (audioSettings.TryGetProperty("localAudioCaptureVolumePercent", out var captureVolumeElement) &&
+            captureVolumeElement.TryGetInt32(out var captureVolume))
+        {
+            _settings.LocalAudioCaptureVolumePercent = Math.Clamp(captureVolume, 0, 150);
+        }
+
+        OpenLinkSettingsStore.Save(_settings);
+        _audioBridge.Configure(_settings, AddLog);
     }
 
     private void HandleMachineManagementActionAck(JsonElement root)
@@ -1655,7 +1739,7 @@ public partial class MainWindow : Window
             }
         }
 
-        return typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "1.7.24";
+        return typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "1.7.25";
     }
 
     private static string GetLastWhatIsNewNotes()
@@ -2418,6 +2502,26 @@ public partial class MainWindow : Window
     private void ToggleMachineClipboardMenuItem_Click(object sender, RoutedEventArgs e) => ToggleSelectedMachine(machine => machine.AllowClipboardSync = !machine.AllowClipboardSync, machine => $"Clipboard sync {(machine.AllowClipboardSync ? "allowed" : "blocked")} for {machine.DisplayName}.");
     private void ToggleMachineFileTransferMenuItem_Click(object sender, RoutedEventArgs e) => ToggleSelectedMachine(machine => machine.AllowFileTransfer = !machine.AllowFileTransfer, machine => $"File transfer {(machine.AllowFileTransfer ? "allowed" : "blocked")} for {machine.DisplayName}.");
 
+    private void OpenRemoteSettingsMenuItem_Click(object sender, RoutedEventArgs e) => SendSelectedMachineManagementAction("open_settings");
+    private void LockRemoteMachineMenuItem_Click(object sender, RoutedEventArgs e) => SendSelectedMachineManagementAction("lock_machine");
+    private void RestartRemoteMachineMenuItem_Click(object sender, RoutedEventArgs e) => SendSelectedMachineManagementAction("restart_machine");
+    private void ShutdownRemoteMachineMenuItem_Click(object sender, RoutedEventArgs e) => SendSelectedMachineManagementAction("shutdown_machine");
+    private void LogoutRemoteMachineMenuItem_Click(object sender, RoutedEventArgs e) => SendSelectedMachineManagementAction("logout_machine");
+
+    private void SendSelectedMachineManagementAction(string action)
+    {
+        if (SelectedMachine is not { } machine)
+        {
+            return;
+        }
+        if (TryBlockLocalMachineAction(machine, action.Replace('_', ' ')))
+        {
+            return;
+        }
+
+        _ = SendRemoteMachineActionAsync(machine, action, null);
+    }
+
     private void UseCanonicalDomainMenuItem_Click(object sender, RoutedEventArgs e) => ToggleSelectedMachine(machine => machine.DomainUsed = EndpointNormalizer.CanonicalShareHost, machine => $"Public link domain for {machine.DisplayName} set to {EndpointNormalizer.CanonicalShareHost}.");
 
     private void UseTailnetDomainMenuItem_Click(object sender, RoutedEventArgs e)
@@ -2703,7 +2807,15 @@ public partial class MainWindow : Window
             AddRecentConnectionsMenu(menu, lastMachine);
         }
         AddTrayMenuItem(menu, $"Machine Details for {lastMachine.DisplayName}", "Show device, connection, network, and application details", (_, _) => ShowMachineDetails(lastMachine));
+        AddTrayMenuItem(menu, $"Running Apps and Processes on {lastMachine.DisplayName}", $"List running applications and processes on {lastMachine.DisplayName}", (_, _) => ShowMachineDetails(lastMachine));
         AddTrayMenuItem(menu, $"Open Settings on {lastMachine.DisplayName}", $"Open OpenLink settings on {lastMachine.DisplayName} if this device is trusted or owned", (_, _) => _ = SendRemoteMachineActionAsync(lastMachine, "open_settings", null));
+        AddTrayMenuItem(menu, "Open Local Settings, Ctrl Comma", "Open OpenLink settings on this computer", (_, _) => SettingsButton_Click(this, new RoutedEventArgs()));
+        AddRemoteAudioMenu(menu, lastMachine);
+        menu.Items.Add(new Forms.ToolStripSeparator());
+        AddTrayMenuItem(menu, $"Lock {lastMachine.DisplayName}", $"Lock {lastMachine.DisplayName}", (_, _) => _ = SendRemoteMachineActionAsync(lastMachine, "lock_machine", null));
+        AddTrayMenuItem(menu, $"Restart {lastMachine.DisplayName}", $"Restart {lastMachine.DisplayName}", (_, _) => _ = SendRemoteMachineActionAsync(lastMachine, "restart_machine", null));
+        AddTrayMenuItem(menu, $"Shut Down {lastMachine.DisplayName}", $"Shut down {lastMachine.DisplayName}", (_, _) => _ = SendRemoteMachineActionAsync(lastMachine, "shutdown_machine", null));
+        AddTrayMenuItem(menu, $"Log Out {lastMachine.DisplayName}", $"Log out {lastMachine.DisplayName}", (_, _) => _ = SendRemoteMachineActionAsync(lastMachine, "logout_machine", null));
         if (hasRemoteSession)
         {
             menu.Items.Add(new Forms.ToolStripSeparator());
@@ -2767,6 +2879,69 @@ public partial class MainWindow : Window
         SetStatus(hasRemoteSession
             ? $"Controller actions for {lastMachine.DisplayName}. Use arrow keys to choose an action. Escape closes the menu and keeps OpenLink in the tray."
             : $"Connection actions for {lastMachine.DisplayName}. Use Recent Connections for another device. Escape closes the menu.");
+    }
+
+    private void AddRemoteAudioMenu(Forms.ContextMenuStrip menu, MachineRecord machine)
+    {
+        var audioMenu = new Forms.ToolStripMenuItem($"Audio Settings for {machine.DisplayName}")
+        {
+            AccessibleName = $"Audio settings for {machine.DisplayName}",
+            AccessibleDescription = $"Change remote audio and volume settings for {machine.DisplayName}"
+        };
+        audioMenu.DropDownItems.Add(CreateRemoteAudioMenuItem(
+            "Toggle Microphone Audio",
+            $"Toggle microphone audio on {machine.DisplayName}",
+            machine,
+            allowMicrophoneAudio: !machine.AllowMicrophoneAudio,
+            allowSystemAudio: null,
+            remoteAudioVolumePercent: null,
+            isChecked: machine.AllowMicrophoneAudio));
+        audioMenu.DropDownItems.Add(CreateRemoteAudioMenuItem(
+            "Toggle System Audio",
+            $"Toggle system audio on {machine.DisplayName}",
+            machine,
+            allowMicrophoneAudio: null,
+            allowSystemAudio: !machine.AllowSystemAudio,
+            remoteAudioVolumePercent: null,
+            isChecked: machine.AllowSystemAudio));
+        audioMenu.DropDownItems.Add(new Forms.ToolStripSeparator());
+
+        foreach (var volume in new[] { 50, 75, 100, 125, 150 })
+        {
+            audioMenu.DropDownItems.Add(CreateRemoteAudioMenuItem(
+                $"Remote Audio Volume {volume} Percent",
+                $"Set remote audio volume on {machine.DisplayName} to {volume} percent",
+                machine,
+                allowMicrophoneAudio: null,
+                allowSystemAudio: null,
+                remoteAudioVolumePercent: volume,
+                isChecked: null));
+        }
+
+        menu.Items.Add(audioMenu);
+    }
+
+    private Forms.ToolStripMenuItem CreateRemoteAudioMenuItem(
+        string text,
+        string accessibleDescription,
+        MachineRecord machine,
+        bool? allowMicrophoneAudio,
+        bool? allowSystemAudio,
+        int? remoteAudioVolumePercent,
+        bool? isChecked)
+    {
+        var item = new Forms.ToolStripMenuItem(text)
+        {
+            AccessibleName = text,
+            AccessibleDescription = accessibleDescription,
+            AccessibleRole = isChecked.HasValue
+                ? Forms.AccessibleRole.CheckButton
+                : Forms.AccessibleRole.MenuItem,
+            Checked = isChecked == true,
+            CheckOnClick = isChecked.HasValue
+        };
+        item.Click += (_, _) => _ = SendRemoteAudioSettingsAsync(machine, allowMicrophoneAudio, allowSystemAudio, remoteAudioVolumePercent);
+        return item;
     }
 
     private void AddRecentConnectionsMenu(Forms.ContextMenuStrip menu, MachineRecord currentMachine)
@@ -2841,6 +3016,7 @@ public partial class MainWindow : Window
         _controllerActionsMenuQueued = true;
         try
         {
+            await WaitForControllerHotkeyReleaseAsync();
             await Task.Delay(_remoteInputActive || _remoteInputPending ? 40 : 120);
             if (_controllerActionsMenuOpen && _controllerActionsMenu is not null)
             {
@@ -2854,6 +3030,26 @@ public partial class MainWindow : Window
         {
             _controllerActionsMenuQueued = false;
         }
+    }
+
+    private static async Task WaitForControllerHotkeyReleaseAsync()
+    {
+        for (var i = 0; i < 20 && IsControllerHotkeyChordDown(); i++)
+        {
+            await Task.Delay(25);
+        }
+    }
+
+    private static bool IsControllerHotkeyChordDown()
+    {
+        return IsKeyCurrentlyDown(VkControl) &&
+               IsKeyCurrentlyDown(VkMenu) &&
+               (IsKeyCurrentlyDown((int)VkOem5) || IsKeyCurrentlyDown(VkOem102));
+    }
+
+    private static bool IsKeyCurrentlyDown(int virtualKey)
+    {
+        return (GetAsyncKeyState(virtualKey) & unchecked((short)0x8000)) != 0;
     }
 
     private void CloseControllerActionsMenuSilently()
@@ -2943,6 +3139,40 @@ public partial class MainWindow : Window
             connectionPolicy = CreateConnectionPolicy()
         });
         SetStatus($"Sent {action.Replace('_', ' ')} request for {machine.DisplayName}.");
+    }
+
+    private async Task SendRemoteAudioSettingsAsync(
+        MachineRecord machine,
+        bool? allowMicrophoneAudio,
+        bool? allowSystemAudio,
+        int? remoteAudioVolumePercent)
+    {
+        await SendPeerAsync(new
+        {
+            type = "machine_management_action",
+            action = "set_audio_settings",
+            targetMachineId = machine.Id,
+            trustedOwner = machine.IsTrusted || machine.AllowDropIn || machine.AutoConnect,
+            machineInfo = CreateLocalMachineInfo(_activeServerUrl ?? GetServerUrl()),
+            audioSettings = new
+            {
+                allowMicrophoneAudio,
+                allowSystemAudio,
+                remoteAudioVolumePercent
+            }
+        });
+
+        if (allowMicrophoneAudio.HasValue)
+        {
+            machine.AllowMicrophoneAudio = allowMicrophoneAudio.Value;
+        }
+        if (allowSystemAudio.HasValue)
+        {
+            machine.AllowSystemAudio = allowSystemAudio.Value;
+        }
+        MachineStore.Save(_machines);
+
+        SetStatus($"Sent audio settings request for {machine.DisplayName}.");
     }
 
     private static Forms.ToolStripMenuItem AddTrayMenuItem(
@@ -3302,6 +3532,9 @@ public partial class MainWindow : Window
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool LockWorkStation();
 
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern IntPtr GetModuleHandle(string lpModuleName);

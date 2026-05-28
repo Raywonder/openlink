@@ -1081,8 +1081,79 @@ class OpenLinkService: ObservableObject {
             } else {
                 postStatusNotification(title: "OpenLink settings request", body: "A remote device requested settings access. Approve the device as trusted or disable guest approval before allowing remote settings changes.")
             }
+        case "set_audio_settings":
+            let trustedOwner = json["trustedOwner"] as? Bool ?? false
+            let accepted = trustedOwner
+            if accepted, let audioSettings = json["audioSettings"] as? [String: Any] {
+                if let allowMicrophoneAudio = audioSettings["allowMicrophoneAudio"] as? Bool {
+                    UserDefaults.standard.set(allowMicrophoneAudio, forKey: "allowMicrophoneAudio")
+                }
+                if let allowSystemAudio = audioSettings["allowSystemAudio"] as? Bool {
+                    UserDefaults.standard.set(allowSystemAudio, forKey: "allowSystemAudio")
+                }
+                if let remoteAudioVolumePercent = audioSettings["remoteAudioVolumePercent"] as? Int {
+                    UserDefaults.standard.set(max(0, min(150, remoteAudioVolumePercent)), forKey: "remoteAudioVolumePercent")
+                }
+            }
+            let message = accepted
+                ? "Audio settings updated on \(localStableMachineName())."
+                : "Audio settings request is not allowed on \(localStableMachineName())."
+            let response = responseForController([
+                "type": "machine_management_action_ack",
+                "action": "set_audio_settings",
+                "success": accepted,
+                "message": message,
+                "trustedOwner": trustedOwner
+            ], originalMessage: json, serverId: serverId)
+            sendWebSocketResponse(response, serverId: serverId, broadcast: true)
+            runtimeLog("remote audio settings request accepted=\(accepted) target=\(response["targetMachineId"] as? String ?? "unknown-controller")")
+        case "lock_machine", "restart_machine", "shutdown_machine", "logout_machine":
+            let trustedOwner = json["trustedOwner"] as? Bool ?? false
+            let accepted = trustedOwner
+            let message = accepted
+                ? "Remote \(action.replacingOccurrences(of: "_", with: " ")) accepted on \(localStableMachineName())."
+                : "Remote \(action.replacingOccurrences(of: "_", with: " ")) is not allowed on \(localStableMachineName())."
+            let response = responseForController([
+                "type": "machine_management_action_ack",
+                "action": action,
+                "success": accepted,
+                "message": message,
+                "trustedOwner": trustedOwner
+            ], originalMessage: json, serverId: serverId)
+            sendWebSocketResponse(response, serverId: serverId, broadcast: true)
+            runtimeLog("remote machine action \(action) accepted=\(accepted) target=\(response["targetMachineId"] as? String ?? "unknown-controller")")
+
+            if accepted {
+                runLocalMachineAction(action)
+            }
         default:
             break
+        }
+    }
+
+    private func runLocalMachineAction(_ action: String) {
+        switch action {
+        case "lock_machine":
+            launchProcess("/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession", arguments: ["-suspend"])
+        case "restart_machine":
+            launchProcess("/usr/bin/osascript", arguments: ["-e", "tell application \"System Events\" to restart"])
+        case "shutdown_machine":
+            launchProcess("/usr/bin/osascript", arguments: ["-e", "tell application \"System Events\" to shut down"])
+        case "logout_machine":
+            launchProcess("/usr/bin/osascript", arguments: ["-e", "tell application \"System Events\" to log out"])
+        default:
+            break
+        }
+    }
+
+    private func launchProcess(_ launchPath: String, arguments: [String]) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: launchPath)
+        process.arguments = arguments
+        do {
+            try process.run()
+        } catch {
+            runtimeLog("failed to run \(launchPath): \(error.localizedDescription)")
         }
     }
 

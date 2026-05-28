@@ -26,7 +26,7 @@
               KeyboardNavigation.IsTabStop="False"
               KeyboardNavigation.TabNavigation="None">
             <MenuItem Header="_File">
-                <MenuItem Header="_Settings" Click="SettingsButton_Click" />
+                <MenuItem Header="_Settings" InputGestureText="Ctrl+," Click="SettingsButton_Click" />
                 <MenuItem Header="_What is New" Click="WhatIsNewMenuItem_Click" />
                 <MenuItem Header="Check for _Updates" Click="CheckUpdatesMenuItem_Click" />
                 <Separator />
@@ -267,6 +267,11 @@
                                 <Separator />
                                 <MenuItem x:Name="RunningApplicationsContextItem" Header="Running Applications" Click="RunningApplicationsMenuItem_Click" />
                                 <MenuItem x:Name="MachineDetailsContextItem" Header="Machine Details" Click="MachineDetailsMenuItem_Click" />
+                                <MenuItem Header="Open Remote Settings" Click="OpenRemoteSettingsMenuItem_Click" />
+                                <MenuItem Header="Lock Remote Device" Click="LockRemoteMachineMenuItem_Click" />
+                                <MenuItem Header="Restart Remote Device" Click="RestartRemoteMachineMenuItem_Click" />
+                                <MenuItem Header="Shut Down Remote Device" Click="ShutdownRemoteMachineMenuItem_Click" />
+                                <MenuItem Header="Log Out Remote Device" Click="LogoutRemoteMachineMenuItem_Click" />
                                 <MenuItem Header="Remove From List" Click="RemoveMachineMenuItem_Click" />
                             </ContextMenu>
                         </ListBox.ContextMenu>
