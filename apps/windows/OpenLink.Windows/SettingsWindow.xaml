@@ -337,6 +337,10 @@
                     <CheckBox x:Name="EnableBrailleDisplaySupportBox"
                               Margin="0,0,0,8"
                               Content="Send OpenLink announcements to a braille display" />
+                    <CheckBox x:Name="RouteBrailleToRemoteWhenConnectedBox"
+                              Margin="0,0,0,8"
+                              Content="When connected, reserve the braille display for the remote machine"
+                              AutomationProperties.HelpText="When keyboard and audio control are starting or active, OpenLink sends remote screen reader and VoiceOver announcements to braille and keeps local status chatter off the display." />
                     <Label x:Name="BrailleProviderLabel"
                            Content="Braille provider"
                            Target="{Binding ElementName=BrailleProviderBox}" />

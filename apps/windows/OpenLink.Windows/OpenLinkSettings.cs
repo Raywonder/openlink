@@ -71,6 +71,7 @@ public sealed class OpenLinkSettings
     public string TtsFallbackMode { get; set; } = "screen-reader";
     public int LocalTtsPort { get; set; } = OpenLinkTtsService.DefaultPort;
     public bool EnableBrailleDisplaySupport { get; set; }
+    public bool RouteBrailleToRemoteWhenConnected { get; set; } = true;
     public string BrailleProvider { get; set; } = "auto";
     public string BrlttyExecutablePath { get; set; } = "";
 
@@ -147,6 +148,7 @@ public sealed class OpenLinkSettings
             TtsFallbackMode = TtsFallbackMode,
             LocalTtsPort = LocalTtsPort,
             EnableBrailleDisplaySupport = EnableBrailleDisplaySupport,
+            RouteBrailleToRemoteWhenConnected = RouteBrailleToRemoteWhenConnected,
             BrailleProvider = BrailleProvider,
             BrlttyExecutablePath = BrlttyExecutablePath,
             CheckForUpdatesAutomatically = CheckForUpdatesAutomatically,

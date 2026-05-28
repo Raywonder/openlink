@@ -12,6 +12,7 @@ Usage:
   openlink-macos-permission-helper.sh --open
   openlink-macos-permission-helper.sh --status
   openlink-macos-permission-helper.sh --karabiner-status
+  openlink-macos-permission-helper.sh --karabiner-install
   openlink-macos-permission-helper.sh --karabiner-open
   openlink-macos-permission-helper.sh --reset-stale
 
@@ -20,6 +21,8 @@ What this can do:
     Screen Recording, Screen & System Audio Recording, and Remote Desktop.
   - Check whether Karabiner-Elements and its virtual HID driver are available
     as an optional keyboard reliability assist.
+  - Install Karabiner-Elements through Homebrew when Homebrew is available, or
+    open the official Karabiner download page when it is not.
   - Report whether the current OpenLink process is trusted for Accessibility
     and show OpenLink-related TCC rows when readable.
   - Reset stale Accessibility/Input Monitoring/Screen Recording/Remote Desktop
@@ -99,11 +102,43 @@ karabiner_status() {
     cat <<'EOF'
 
 OpenLink note:
-  Karabiner virtual HID may become a lower-level keyboard assist path after the
-  DriverKit extension and virtual HID client are installed and enabled. It does
-  not grant OpenLink Accessibility, Input Monitoring, Screen Recording, Remote
-  Desktop, or System Audio access.
+  OpenLink reports Karabiner virtual HID readiness during keyboard handshakes
+  when the driver and CLI are available. It does not grant OpenLink
+  Accessibility, Input Monitoring, Screen Recording, Remote Desktop, or System
+  Audio access.
 EOF
+}
+
+karabiner_install() {
+    if [[ -x "/Library/Application Support/org.pqrs/Karabiner-Elements/bin/karabiner_cli" ]]; then
+        echo "Karabiner-Elements CLI is already installed."
+        karabiner_status
+        karabiner_open
+        return 0
+    fi
+
+    local brew=""
+    if [[ -x "/opt/homebrew/bin/brew" ]]; then
+        brew="/opt/homebrew/bin/brew"
+    elif [[ -x "/usr/local/bin/brew" ]]; then
+        brew="/usr/local/bin/brew"
+    elif command -v brew >/dev/null 2>&1; then
+        brew="$(command -v brew)"
+    fi
+
+    if [[ -n "${brew}" ]]; then
+        echo "Installing Karabiner-Elements with Homebrew cask..."
+        "${brew}" install --cask karabiner-elements
+        echo
+        echo "Karabiner-Elements installed. macOS may still require Driver Extension approval in Privacy & Security."
+        karabiner_status
+        karabiner_open
+        return 0
+    fi
+
+    echo "Homebrew was not found. Opening the official Karabiner-Elements download page."
+    open "https://karabiner-elements.pqrs.org/" || true
+    return 1
 }
 
 karabiner_open() {
@@ -129,6 +164,9 @@ case "${1:---help}" in
         ;;
     --karabiner-status)
         karabiner_status
+        ;;
+    --karabiner-install)
+        karabiner_install
         ;;
     --karabiner-open)
         karabiner_open

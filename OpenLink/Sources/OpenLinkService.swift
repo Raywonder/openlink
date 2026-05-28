@@ -276,6 +276,7 @@ class OpenLinkService: ObservableObject {
             "localTtsVolumePercent": 100.0,
             "ttsFallbackMode": "screen-reader",
             "enableBrailleDisplaySupport": false,
+            "routeBrailleToRemoteWhenConnected": true,
             "brailleProvider": "auto",
             "brlttyExecutablePath": "",
             "showActivityLog": false,
@@ -1131,6 +1132,8 @@ class OpenLinkService: ObservableObject {
             }
         case "audio_frame":
             handleWebSocketControlMessage(json, serverId: serverId)
+        case "tts_announcement", "screen_reader_announcement", "braille_announcement":
+            handleRemoteAccessibilityAnnouncement(json)
         case "swap_control_request":
             sendWebSocketResponse(["type": "swap_control_state", "success": true, "keyboardCoUse": true], serverId: serverId)
         default:
@@ -1366,8 +1369,7 @@ class OpenLinkService: ObservableObject {
     private func sendControllerAnnouncement(_ text: String, originalMessage: [String: Any], serverId: String, broadcast: Bool) {
         guard !text.isEmpty else { return }
         let controllerMachineId = controllerMachineId(from: originalMessage) ?? serverId
-        let payload: [String: Any] = [
-            "type": "tts_announcement",
+        let basePayload: [String: Any] = [
             "targetMachineId": controllerMachineId,
             "sourceMachineId": localStableMachineId(),
             "sourcePlatform": "macOS",
@@ -1375,7 +1377,27 @@ class OpenLinkService: ObservableObject {
             "interrupt": true,
             "text": text
         ]
-        sendWebSocketResponse(payload, serverId: serverId, broadcast: broadcast)
+        var speechPayload = basePayload
+        speechPayload["type"] = "tts_announcement"
+        sendWebSocketResponse(speechPayload, serverId: serverId, broadcast: broadcast)
+
+        if originalMessage["routeBrailleToRemoteWhenConnected"] as? Bool ?? true {
+            var braillePayload = basePayload
+            braillePayload["type"] = "braille_announcement"
+            sendWebSocketResponse(braillePayload, serverId: serverId, broadcast: broadcast)
+        }
+    }
+
+    private func handleRemoteAccessibilityAnnouncement(_ json: [String: Any]) {
+        guard messageTargetsLocalMachine(json) else { return }
+        let text = (json["text"] as? String) ?? (json["message"] as? String) ?? ""
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        if json["type"] as? String != "braille_announcement" {
+            postAccessibilityAnnouncement(title: "", body: text, allowBrailleDuringRemoteSession: true)
+        } else {
+            BrlttyBridge.shared.send(text)
+        }
     }
 
     private func controllerMachineId(from json: [String: Any]) -> String? {
@@ -2005,6 +2027,9 @@ class OpenLinkService: ObservableObject {
                 "clipboardAllowed": machine.allowClipboardSync,
                 "fileTransferAllowed": machine.allowFileTransfer,
                 "diagnosticsEnabled": UserDefaults.standard.bool(forKey: "enableDiagnosticSending"),
+                "brailleEnabled": UserDefaults.standard.bool(forKey: "enableBrailleDisplaySupport"),
+                "brailleProvider": UserDefaults.standard.string(forKey: "brailleProvider") ?? "auto",
+                "routeBrailleToRemoteWhenConnected": UserDefaults.standard.bool(forKey: "routeBrailleToRemoteWhenConnected"),
                 "managedMachineConfirmation": "desktop-built-in",
                 "companionConfirmationSupported": true,
                 "companionPlatform": "iOS",
@@ -2044,6 +2069,11 @@ class OpenLinkService: ObservableObject {
                 "requestedCodec": UserDefaults.standard.string(forKey: "audioStreamingCodec") ?? "pcm_s16le",
                 "directAudioBufferSamples": max(16, min(2048, UserDefaults.standard.integer(forKey: "directAudioBufferSamples") == 0 ? 512 : UserDefaults.standard.integer(forKey: "directAudioBufferSamples"))),
                 "windowsAudioBufferSamples": max(16, min(2048, UserDefaults.standard.integer(forKey: "macAudioPlaybackBufferSamples") == 0 ? 512 : UserDefaults.standard.integer(forKey: "macAudioPlaybackBufferSamples")))
+            ],
+            "braille": [
+                "enabled": UserDefaults.standard.bool(forKey: "enableBrailleDisplaySupport"),
+                "provider": UserDefaults.standard.string(forKey: "brailleProvider") ?? "auto",
+                "routeToRemoteWhenConnected": UserDefaults.standard.bool(forKey: "routeBrailleToRemoteWhenConnected")
             ]
         ]
     }
@@ -2063,6 +2093,9 @@ class OpenLinkService: ObservableObject {
             "directAudioBufferSamples": max(16, min(2048, UserDefaults.standard.integer(forKey: "directAudioBufferSamples") == 0 ? 512 : UserDefaults.standard.integer(forKey: "directAudioBufferSamples"))),
             "windowsAudioBufferSamples": max(16, min(2048, UserDefaults.standard.integer(forKey: "macAudioPlaybackBufferSamples") == 0 ? 512 : UserDefaults.standard.integer(forKey: "macAudioPlaybackBufferSamples"))),
             "diagnosticsEnabled": UserDefaults.standard.bool(forKey: "enableDiagnosticSending"),
+            "brailleEnabled": UserDefaults.standard.bool(forKey: "enableBrailleDisplaySupport"),
+            "brailleProvider": UserDefaults.standard.string(forKey: "brailleProvider") ?? "auto",
+            "routeBrailleToRemoteWhenConnected": UserDefaults.standard.bool(forKey: "routeBrailleToRemoteWhenConnected"),
             "autoMuteControlledComputerAudio": UserDefaults.standard.bool(forKey: "autoMuteRemoteAudio"),
             "autoMuteProcessesOnConnect": autoMuteProcessList(),
             "managedMachineConfirmation": "desktop-built-in",
@@ -2216,13 +2249,17 @@ class OpenLinkService: ObservableObject {
         }
     }
 
-    private func postAccessibilityAnnouncement(title: String, body: String) {
+    private func postAccessibilityAnnouncement(title: String, body: String, allowBrailleDuringRemoteSession: Bool = false) {
         guard UserDefaults.standard.object(forKey: "announceStatusChanges") as? Bool ?? true else { return }
         let announcement = title.isEmpty ? body : "\(title). \(body)"
         guard !announcement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
         DispatchQueue.main.async {
-            BrlttyBridge.shared.send(announcement)
+            let remoteOwnsBraille = UserDefaults.standard.bool(forKey: "routeBrailleToRemoteWhenConnected") &&
+                (RemoteControlManager.shared.isRemoteControlActive || RemoteControlManager.shared.isReceivingControl)
+            if allowBrailleDuringRemoteSession || !remoteOwnsBraille {
+                BrlttyBridge.shared.send(announcement)
+            }
             let element: Any
             if let mainWindow = NSApp.mainWindow {
                 element = mainWindow

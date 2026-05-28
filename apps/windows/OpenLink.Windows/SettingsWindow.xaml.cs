@@ -78,6 +78,7 @@ public partial class SettingsWindow : Window
         AnnounceConnectionStrengthBox.IsChecked = Settings.AnnounceConnectionStrength;
         EnableLocalTtsHelperBox.IsChecked = Settings.EnableLocalTtsHelper;
         EnableBrailleDisplaySupportBox.IsChecked = Settings.EnableBrailleDisplaySupport;
+        RouteBrailleToRemoteWhenConnectedBox.IsChecked = Settings.RouteBrailleToRemoteWhenConnected;
         SelectComboItem(BrailleProviderBox, Settings.BrailleProvider);
         BrlttyExecutablePathBox.Text = Settings.BrlttyExecutablePath;
         SelectTtsVoice(Settings.LocalTtsVoiceId);
@@ -164,6 +165,7 @@ public partial class SettingsWindow : Window
         Settings.LocalTtsVolumePercent = (int)LocalTtsVolumeSlider.Value;
         Settings.TtsFallbackMode = GetComboText(TtsFallbackModeBox, "screen-reader");
         Settings.EnableBrailleDisplaySupport = EnableBrailleDisplaySupportBox.IsChecked == true;
+        Settings.RouteBrailleToRemoteWhenConnected = RouteBrailleToRemoteWhenConnectedBox.IsChecked == true;
         Settings.BrailleProvider = GetComboText(BrailleProviderBox, "auto");
         Settings.BrlttyExecutablePath = BrlttyExecutablePathBox.Text.Trim();
 

@@ -7,20 +7,26 @@ struct KarabinerStatus {
     let version: String?
     let virtualHIDExtensionSeen: Bool
     let virtualHIDExtensionEnabled: Bool
+    let homebrewPath: String?
+    let installCommand: String
     let summary: String
 
     var isInstalled: Bool { cliPath != nil || virtualHIDClientPath != nil || virtualHIDExtensionSeen }
     var isReady: Bool { virtualHIDExtensionEnabled && virtualHIDClientPath != nil }
+    var canInstallWithHomebrew: Bool { homebrewPath != nil }
 
     var dictionary: [String: Any] {
         [
             "installed": isInstalled,
             "ready": isReady,
+            "canInstallWithHomebrew": canInstallWithHomebrew,
             "cliPath": cliPath ?? "",
             "virtualHIDClientPath": virtualHIDClientPath ?? "",
             "version": version ?? "",
             "virtualHIDExtensionSeen": virtualHIDExtensionSeen,
             "virtualHIDExtensionEnabled": virtualHIDExtensionEnabled,
+            "homebrewPath": homebrewPath ?? "",
+            "installCommand": installCommand,
             "summary": summary
         ]
     }
@@ -36,12 +42,18 @@ final class KarabinerIntegration {
     private let virtualHIDClientCandidates = [
         "/Library/Application Support/org.pqrs/Karabiner-DriverKit-VirtualHIDDevice/Applications/Karabiner-DriverKit-VirtualHIDDeviceClient.app/Contents/MacOS/Karabiner-DriverKit-VirtualHIDDeviceClient"
     ]
+    private let homebrewCandidates = [
+        "/opt/homebrew/bin/brew",
+        "/usr/local/bin/brew"
+    ]
+    private let officialDownloadURL = URL(string: "https://karabiner-elements.pqrs.org/")!
 
     private init() {}
 
     func status() -> KarabinerStatus {
         let cliPath = cliCandidates.first { FileManager.default.isExecutableFile(atPath: $0) }
         let virtualHIDClientPath = virtualHIDClientCandidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+        let homebrewPath = homebrewCandidates.first { FileManager.default.isExecutableFile(atPath: $0) }
         let version = cliPath.flatMap { run($0, arguments: ["--version"], timeout: 2).trimmedNonEmpty }
         let extensions = run("/usr/bin/systemextensionsctl", arguments: ["list"], timeout: 3)
         let lowerExtensions = extensions.lowercased()
@@ -53,11 +65,13 @@ final class KarabinerIntegration {
 
         let summary: String
         if cliPath == nil && !extensionSeen && virtualHIDClientPath == nil {
-            summary = "Karabiner-Elements is not installed. OpenLink will use the built-in macOS CGEvent input path."
+            summary = homebrewPath == nil
+                ? "Karabiner-Elements is not installed. OpenLink can open the official Karabiner download page, and will use the built-in macOS CGEvent input path until Karabiner is installed."
+                : "Karabiner-Elements is not installed. OpenLink can install it with Homebrew, then macOS will ask to approve the virtual HID driver extension."
         } else if extensionEnabled && virtualHIDClientPath != nil && cliPath != nil {
-            summary = "Karabiner virtual HID driver is enabled. OpenLink can use this as a future low-level input assist path, while current control still requires OpenLink Accessibility trust."
+            summary = "Karabiner virtual HID driver and CLI are installed and enabled. OpenLink will advertise Karabiner readiness during remote keyboard handshakes; macOS Accessibility trust is still required for the current input path."
         } else if extensionEnabled && virtualHIDClientPath != nil {
-            summary = "Karabiner virtual HID driver is enabled, but the Karabiner-Elements CLI was not found. OpenLink can detect the low-level driver and can use it after a dedicated virtual-HID bridge is added; current control still uses CGEvent and requires OpenLink Accessibility trust."
+            summary = "Karabiner virtual HID driver is enabled, but the Karabiner-Elements CLI was not found. Install Karabiner-Elements so OpenLink can manage and report the full driver stack."
         } else if extensionEnabled {
             summary = "Karabiner virtual HID driver is enabled, but OpenLink did not find the virtual HID client binary needed for a direct assist path. Current control still uses CGEvent."
         } else if extensionSeen {
@@ -72,6 +86,8 @@ final class KarabinerIntegration {
             version: version,
             virtualHIDExtensionSeen: extensionSeen,
             virtualHIDExtensionEnabled: extensionEnabled,
+            homebrewPath: homebrewPath,
+            installCommand: "brew install --cask karabiner-elements",
             summary: summary
         )
     }
@@ -82,6 +98,33 @@ final class KarabinerIntegration {
             return
         }
         NSWorkspace.shared.open(url)
+    }
+
+    func installOrOpenKarabiner() {
+        let current = status()
+        if current.cliPath != nil {
+            openKarabinerApp()
+            return
+        }
+
+        if let homebrewPath = current.homebrewPath {
+            openTerminalInstallCommand(homebrewPath: homebrewPath)
+            return
+        }
+
+        NSWorkspace.shared.open(officialDownloadURL)
+    }
+
+    private func openTerminalInstallCommand(homebrewPath: String) {
+        let command = """
+\"\(homebrewPath)\" install --cask karabiner-elements; echo; echo \"Karabiner install finished. If macOS asks for Driver Extension approval, approve Karabiner in Privacy & Security, then return to OpenLink.\"; read -n 1 -s -r -p \"Press any key to close this window.\"
+"""
+        let escaped = command.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        let script = "tell application \"Terminal\" to do script \"\(escaped)\""
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        try? process.run()
     }
 
     private func run(_ launchPath: String, arguments: [String], timeout: TimeInterval) -> String {

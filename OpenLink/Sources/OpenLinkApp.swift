@@ -1783,6 +1783,7 @@ struct AccessibilitySettingsTab: View {
     @AppStorage("localTtsVolumePercent") private var localTtsVolumePercent = 100.0
     @AppStorage("ttsFallbackMode") private var ttsFallbackMode = "screen-reader"
     @AppStorage("enableBrailleDisplaySupport") private var enableBrailleDisplaySupport = false
+    @AppStorage("routeBrailleToRemoteWhenConnected") private var routeBrailleToRemoteWhenConnected = true
     @AppStorage("brailleProvider") private var brailleProvider = "auto"
     @AppStorage("brlttyExecutablePath") private var brlttyExecutablePath = ""
     @State private var karabinerStatus = KarabinerIntegration.shared.status()
@@ -1833,6 +1834,7 @@ struct AccessibilitySettingsTab: View {
             GroupBox("Braille Display") {
                 VStack(alignment: .leading, spacing: 12) {
                     Toggle("Send OpenLink announcements to a braille display", isOn: $enableBrailleDisplaySupport)
+                    Toggle("When connected, reserve the braille display for the remote machine", isOn: $routeBrailleToRemoteWhenConnected)
                     Picker("Braille provider", selection: $brailleProvider) {
                         Text("Auto").tag("auto")
                         Text("BRLTTY / BrlAPI").tag("brltty")
@@ -1864,11 +1866,14 @@ struct AccessibilitySettingsTab: View {
                     settingsStatusRow("Current input path", value: "macOS CGEvent")
                     settingsStatusRow("Karabiner-Elements", value: karabinerStatus.isInstalled ? "Installed" : "Not installed")
                     settingsStatusRow("Karabiner virtual HID driver", value: karabinerStatus.isReady ? "Enabled" : "Not ready")
+                    if karabinerStatus.canInstallWithHomebrew && !karabinerStatus.isInstalled {
+                        settingsStatusRow("Karabiner installer", value: karabinerStatus.installCommand)
+                    }
                     Text(karabinerStatus.summary)
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("OpenLink keeps CGEvent as the active stable keyboard path for now. Karabiner virtual HID is detected here so it can be used as an optional lower-level driver path after the Mac permissions and control handshake are stable.")
+                    Text("OpenLink advertises Karabiner virtual HID readiness during keyboard handshakes when the driver is installed. macOS Accessibility and Input Monitoring approval remain required for remote input.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1876,10 +1881,12 @@ struct AccessibilitySettingsTab: View {
                         Button("Refresh Keyboard Driver Status") {
                             karabinerStatus = KarabinerIntegration.shared.status()
                         }
-                        Button("Open Karabiner-Elements") {
-                            KarabinerIntegration.shared.openKarabinerApp()
+                        Button(karabinerStatus.isInstalled ? "Open Karabiner-Elements" : "Install Karabiner-Elements") {
+                            KarabinerIntegration.shared.installOrOpenKarabiner()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                karabinerStatus = KarabinerIntegration.shared.status()
+                            }
                         }
-                        .disabled(!karabinerStatus.isInstalled)
                     }
                 }
                 .padding(.vertical, 8)

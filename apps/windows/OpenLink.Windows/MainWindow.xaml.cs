@@ -781,6 +781,9 @@ public partial class MainWindow : Window
             case "screen_reader_announcement":
                 HandleRemoteTtsAnnouncement(root);
                 break;
+            case "braille_announcement":
+                HandleRemoteBrailleAnnouncement(root);
+                break;
             case "message":
             case "chat_message":
             case "machine_message":
@@ -969,7 +972,29 @@ public partial class MainWindow : Window
 
         AddLog($"Remote announcement: {text}", announce: false);
         _ = _ttsService.SpeakRemoteAnnouncementAsync(text);
-        _ = _brailleDisplay.SendAsync(text);
+        _ = SendRemoteBrailleAsync(text);
+    }
+
+    private void HandleRemoteBrailleAnnouncement(JsonElement root)
+    {
+        var target = root.TryGetProperty("targetMachineId", out var targetElement) ? targetElement.GetString() : null;
+        if (!string.IsNullOrWhiteSpace(target) &&
+            !string.Equals(target, Environment.MachineName, StringComparison.OrdinalIgnoreCase) &&
+            !_machines.Any(machine => string.Equals(machine.Id, target, StringComparison.OrdinalIgnoreCase) && IsLocalMachine(machine)))
+        {
+            return;
+        }
+
+        var text = root.TryGetProperty("text", out var textElement)
+            ? textElement.GetString()
+            : root.TryGetProperty("message", out var messageElement) ? messageElement.GetString() : null;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        AddLog($"Remote braille: {text}", announce: false);
+        _ = SendRemoteBrailleAsync(text);
     }
 
     private void HandleRemoteInputAck(JsonElement root, string? type)
@@ -1848,7 +1873,7 @@ public partial class MainWindow : Window
         {
             if (_nvdaController.Speak(spoken))
             {
-                _ = _brailleDisplay.SendAsync(spoken);
+                _ = SendLocalBrailleAsync(spoken);
                 return;
             }
 
@@ -1859,7 +1884,7 @@ public partial class MainWindow : Window
                 System.Windows.Automation.AutomationNotificationProcessing.ImportantMostRecent,
                 spoken,
                 "OpenLinkLogMessage");
-            _ = _brailleDisplay.SendAsync(spoken);
+            _ = SendLocalBrailleAsync(spoken);
         }
         catch
         {
@@ -1873,7 +1898,7 @@ public partial class MainWindow : Window
         {
             if (_nvdaController.Speak(status))
             {
-                _ = _brailleDisplay.SendAsync(status);
+                _ = SendLocalBrailleAsync(status);
                 return;
             }
 
@@ -1894,7 +1919,7 @@ public partial class MainWindow : Window
                 System.Windows.Automation.AutomationNotificationProcessing.ImportantMostRecent,
                 status,
                 "OpenLinkStatus");
-            _ = _brailleDisplay.SendAsync(status);
+            _ = SendLocalBrailleAsync(status);
         }
         catch
         {
@@ -1915,6 +1940,21 @@ public partial class MainWindow : Window
             AnnounceMessageToScreenReader(message);
         }
         WriteRuntimeLog(message);
+    }
+
+    private Task<bool> SendRemoteBrailleAsync(string text)
+    {
+        return _brailleDisplay.SendAsync(text);
+    }
+
+    private Task<bool> SendLocalBrailleAsync(string text)
+    {
+        if (_settings.RouteBrailleToRemoteWhenConnected && (_remoteInputPending || _remoteInputActive))
+        {
+            return Task.FromResult(false);
+        }
+
+        return _brailleDisplay.SendAsync(text);
     }
 
     private static void WriteRuntimeLog(string message)
@@ -2137,6 +2177,7 @@ public partial class MainWindow : Window
             diagnosticsEnabled = _settings.EnableDiagnosticSending,
             brailleEnabled = _settings.EnableBrailleDisplaySupport,
             brailleProvider = _settings.BrailleProvider,
+            routeBrailleToRemoteWhenConnected = _settings.RouteBrailleToRemoteWhenConnected,
             managedMachineConfirmation = "desktop-built-in",
             companionConfirmationSupported = true,
             companionPlatform = "iOS",
@@ -2572,6 +2613,9 @@ public partial class MainWindow : Window
             localTtsEnabled = _settings.EnableLocalTtsHelper,
             localTtsPort = _settings.LocalTtsPort,
             localTtsFallbackMode = _settings.TtsFallbackMode,
+            brailleEnabled = _settings.EnableBrailleDisplaySupport,
+            brailleProvider = _settings.BrailleProvider,
+            routeBrailleToRemoteWhenConnected = _settings.RouteBrailleToRemoteWhenConnected,
             interactionMode = "full-keyboard-and-audio",
             connectionPolicy = CreateConnectionPolicy()
         });
