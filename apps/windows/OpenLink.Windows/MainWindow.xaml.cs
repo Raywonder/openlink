@@ -101,6 +101,7 @@ public partial class MainWindow : Window
     private const int VkLWin = 0x5B;
     private const int VkRWin = 0x5C;
     private const int VkOem102 = 0xE2;
+    private static readonly IntPtr HwndTopMost = new(-1);
     private const ulong MacShiftFlag = 0x20000;
     private const ulong MacControlFlag = 0x40000;
     private const ulong MacAlternateFlag = 0x80000;
@@ -694,7 +695,7 @@ public partial class MainWindow : Window
 
         if (!ShouldSuppressServerLog(type))
         {
-            AddLog(SummarizeServerMessage(root, type));
+            AddLog(SummarizeServerMessage(root, type), announce: false);
         }
 
         switch (type)
@@ -741,7 +742,8 @@ public partial class MainWindow : Window
                     ? "Remote machine accepted the connection. Starting keyboard and audio interaction now."
                     : _settings.AutoStartInteractionOnConnect
                         ? "Remote machine accepted the connection. Preparing keyboard and audio interaction."
-                        : "Remote machine accepted the connection. Choose Start Using to begin keyboard and audio control.");
+                        : "Remote machine accepted the connection. Choose Start Using to begin keyboard and audio control.",
+                    announce: !_remoteInputPending);
                 break;
             case "machine_connect_request":
                 HandleMachineConnectRequest(root);
@@ -798,7 +800,7 @@ public partial class MainWindow : Window
                     : root.TryGetProperty("error", out var errorElement) ? errorElement.GetString() : "Unknown server error";
                 SetStatus($"Server error: {message}");
                 PlaySound(SoundAction.Error);
-                StopRemoteInputForwarding($"server error: {message}");
+                StopRemoteInputForwarding($"server error: {message}", announce: false);
                 _ = SendDiagnosticEventAsync("server_error", outcome: "error", metadata: new { errorType = type, message });
                 break;
         }
@@ -1425,7 +1427,7 @@ public partial class MainWindow : Window
         HideOpenLinkWindow();
     }
 
-    private void StopRemoteInputForwarding(string? reason = null)
+    private void StopRemoteInputForwarding(string? reason = null, bool announce = true)
     {
         _audioBridge.SetFrameSink(null);
         _remoteInputActivationCts?.Cancel();
@@ -1434,9 +1436,11 @@ public partial class MainWindow : Window
 
         if ((_remoteInputActive || _remoteInputPending) && _remoteInputMachine is not null)
         {
-            AddLog(string.IsNullOrWhiteSpace(reason)
-                ? $"Remote keyboard forwarding stopped for {_remoteInputMachine.DisplayName}."
-                : $"Remote keyboard forwarding stopped for {_remoteInputMachine.DisplayName}: {reason}.");
+            AddLog(
+                string.IsNullOrWhiteSpace(reason)
+                    ? $"Remote keyboard forwarding stopped for {_remoteInputMachine.DisplayName}."
+                    : $"Remote keyboard forwarding stopped for {_remoteInputMachine.DisplayName}: {reason}.",
+                announce);
         }
 
         _remoteInputActive = false;
@@ -1768,11 +1772,11 @@ public partial class MainWindow : Window
         RebuildTrayMenu();
     }
 
-    private void SetStatus(string status)
+    private void SetStatus(string status, bool announce = true)
     {
         if (!Dispatcher.CheckAccess())
         {
-            Dispatcher.Invoke(() => SetStatus(status));
+            Dispatcher.Invoke(() => SetStatus(status, announce));
             return;
         }
 
@@ -1780,11 +1784,17 @@ public partial class MainWindow : Window
         var nextAccessibleName = $"Status: {status}";
         StatusTextBlock.Text = status;
         System.Windows.Automation.AutomationProperties.SetName(StatusTextBlock, nextAccessibleName);
-        AnnounceStatusToScreenReader(status, previousAccessibleName, nextAccessibleName);
+        if (announce)
+        {
+            AnnounceStatusToScreenReader(status, previousAccessibleName, nextAccessibleName);
+        }
         if (_settings.AnnounceStatusChanges)
         {
             AddLog(status, announce: false);
-            _ = _ttsService.SpeakStatusAsync(status);
+            if (announce)
+            {
+                _ = _ttsService.SpeakStatusAsync(status);
+            }
         }
     }
 
@@ -1916,7 +1926,7 @@ public partial class MainWindow : Window
             SetStatus("Checking for OpenLink updates.");
         }
 
-        var updater = new OpenLinkUpdater(_settings, SetStatus, AddLog);
+        var updater = new OpenLinkUpdater(_settings, status => SetStatus(status), AddLog);
         await updater.CheckAsync(interactive);
     }
 
@@ -2389,9 +2399,10 @@ public partial class MainWindow : Window
         }
 
         SetStatus(dropIn
-            ? $"Drop-in connect requested for {machine.DisplayName}. {InteractionShortcutHelp}"
-            : $"Connect requested for {machine.DisplayName}. {InteractionShortcutHelp}");
-        NotifyDeviceConnection(Environment.MachineName, machine.DisplayName, true);
+            ? $"Drop-in connect requested for {machine.DisplayName}."
+            : $"Connect requested for {machine.DisplayName}.",
+            announce: false);
+        NotifyDeviceConnection(Environment.MachineName, machine.DisplayName, true, announce: false);
         _ = SendDiagnosticEventAsync("machine_connect_request", machine, "sent", new
         {
             dropIn,
@@ -2546,7 +2557,7 @@ public partial class MainWindow : Window
             windowsAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.WindowsAudioBufferSamples),
             keyboardControl = true
         });
-        SetStatus($"Start using {machine.DisplayName} requested. Waiting for the remote machine to confirm keyboard control. Keyboard and audio remain on this computer until confirmation.");
+        SetStatus($"Waiting for {machine.DisplayName} to confirm keyboard control. Keyboard and audio remain on this computer until confirmed.");
     }
 
     private Task<bool> SendRemoteAudioFrameAsync(MachineRecord machine, OpenLinkAudioFrame frame)
@@ -3169,6 +3180,7 @@ public partial class MainWindow : Window
                 CloseControllerActionsMenuSilently();
             }
         };
+        var owner = EnsureControllerMenuOwner();
         menu.Closed += (_, _) =>
         {
             _controllerActionsMenuOpen = false;
@@ -3180,18 +3192,14 @@ public partial class MainWindow : Window
             {
                 HideOpenLinkWindow();
             }
+            owner.Hide();
         };
-        var owner = EnsureControllerMenuOwner();
-        owner.Show();
-        owner.Activate();
-        SetForegroundWindow(owner.Handle);
-
         var position = GetControllerMenuPosition();
-        menu.Show(owner, owner.PointToClient(position));
+        PrepareControllerMenuOwner(owner, position);
+        menu.Show(owner, new DrawingPoint(0, owner.Height));
         menu.BeginInvoke(new Action(() =>
         {
-            SetForegroundWindow(owner.Handle);
-            owner.Activate();
+            PrepareControllerMenuOwner(owner, position);
             menu.Focus();
             if (menu.Items.Count > 0)
             {
@@ -3286,15 +3294,37 @@ public partial class MainWindow : Window
             FormBorderStyle = Forms.FormBorderStyle.None,
             ShowInTaskbar = false,
             StartPosition = Forms.FormStartPosition.Manual,
-            Size = new System.Drawing.Size(1, 1),
-            Location = new DrawingPoint(-32000, -32000),
-            Opacity = 0,
+            Size = new System.Drawing.Size(2, 2),
+            Location = new DrawingPoint(0, 0),
+            Opacity = 0.01,
             TopMost = true,
             Text = "OpenLink Controller Actions"
         };
         _controllerMenuOwner.AccessibleName = "OpenLink controller actions owner";
         _controllerMenuOwner.AccessibleDescription = "Keeps OpenLink controller actions focused for keyboard and screen reader navigation.";
         return _controllerMenuOwner;
+    }
+
+    private static void PrepareControllerMenuOwner(Forms.Form owner, DrawingPoint screenPosition)
+    {
+        owner.Location = screenPosition;
+        owner.Show();
+        owner.WindowState = Forms.FormWindowState.Normal;
+        owner.TopMost = true;
+        ShowWindow(owner.Handle, ShowWindowCommand.ShowNormal);
+        SetWindowPos(
+            owner.Handle,
+            HwndTopMost,
+            screenPosition.X,
+            screenPosition.Y,
+            Math.Max(2, owner.Width),
+            Math.Max(2, owner.Height),
+            SetWindowPosFlags.ShowWindow);
+        BringWindowToTop(owner.Handle);
+        SetActiveWindow(owner.Handle);
+        SetForegroundWindow(owner.Handle);
+        owner.Activate();
+        owner.Focus();
     }
 
     private async void QueueControllerActionsMenu()
@@ -3576,19 +3606,19 @@ public partial class MainWindow : Window
             .Replace("Signal strength: ", "", StringComparison.OrdinalIgnoreCase);
     }
 
-    private void NotifyDeviceConnection(string fromDevice, string toDevice, bool connected)
+    private void NotifyDeviceConnection(string fromDevice, string toDevice, bool connected, bool announce = true)
     {
         var verb = connected ? "connected" : "disconnected";
         var message = connected
             ? $"Connection from {fromDevice} to {toDevice} has connected."
             : $"Connection from {fromDevice} to {toDevice} has disconnected.";
-        SetStatus(message);
+        SetStatus(message, announce);
         if (_settings.ShowConnectionNotifications)
         {
             _trayIcon.ShowBalloonTip(3000, "OpenLink", message, connected ? Forms.ToolTipIcon.Info : Forms.ToolTipIcon.Warning);
         }
         PlaySound(connected ? SoundAction.Connect : SoundAction.Disconnect);
-        AddLog($"Device {verb}: {fromDevice} -> {toDevice}");
+        AddLog($"Device {verb}: {fromDevice} -> {toDevice}", announce: false);
     }
 
     private void UpdateConnectedUiState()
@@ -3908,8 +3938,31 @@ public partial class MainWindow : Window
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetActiveWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, ShowWindowCommand nCmdShow);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, SetWindowPosFlags flags);
+
+    [DllImport("user32.dll")]
     private static extern bool LockWorkStation();
 
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern IntPtr GetModuleHandle(string lpModuleName);
+
+    private enum ShowWindowCommand
+    {
+        ShowNormal = 1
+    }
+
+    [Flags]
+    private enum SetWindowPosFlags
+    {
+        ShowWindow = 0x0040
+    }
 }
