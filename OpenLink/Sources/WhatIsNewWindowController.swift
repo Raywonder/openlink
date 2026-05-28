@@ -9,6 +9,7 @@ final class WhatIsNewWindowController {
     - Trusted or owned devices can request remote OpenLink settings, while guest settings requests require local approval.
     - Ctrl Alt Backslash now waits for the key chord to release before opening controller actions, so the menu stays open for arrow-key navigation.
     - Controller and machine menus now include local Settings, remote Settings, running apps and processes, audio controls, volume presets, lock, restart, shut down, and log out.
+    - macOS permission helper now opens Remote Desktop and Screen & System Audio Recording and reports stale OpenLink privacy entries.
     """
 
     private let version: String
@@ -73,7 +74,7 @@ final class WhatIsNewWindowController {
             return value
         }
 
-        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.25"
+        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.26"
     }
 
     static func lastNotes() -> String {
