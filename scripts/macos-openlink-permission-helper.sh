@@ -90,9 +90,9 @@ karabiner_status() {
     fi
 
     if [[ -x "${virtual_hid_client}" ]]; then
-        echo "Karabiner virtual HID client: installed"
+        echo "Karabiner legacy virtual HID client: installed"
     else
-        echo "Karabiner virtual HID client: not found"
+        echo "Karabiner legacy virtual HID client: not found; current Karabiner builds may rely on the CLI plus DriverKit extension instead."
     fi
 
     echo

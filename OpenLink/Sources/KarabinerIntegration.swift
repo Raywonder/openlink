@@ -12,7 +12,7 @@ struct KarabinerStatus {
     let summary: String
 
     var isInstalled: Bool { cliPath != nil || virtualHIDClientPath != nil || virtualHIDExtensionSeen }
-    var isReady: Bool { virtualHIDExtensionEnabled && virtualHIDClientPath != nil }
+    var isReady: Bool { virtualHIDExtensionEnabled && (cliPath != nil || virtualHIDClientPath != nil) }
     var canInstallWithHomebrew: Bool { homebrewPath != nil }
 
     var dictionary: [String: Any] {
@@ -68,12 +68,12 @@ final class KarabinerIntegration {
             summary = homebrewPath == nil
                 ? "Karabiner-Elements is not installed. OpenLink can open the official Karabiner download page, and will use the built-in macOS CGEvent input path until Karabiner is installed."
                 : "Karabiner-Elements is not installed. OpenLink can install it with Homebrew, then macOS will ask to approve the virtual HID driver extension."
-        } else if extensionEnabled && virtualHIDClientPath != nil && cliPath != nil {
+        } else if extensionEnabled && cliPath != nil {
             summary = "Karabiner virtual HID driver and CLI are installed and enabled. OpenLink will advertise Karabiner readiness during remote keyboard handshakes; macOS Accessibility trust is still required for the current input path."
         } else if extensionEnabled && virtualHIDClientPath != nil {
-            summary = "Karabiner virtual HID driver is enabled, but the Karabiner-Elements CLI was not found. Install Karabiner-Elements so OpenLink can manage and report the full driver stack."
+            summary = "Karabiner virtual HID driver is enabled and the legacy virtual HID client is installed, but the Karabiner-Elements CLI was not found. Install Karabiner-Elements so OpenLink can manage and report the full driver stack."
         } else if extensionEnabled {
-            summary = "Karabiner virtual HID driver is enabled, but OpenLink did not find the virtual HID client binary needed for a direct assist path. Current control still uses CGEvent."
+            summary = "Karabiner virtual HID driver is enabled, but OpenLink did not find the Karabiner CLI or legacy virtual HID client needed to report the assist path as ready."
         } else if extensionSeen {
             summary = "Karabiner is installed, but its virtual HID driver is not enabled yet in macOS System Settings."
         } else {
