@@ -231,16 +231,6 @@ public partial class MainWindow : Window
             {
                 _controllerHotkeyChordDown = false;
             }
-            if (keyDown && vkCode == VkEscape && _controllerActionsMenuOpen)
-            {
-                Dispatcher.BeginInvoke(CloseControllerActionsMenuSilently);
-                return new IntPtr(1);
-            }
-            if (_controllerActionsMenuOpen)
-            {
-                return CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
-            }
-
             if (_remoteInputActive && _remoteInputMachine is not null)
             {
                 if (keyDown && vkCode == VkEscape && ctrlDown && altDown)
@@ -253,7 +243,20 @@ public partial class MainWindow : Window
                     });
                     return new IntPtr(1);
                 }
+            }
 
+            if (keyDown && vkCode == VkEscape && _controllerActionsMenuOpen)
+            {
+                Dispatcher.BeginInvoke(CloseControllerActionsMenuSilently);
+                return new IntPtr(1);
+            }
+            if (_controllerActionsMenuOpen)
+            {
+                return CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
+            }
+
+            if (_remoteInputActive && _remoteInputMachine is not null)
+            {
                 if (ShouldKeepKeyLocal(vkCode, ctrlDown, altDown))
                 {
                     return CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
@@ -635,6 +638,10 @@ public partial class MainWindow : Window
                 AddLog($"Connection stopped: {ex.Message}");
             });
         }
+        finally
+        {
+            await Dispatcher.InvokeAsync(() => StopRemoteInputForwarding("signaling connection ended"));
+        }
     }
 
     private void HandleServerMessage(string json)
@@ -713,6 +720,10 @@ public partial class MainWindow : Window
                 break;
             case "audio_frame":
                 HandleRemoteAudioFrame(root);
+                break;
+            case "input_event_ack":
+            case "key_event_ack":
+                HandleRemoteInputAck(root, type);
                 break;
             case "machine_management_action":
                 HandleMachineManagementAction(root);
@@ -876,6 +887,23 @@ public partial class MainWindow : Window
 
         AddLog($"Remote announcement: {text}");
         _ = _ttsService.SpeakRemoteAnnouncementAsync(text);
+    }
+
+    private void HandleRemoteInputAck(JsonElement root, string? type)
+    {
+        var success = !root.TryGetProperty("success", out var successElement) || successElement.ValueKind != JsonValueKind.False;
+        if (success)
+        {
+            return;
+        }
+
+        var error = root.TryGetProperty("error", out var errorElement)
+            ? errorElement.GetString()
+            : "remote input was rejected";
+        StopRemoteInputForwarding(error);
+        SetStatus($"Remote keyboard forwarding stopped because the remote machine rejected input: {error}. Keyboard returned to this computer.");
+        AddLog($"{type ?? "input_event_ack"} reported failure: {error}");
+        PlaySound(SoundAction.Error);
     }
 
     private void HandleMachineManagementAction(JsonElement root)
@@ -3033,7 +3061,11 @@ public partial class MainWindow : Window
         _controllerActionsMenuQueued = true;
         try
         {
-            await WaitForControllerHotkeyReleaseAsync();
+            if (!await WaitForControllerHotkeyReleaseAsync())
+            {
+                SetStatus("Release Control Alt Backslash to open OpenLink controller actions.");
+                return;
+            }
             await Task.Delay(_remoteInputActive || _remoteInputPending ? 40 : 120);
             if (_controllerActionsMenuOpen && _controllerActionsMenu is not null)
             {
@@ -3049,12 +3081,14 @@ public partial class MainWindow : Window
         }
     }
 
-    private static async Task WaitForControllerHotkeyReleaseAsync()
+    private static async Task<bool> WaitForControllerHotkeyReleaseAsync()
     {
-        for (var i = 0; i < 20 && IsControllerHotkeyChordDown(); i++)
+        for (var i = 0; i < 100 && IsControllerHotkeyChordDown(); i++)
         {
             await Task.Delay(25);
         }
+
+        return !IsControllerHotkeyChordDown();
     }
 
     private static bool IsControllerHotkeyChordDown()

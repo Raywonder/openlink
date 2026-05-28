@@ -48,7 +48,7 @@ echo Updating local OpenLink install at "%INSTALL_DIR%"...
 taskkill /IM OpenLink.exe /F >nul 2>nul
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 robocopy "%PUBLISH_DIR%" "%INSTALL_DIR%" /MIR /NFL /NDL /NJH /NJS /NP
-if %ERRORLEVEL% GEQ 8 exit /b %ERRORLEVEL%
+if %ERRORLEVEL% GEQ 4 exit /b %ERRORLEVEL%
 exit /b 0
 
 :launch_local
