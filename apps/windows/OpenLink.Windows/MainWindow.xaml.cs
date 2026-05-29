@@ -23,6 +23,10 @@ public partial class MainWindow : Window
 {
     private const string CurrentWhatIsNewNotes =
         """
+        - Controller actions now pause remote keyboard forwarding while the Ctrl Alt Backslash menu is open. Escape or closing without an action resumes remote control; choosing a menu action keeps the keyboard local until Start Using is chosen again.
+        - Windows now starts its controlled-side audio route when another machine begins an interaction, so Windows-to-remote audio can flow back through the same OpenLink signal path.
+        - Remote audio frames now use the same machine-alias targeting as control messages, reducing false offline or dropped-audio cases when device names differ.
+        - macOS audio capture no longer lets microphone startup failure block ScreenCaptureKit system audio, and Mac playback reconnects when incoming audio format changes.
         - Screen-reader readouts now use native UI Automation live-region events on Windows and NSAccessibility announcements on macOS.
         - OpenLink now shows a tCast-style What is New dialog after updates and keeps release notes available from the File menu.
         - macOS Settings now opens in a real foreground window and can be reopened from the app menu.
@@ -75,6 +79,8 @@ public partial class MainWindow : Window
     private DateTimeOffset _lastSignalPongAt = DateTimeOffset.MinValue;
     private bool _controllerActionsMenuQueued;
     private bool _controllerActionsMenuOpen;
+    private bool _remoteInputPausedForControllerMenu;
+    private bool _controllerMenuActionChosen;
     private Forms.ContextMenuStrip? _controllerActionsMenu;
     private bool _controllerHotkeyChordDown;
     private DateTimeOffset? _emergencyReleaseChordStartedAt;
@@ -372,6 +378,10 @@ public partial class MainWindow : Window
                 return new IntPtr(1);
             }
             if (_controllerActionsMenuOpen)
+            {
+                return CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
+            }
+            if (_remoteInputPausedForControllerMenu)
             {
                 return CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
             }
@@ -1445,6 +1455,7 @@ public partial class MainWindow : Window
 
         _sessionActive = true;
         UpdateConnectedUiState();
+        StartAudioBridgeForRemoteController(remoteMachine, GetSourceMachineId(root), $"controlled by {remoteMachine?.DisplayName ?? "remote controller"}");
         PlaySound(SoundAction.Connect);
         var acceptedMessage = $"Remote keyboard and audio control accepted from {remoteMachine?.DisplayName ?? "another OpenLink machine"}. Use Control Alt Backslash for local OpenLink actions.";
         SetStatus(acceptedMessage);
@@ -1470,6 +1481,7 @@ public partial class MainWindow : Window
         }
 
         _audioBridge.SetFrameSink(null);
+        _audioBridge.Stop();
         SetStatus("Remote interaction ended. Local keyboard and audio remain on this computer.");
         _ = SendPeerAsync(new
         {
@@ -1644,6 +1656,8 @@ public partial class MainWindow : Window
         _remoteInputActivationCts = null;
         _remoteInputPending = false;
         _remoteInputActive = true;
+        _remoteInputPausedForControllerMenu = false;
+        _controllerMenuActionChosen = false;
         AddLog($"Remote keyboard forwarding enabled for {_remoteInputMachine.DisplayName} ({_remoteInputMachine.Platform}).", announce: false);
         StartAudioBridge($"using {_remoteInputMachine.DisplayName}");
         var screenReaderMessage = BuildScreenReaderConnectionMessage(_remoteInputMachine);
@@ -1674,6 +1688,8 @@ public partial class MainWindow : Window
 
         _remoteInputActive = false;
         _remoteInputPending = false;
+        _remoteInputPausedForControllerMenu = false;
+        _controllerMenuActionChosen = false;
         _remoteInputRequestId = null;
         _remoteInputMachine = null;
     }
@@ -2489,6 +2505,48 @@ public partial class MainWindow : Window
         AddLog($"Audio bridge active for {reason}: {_audioBridge.StatusText}", announce: false);
     }
 
+    private void StartAudioBridgeForRemoteController(MachineRecord? controllerMachine, string? controllerMachineId, string reason)
+    {
+        if (!_settings.AllowAudio)
+        {
+            AddLog("Remote audio capture is disabled in OpenLink settings.", announce: false);
+            return;
+        }
+
+        var targetId = !string.IsNullOrWhiteSpace(controllerMachine?.Id)
+            ? controllerMachine!.Id
+            : controllerMachineId;
+        if (string.IsNullOrWhiteSpace(targetId))
+        {
+            AddLog("Remote audio capture could not start because the controller machine id was missing.", announce: false);
+            return;
+        }
+
+        var target = controllerMachine ?? new MachineRecord
+        {
+            Id = targetId,
+            DisplayName = targetId,
+            MachineHostname = targetId,
+            Platform = "Unknown",
+            AllowMicrophoneAudio = _settings.AllowMicrophoneAudio,
+            AllowSystemAudio = _settings.AllowSystemAudio
+        };
+
+        StartAudioBridge(reason);
+        _audioBridge.SetFrameSink(frame => SendRemoteAudioFrameAsync(target, frame));
+        _ = SendPeerAsync(new
+        {
+            type = "audio_route_status",
+            targetMachineId = target.Id,
+            sourceMachineId = Environment.MachineName,
+            sourcePlatform = "Windows",
+            microphoneCaptureStarted = _settings.AllowMicrophoneAudio,
+            systemAudioRequested = _settings.AllowSystemAudio,
+            systemAudioCaptureStarted = _settings.AllowSystemAudio,
+            message = "Windows audio routing started."
+        });
+    }
+
     private object CreateLocalMachineInfo(string serverUrl)
     {
         return new
@@ -3166,10 +3224,7 @@ public partial class MainWindow : Window
 
     private void HandleRemoteAudioFrame(JsonElement root)
     {
-        var target = root.TryGetProperty("targetMachineId", out var targetElement) ? targetElement.GetString() : null;
-        if (!string.IsNullOrWhiteSpace(target) &&
-            !string.Equals(target, Environment.MachineName, StringComparison.OrdinalIgnoreCase) &&
-            !_machines.Any(machine => string.Equals(machine.Id, target, StringComparison.OrdinalIgnoreCase) && IsLocalMachine(machine)))
+        if (!IsMessageTargetedToThisMachine(root))
         {
             return;
         }
@@ -3739,6 +3794,10 @@ public partial class MainWindow : Window
         var hasRemoteSession = IsActiveRemoteSessionFor(lastMachine);
         if (hasRemoteSession)
         {
+            PauseRemoteInputForControllerMenu(lastMachine);
+        }
+        if (hasRemoteSession)
+        {
             AddTrayMenuItem(menu, $"Start Using {lastMachine.DisplayName}", $"Start full keyboard control and remote audio transmission for {lastMachine.DisplayName}", (_, _) => _ = StartUsingMachineAsync(lastMachine));
             AddTrayMenuItem(menu, $"Minimize Remote Connection to Use Local Machine", "Pause active remote interaction and return focus to this local computer", (_, _) => _ = MinimizeRemoteForLocalUseAsync(lastMachine));
             AddTrayMenuItem(menu, $"Disconnect from {lastMachine.DisplayName}", "Disconnect this computer from the connected device", (_, _) => _ = DisconnectFromDeviceAsync(lastMachine));
@@ -3770,10 +3829,15 @@ public partial class MainWindow : Window
         menu.Opening += (_, _) =>
         {
             _controllerActionsMenuOpen = true;
+            _controllerMenuActionChosen = false;
             if (menu.Items.Count > 0)
             {
                 menu.Items[0].Select();
             }
+        };
+        menu.ItemClicked += (_, _) =>
+        {
+            _controllerMenuActionChosen = true;
         };
         menu.KeyDown += (_, e) =>
         {
@@ -3795,6 +3859,14 @@ public partial class MainWindow : Window
             }
             if (hasRemoteSession)
             {
+                if (_controllerMenuActionChosen)
+                {
+                    KeepRemoteInputPausedAfterControllerMenu(lastMachine);
+                }
+                else
+                {
+                    ResumeRemoteInputAfterControllerMenu(lastMachine);
+                }
                 HideOpenLinkWindow();
             }
             owner.Hide();
@@ -3808,8 +3880,40 @@ public partial class MainWindow : Window
         }));
         _ = RefocusControllerMenuAfterDelayAsync(menu, owner, position, TimeSpan.FromMilliseconds(150));
         SetStatus(hasRemoteSession
-            ? $"Controller actions for {lastMachine.DisplayName}. Use arrow keys to choose an action. Escape closes the menu and keeps OpenLink in the tray."
+            ? $"Controller actions for {lastMachine.DisplayName}. Remote keyboard is paused while this menu is open. Escape closes the menu and resumes remote control."
             : $"Connection actions for {lastMachine.DisplayName}. Use Recent Connections for another device. Escape closes the menu.");
+    }
+
+    private void PauseRemoteInputForControllerMenu(MachineRecord machine)
+    {
+        if (!_remoteInputActive || _remoteInputPausedForControllerMenu)
+        {
+            return;
+        }
+
+        _remoteInputPausedForControllerMenu = true;
+        AddLog($"Remote keyboard forwarding paused while controller actions are open for {machine.DisplayName}.", announce: false);
+    }
+
+    private void ResumeRemoteInputAfterControllerMenu(MachineRecord machine)
+    {
+        if (!_remoteInputPausedForControllerMenu)
+        {
+            return;
+        }
+
+        _remoteInputPausedForControllerMenu = false;
+        SetStatus($"Controller actions closed. Keyboard forwarding resumed for {machine.DisplayName}.");
+    }
+
+    private void KeepRemoteInputPausedAfterControllerMenu(MachineRecord machine)
+    {
+        if (!_remoteInputPausedForControllerMenu)
+        {
+            return;
+        }
+
+        SetStatus($"Controller action chosen. Keyboard is local now; choose Start Using {machine.DisplayName} to resume remote keyboard control.");
     }
 
     private void AddRemoteAudioMenu(Forms.ContextMenuStrip menu, MachineRecord machine)

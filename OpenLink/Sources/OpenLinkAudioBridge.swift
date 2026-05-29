@@ -15,7 +15,8 @@ final class OpenLinkAudioBridge {
     private let systemAudioCapture = MacSystemAudioCapture()
     private var isPlayerAttached = false
     private var isCapturing = false
-    private var lastFrameTime = Date.distantPast
+    private var lastFrameTimes: [String: Date] = [:]
+    private var playbackFormatKey: String?
     private let lock = NSLock()
     private var captureBufferSamples = 512
     private var playbackBufferSamples = 512
@@ -47,11 +48,10 @@ final class OpenLinkAudioBridge {
     @discardableResult
     func startCapture(targetMachineId: String, directBufferSamples: Int? = nil, requestedCodec: String? = nil, frameSink: @escaping ([String: Any]) -> Void) -> Bool {
         lock.lock()
-        defer { lock.unlock() }
-
         currentCaptureTargetMachineId = targetMachineId
         currentFrameSink = frameSink
         if isCapturing {
+            lock.unlock()
             return true
         }
 
@@ -65,49 +65,58 @@ final class OpenLinkAudioBridge {
         } else if let savedCodec = UserDefaults.standard.string(forKey: "audioStreamingCodec") {
             self.requestedCodec = Self.normalizeCodec(savedCodec)
         }
+        let activeCaptureBufferSamples = captureBufferSamples
+        lock.unlock()
 
         let input = captureEngine.inputNode
         let format = input.inputFormat(forBus: 0)
         let allowMicrophoneAudio = UserDefaults.standard.object(forKey: "allowMicrophoneAudio") as? Bool ?? true
+        var microphoneStarted = false
         if allowMicrophoneAudio {
-            input.removeTap(onBus: 0)
-            input.installTap(onBus: 0, bufferSize: AVAudioFrameCount(captureBufferSamples), format: format) { [weak self] buffer, _ in
-                guard let self else { return }
-                self.lock.lock()
-                let captureSamples = self.captureBufferSamples
-                self.lock.unlock()
-
-                let now = Date()
-                if now.timeIntervalSince(self.lastFrameTime) < Self.frameIntervalSeconds(samples: captureSamples, sampleRate: format.sampleRate) {
-                    return
+            do {
+                input.removeTap(onBus: 0)
+                input.installTap(onBus: 0, bufferSize: AVAudioFrameCount(activeCaptureBufferSamples), format: format) { [weak self] buffer, _ in
+                    guard let self else { return }
+                    guard let data = Self.stereoInt16PCMData(from: buffer) else { return }
+                    self.sendAudioFrame(
+                        source: "microphone",
+                        sampleRate: Int(format.sampleRate),
+                        bitsPerSample: 16,
+                        channels: Self.transportChannels,
+                        data: data
+                    )
                 }
-                self.lastFrameTime = now
-
-                guard let data = Self.stereoInt16PCMData(from: buffer) else { return }
-                self.sendAudioFrame(
-                    source: "microphone",
-                    sampleRate: Int(format.sampleRate),
-                    bitsPerSample: 16,
-                    channels: Self.transportChannels,
-                    data: data
-                )
+                try captureEngine.start()
+                microphoneStarted = true
+            } catch {
+                input.removeTap(onBus: 0)
+                microphoneStarted = false
             }
         }
 
-        do {
-            if allowMicrophoneAudio {
-                try captureEngine.start()
-            }
-            isCapturing = true
-            startSystemAudioCaptureIfAllowed()
-            sendAudioRouteStatus(message: "Mac audio routing started.", microphoneStarted: allowMicrophoneAudio, systemAudioRequested: systemAudioAllowed(), systemAudioStarted: systemAudioCapture.isRunning)
+        let systemRequested = systemAudioAllowed()
+        lock.lock()
+        isCapturing = microphoneStarted || systemRequested
+        lock.unlock()
+
+        if systemRequested {
+            startSystemAudioCaptureIfAllowed(microphoneStarted: microphoneStarted)
+        }
+
+        if microphoneStarted || systemRequested {
+            sendAudioRouteStatus(
+                message: microphoneStarted || systemRequested ? "Mac audio routing started." : "Mac audio routing could not start.",
+                microphoneStarted: microphoneStarted,
+                systemAudioRequested: systemRequested,
+                systemAudioStarted: systemAudioCapture.isRunning
+            )
             return true
-        } catch {
-            input.removeTap(onBus: 0)
-            isCapturing = false
+        } else {
+            lock.lock()
             currentCaptureTargetMachineId = nil
             currentFrameSink = nil
-            systemAudioCapture.stop()
+            isCapturing = false
+            lock.unlock()
             return false
         }
     }
@@ -122,11 +131,12 @@ final class OpenLinkAudioBridge {
         isCapturing = false
         currentCaptureTargetMachineId = nil
         currentFrameSink = nil
+        lastFrameTimes.removeAll()
     }
 
-    private func startSystemAudioCaptureIfAllowed() {
+    private func startSystemAudioCaptureIfAllowed(microphoneStarted: Bool) {
         guard systemAudioAllowed() else {
-            sendAudioRouteStatus(message: "Mac system audio routing is disabled in OpenLink settings.", microphoneStarted: true, systemAudioRequested: false, systemAudioStarted: false)
+            sendAudioRouteStatus(message: "Mac system audio routing is disabled in OpenLink settings.", microphoneStarted: microphoneStarted, systemAudioRequested: false, systemAudioStarted: false)
             return
         }
 
@@ -134,7 +144,7 @@ final class OpenLinkAudioBridge {
             systemAudioCapture.start { [weak self] event in
                 switch event {
                 case .status(let started, let message):
-                    self?.sendAudioRouteStatus(message: message, microphoneStarted: true, systemAudioRequested: true, systemAudioStarted: started)
+                    self?.sendAudioRouteStatus(message: message, microphoneStarted: microphoneStarted, systemAudioRequested: true, systemAudioStarted: started)
                 case .frame(let sampleRate, let channels, let data):
                     self?.sendAudioFrame(
                         source: "system",
@@ -146,7 +156,7 @@ final class OpenLinkAudioBridge {
                 }
             }
         } else {
-            sendAudioRouteStatus(message: "Mac system audio routing needs macOS 13 or later.", microphoneStarted: true, systemAudioRequested: true, systemAudioStarted: false)
+            sendAudioRouteStatus(message: "Mac system audio routing needs macOS 13 or later.", microphoneStarted: microphoneStarted, systemAudioRequested: true, systemAudioStarted: false)
         }
     }
 
@@ -155,6 +165,15 @@ final class OpenLinkAudioBridge {
     }
 
     private func sendAudioFrame(source: String, sampleRate: Int, bitsPerSample: Int, channels: Int, data: Data) {
+        let sampleRate = Self.normalizeSupportedSampleRate(sampleRate)
+        lock.lock()
+        let throttleSamples = captureBufferSamples
+        lock.unlock()
+
+        guard shouldSendFrame(source: source, samples: throttleSamples, sampleRate: Double(sampleRate)) else {
+            return
+        }
+
         lock.lock()
         let targetMachineId = currentCaptureTargetMachineId
         let frameSink = currentFrameSink
@@ -166,7 +185,6 @@ final class OpenLinkAudioBridge {
         guard let targetMachineId, let frameSink else { return }
         let activeCodec = Self.activeTransportCodec(for: activeRequestedCodec)
         let bitsPerSample = Self.bitsPerSample(for: activeCodec)
-        let sampleRate = Self.normalizeSupportedSampleRate(sampleRate)
         let payload = Self.payload(data: data, sampleRate: sampleRate, bitsPerSample: bitsPerSample, channels: channels, codec: activeCodec)
         frameSink([
             "type": "audio_frame",
@@ -184,6 +202,21 @@ final class OpenLinkAudioBridge {
             "virtualDeviceName": virtualDeviceName,
             "data": payload.base64EncodedString()
         ])
+    }
+
+    private func shouldSendFrame(source: String, samples: Int, sampleRate: Double) -> Bool {
+        let now = Date()
+        let interval = Self.frameIntervalSeconds(samples: samples, sampleRate: sampleRate)
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        if let lastFrameTime = lastFrameTimes[source], now.timeIntervalSince(lastFrameTime) < interval {
+            return false
+        }
+
+        lastFrameTimes[source] = now
+        return true
     }
 
     private func sendAudioRouteStatus(message: String, microphoneStarted: Bool, systemAudioRequested: Bool, systemAudioStarted: Bool) {
@@ -237,10 +270,20 @@ final class OpenLinkAudioBridge {
         lock.lock()
         defer { lock.unlock() }
 
+        let formatKey = "\(decoded.sampleRate)-\(decoded.bitsPerSample)-\(Self.transportChannels)"
+        if isPlayerAttached && playbackFormatKey != formatKey {
+            playerNode.stop()
+            playbackEngine.disconnectNodeOutput(playerNode)
+            playbackEngine.detach(playerNode)
+            isPlayerAttached = false
+            playbackFormatKey = nil
+        }
+
         if !isPlayerAttached {
             playbackEngine.attach(playerNode)
             playbackEngine.connect(playerNode, to: playbackEngine.mainMixerNode, format: format)
             isPlayerAttached = true
+            playbackFormatKey = formatKey
         }
 
         if !playbackEngine.isRunning {
