@@ -1379,7 +1379,7 @@ struct GeneralSettingsTab: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Picker("Default signal server", selection: defaultServerBinding) {
                         ForEach(OpenLinkService.approvedWebSocketURLs, id: \.self) { url in
-                            Text(url).tag(url)
+                            Text(OpenLinkService.publicServerURL(for: url)).tag(url)
                         }
                     }
                     .pickerStyle(.menu)
@@ -1472,7 +1472,7 @@ struct ConnectionSettingsTab: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Picker("Default server", selection: defaultServerBinding) {
                         ForEach(OpenLinkService.approvedWebSocketURLs, id: \.self) { url in
-                            Text(url).tag(url)
+                            Text(OpenLinkService.publicServerURL(for: url)).tag(url)
                         }
                     }
                     .pickerStyle(.menu)

@@ -139,12 +139,19 @@ class OpenLinkService: ObservableObject {
     static let shared = OpenLinkService()
     private static let interactionShortcutHelp = "To interact with the connected device, choose Start Using the device. Use the OpenLink status menu for controller actions, disconnect, swap control, and audio. Choose Minimize Remote Connection to Use Local Machine to return to this Mac."
     static let canonicalWebSocketURL = "wss://openlink.tappedin.fm/ws"
+    static let canonicalPublicURL = "https://openlink.tappedin.fm"
     static let canonicalShareHost = "openlink.tappedin.fm"
     static let approvedWebSocketURLs = [
         "wss://openlink.tappedin.fm/ws",
         "wss://openlink.raywonderis.me/ws",
         "wss://openlink.devinecreations.net/ws",
         "wss://openlink.devine-creations.com/ws"
+    ]
+    static let approvedPublicURLs = [
+        "https://openlink.tappedin.fm",
+        "https://openlink.raywonderis.me",
+        "https://openlink.devinecreations.net",
+        "https://openlink.devine-creations.com"
     ]
 
     // State
@@ -214,6 +221,7 @@ class OpenLinkService: ObservableObject {
     private var connections: [String: NWConnection] = [:]
     private var webSocketTasks: [String: URLSessionWebSocketTask] = [:]
     private var webSocketHeartbeatTimers: [String: Timer] = [:]
+    private var lastWebSocketPongAt: [String: Date] = [:]
     private var reconnectingWebSocketIds: Set<String> = []
     private var discoveryTimer: Timer?
     private var serviceHealthTimer: Timer?
@@ -348,6 +356,7 @@ class OpenLinkService: ObservableObject {
             task.cancel(with: .normalClosure, reason: nil)
         }
         webSocketTasks.removeAll()
+        lastWebSocketPongAt.removeAll()
         for (_, timer) in webSocketHeartbeatTimers {
             timer.invalidate()
         }
@@ -946,6 +955,7 @@ class OpenLinkService: ObservableObject {
 
         let task = URLSession.shared.webSocketTask(with: request)
         webSocketTasks[server.id] = task
+        lastWebSocketPongAt[server.id] = Date()
 
         task.resume()
 
@@ -974,12 +984,12 @@ class OpenLinkService: ObservableObject {
                         "remoteControl": allowRemoteControl,
                         "clipboard": UserDefaults.standard.bool(forKey: "allowClipboardSync"),
                         "fileTransfer": UserDefaults.standard.bool(forKey: "allowFileTransfer"),
-                        "audio": UserDefaults.standard.bool(forKey: "allowAudio"),
+                        "audio": UserDefaults.standard.object(forKey: "allowAudio") as? Bool ?? true,
                         "dropIn": UserDefaults.standard.bool(forKey: "allowDropInAccess"),
                         "swapControl": UserDefaults.standard.bool(forKey: "allowSwapControl"),
                         "keyboardCoUse": false,
-                        "microphoneAudio": UserDefaults.standard.bool(forKey: "allowMicrophoneAudio"),
-                        "systemAudio": UserDefaults.standard.bool(forKey: "allowSystemAudio")
+                        "microphoneAudio": UserDefaults.standard.object(forKey: "allowMicrophoneAudio") as? Bool ?? true,
+                        "systemAudio": UserDefaults.standard.object(forKey: "allowSystemAudio") as? Bool ?? true
                     ]
                 ]
             ]
@@ -1072,6 +1082,7 @@ class OpenLinkService: ObservableObject {
                 self?.runtimeLog("websocket receive failed for \(serverId): \(error.localizedDescription)")
                 self?.updateServerOnlineStatus(serverId: serverId, isOnline: false)
                 self?.webSocketTasks.removeValue(forKey: serverId)
+                self?.lastWebSocketPongAt.removeValue(forKey: serverId)
                 self?.stopWebSocketHeartbeat(for: serverId)
                 self?.scheduleLocalSignalingReconnectIfNeeded(serverId: serverId, reason: error.localizedDescription)
                 self?.sendDiagnosticEvent("signaling_receive_failed", serverId: serverId, outcome: "error", metadata: [
@@ -1089,8 +1100,10 @@ class OpenLinkService: ObservableObject {
 
         switch type {
         case "connected":
+            lastWebSocketPongAt[serverId] = Date()
             runtimeLog("signaling connected serverId=\(serverId) connectionId=\(json["connectionId"] as? String ?? "unknown") version=\(json["version"] as? String ?? "unknown")")
         case "session_created", "host_session_ok", "host-session-ok", "handshake_ack", "pong":
+            lastWebSocketPongAt[serverId] = Date()
             updateServerOnlineStatus(serverId: serverId, isOnline: true)
             if type != "pong" {
                 runtimeLog("received \(type) for \(serverId)")
@@ -1491,6 +1504,17 @@ class OpenLinkService: ObservableObject {
             return
         }
 
+        if let lastPong = lastWebSocketPongAt[server.id],
+           Date().timeIntervalSince(lastPong) > 45 {
+            runtimeLog("websocket heartbeat timed out for \(server.id); reconnecting to refresh machine presence")
+            task.cancel(with: .goingAway, reason: nil)
+            webSocketTasks.removeValue(forKey: server.id)
+            lastWebSocketPongAt.removeValue(forKey: server.id)
+            stopWebSocketHeartbeat(for: server.id)
+            scheduleLocalSignalingReconnectIfNeeded(serverId: server.id, reason: "heartbeat timeout")
+            return
+        }
+
         let payload: [String: Any] = [
             "type": "ping",
             "machineInfo": machineInfo,
@@ -1510,6 +1534,16 @@ class OpenLinkService: ObservableObject {
                 self?.webSocketTasks.removeValue(forKey: server.id)
                 self?.stopWebSocketHeartbeat(for: server.id)
                 self?.scheduleLocalSignalingReconnectIfNeeded(serverId: server.id, reason: error.localizedDescription)
+            }
+        }
+
+        task.sendPing { [weak self] error in
+            DispatchQueue.main.async {
+                if let error {
+                    self?.runtimeLog("websocket native ping failed for \(server.id): \(error.localizedDescription)")
+                    return
+                }
+                self?.lastWebSocketPongAt[server.id] = Date()
             }
         }
     }
@@ -2066,6 +2100,8 @@ class OpenLinkService: ObservableObject {
             "aliases": Array(localMachineIdentityTokens()),
             "domainUsed": domainUsed,
             "platform": "macOS",
+            "routeHints": defaultRouteHints(domainUsed: domainUsed),
+            "transportPolicy": transportPolicy(),
             "audio": [
                 "sampleRate": 48_000,
                 "codec": "pcm_s16le",
@@ -2102,9 +2138,42 @@ class OpenLinkService: ObservableObject {
             "autoMuteControlledComputerAudio": UserDefaults.standard.bool(forKey: "autoMuteRemoteAudio"),
             "autoMuteProcessesOnConnect": autoMuteProcessList(),
             "managedMachineConfirmation": "desktop-built-in",
+            "transportStrategy": "rendezvous-direct-then-relay",
+            "userVisibleLinks": "https-only",
+            "hideWebSocketUrls": true,
             "companionConfirmationSupported": true,
             "companionPlatform": "iOS"
         ]
+    }
+
+    private func defaultRouteHints(domainUsed: String) -> [[String: Any]] {
+        let publicURL = Self.publicServerURL(for: domainUsed)
+        return [
+            ["mode": "rendezvous", "priority": 10, "url": publicURL],
+            ["mode": "relay", "priority": 20, "url": "\(publicURL)/relay"],
+            ["mode": "cloudflare-edge", "priority": 30, "url": Self.cloudflareEdgeURL(for: publicURL), "role": "optional-rendezvous-fallback"],
+            ["mode": "tailnet-direct", "priority": 90, "url": "hidden-direct-candidate"]
+        ]
+    }
+
+    private func transportPolicy() -> [String: Any] {
+        [
+            "strategy": "rendezvous-direct-then-relay",
+            "userVisibleLinks": "https-only",
+            "hideWebSocketUrls": true,
+            "fallbackOrder": ["public-signal", "relay", "cloudflare-edge", "tailnet-direct"],
+            "inspiredBy": "rendezvous-plus-relay-edge"
+        ]
+    }
+
+    private static func cloudflareEdgeURL(for publicURL: String) -> String {
+        guard let host = URL(string: publicURL)?.host else {
+            return "https://openlink-edge.tappedin.fm"
+        }
+        if host.caseInsensitiveCompare("openlink.raywonderis.me") == .orderedSame {
+            return "https://openlink-edge.raywonderis.me"
+        }
+        return "https://openlink-edge.tappedin.fm"
     }
 
     func normalizeEndpoint(_ rawValue: String, allowCustomServer: Bool = false) -> String {
@@ -2147,6 +2216,17 @@ class OpenLinkService: ObservableObject {
     static func isApprovedDefaultWebSocketURL(_ value: String) -> Bool {
         let normalized = normalizedEndpointForComparison(value)
         return approvedWebSocketURLs.contains { $0.caseInsensitiveCompare(normalized) == .orderedSame }
+    }
+
+    static func publicServerURL(for value: String) -> String {
+        let normalized = normalizedEndpointForComparison(value)
+        guard var components = URLComponents(string: normalized) else {
+            return canonicalPublicURL
+        }
+        components.scheme = components.scheme == "ws" ? "http" : "https"
+        components.path = ""
+        components.query = nil
+        return components.string?.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? canonicalPublicURL
     }
 
     private static func normalizedEndpointForComparison(_ value: String) -> String {

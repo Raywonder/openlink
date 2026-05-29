@@ -1,0 +1,20 @@
+name = "openlink-edge"
+main = "openlink-edge-worker.js"
+compatibility_date = "2026-05-29"
+
+[[durable_objects.bindings]]
+name = "OPENLINK_EDGE_ROOM"
+class_name = "OpenLinkEdgeRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["OpenLinkEdgeRoom"]
+
+# Set this as a secret in production:
+# wrangler secret put OPENLINK_EDGE_SHARED_TOKEN
+#
+# Route examples after DNS is ready:
+# routes = [
+#   { pattern = "openlink-edge.tappedin.fm/*", zone_name = "tappedin.fm" },
+#   { pattern = "openlink-edge.raywonderis.me/*", zone_name = "raywonderis.me" }
+# ]

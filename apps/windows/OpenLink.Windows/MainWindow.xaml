@@ -92,10 +92,10 @@
                       IsEditable="False"
                       AutomationProperties.LabeledBy="{Binding ElementName=ServerLabel}"
                       Visibility="Collapsed">
-                <ComboBoxItem Content="wss://openlink.tappedin.fm/ws" IsSelected="True" />
-                <ComboBoxItem Content="wss://openlink.raywonderis.me/ws" />
-                <ComboBoxItem Content="wss://openlink.devinecreations.net/ws" />
-                <ComboBoxItem Content="wss://openlink.devine-creations.com/ws" />
+                <ComboBoxItem Content="https://openlink.tappedin.fm" IsSelected="True" />
+                <ComboBoxItem Content="https://openlink.raywonderis.me" />
+                <ComboBoxItem Content="https://openlink.devinecreations.net" />
+                <ComboBoxItem Content="https://openlink.devine-creations.com" />
             </ComboBox>
 
             <Label x:Name="SessionLabel"

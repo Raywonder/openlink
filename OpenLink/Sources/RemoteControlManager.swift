@@ -1644,10 +1644,10 @@ class RemoteControlManager: ObservableObject {
     }
 
     private func loadSettings() {
-        clipboardSyncEnabled = UserDefaults.standard.bool(forKey: "clipboardSyncEnabled")
-        inputForwardingEnabled = UserDefaults.standard.bool(forKey: "inputForwardingEnabled")
-        screenSharingEnabled = UserDefaults.standard.bool(forKey: "screenSharingEnabled")
-        fileSharingEnabled = UserDefaults.standard.bool(forKey: "fileSharingEnabled")
+        clipboardSyncEnabled = UserDefaults.standard.object(forKey: "clipboardSyncEnabled") as? Bool ?? true
+        inputForwardingEnabled = UserDefaults.standard.object(forKey: "inputForwardingEnabled") as? Bool ?? true
+        screenSharingEnabled = UserDefaults.standard.object(forKey: "screenSharingEnabled") as? Bool ?? false
+        fileSharingEnabled = UserDefaults.standard.object(forKey: "fileSharingEnabled") as? Bool ?? true
 
         // Set defaults if not set
         if !UserDefaults.standard.bool(forKey: "settingsInitialized") {

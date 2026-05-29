@@ -20,9 +20,10 @@ public partial class SettingsWindow : Window
 
     private void LoadSettings()
     {
-        DefaultServerBox.Text = EndpointNormalizer.NormalizeWebSocketUrl(
-            Settings.DefaultServerUrl,
-            Settings.CustomSignalingServerAccessEnabled);
+        DefaultServerBox.Text = EndpointNormalizer.ToPublicServerUrl(
+            EndpointNormalizer.NormalizeWebSocketUrl(
+                Settings.DefaultServerUrl,
+                Settings.CustomSignalingServerAccessEnabled));
         SessionPrefixBox.Text = Settings.SessionPrefix;
         StartHostingOnLaunchBox.IsChecked = Settings.StartHostingOnLaunch;
         CopyLinkWhenHostingStartsBox.IsChecked = Settings.CopyLinkWhenHostingStarts;
@@ -185,9 +186,9 @@ public partial class SettingsWindow : Window
     {
         var serverText = DefaultServerBox.Text.Trim();
         if (!Uri.TryCreate(serverText, UriKind.Absolute, out var serverUri) ||
-            (serverUri.Scheme != "wss" && serverUri.Scheme != "ws"))
+            (serverUri.Scheme != "https" && serverUri.Scheme != "http" && serverUri.Scheme != "wss" && serverUri.Scheme != "ws"))
         {
-            ShowValidationError("Default server must be a ws or wss URL.", DefaultServerBox);
+            ShowValidationError("Default server must be an http or https URL. OpenLink will use the matching secure WebSocket internally.", DefaultServerBox);
             return false;
         }
 
@@ -237,7 +238,7 @@ public partial class SettingsWindow : Window
     private void ConfigureDefaultServerChoices()
     {
         DefaultServerBox.Items.Clear();
-        foreach (var url in EndpointNormalizer.ApprovedWebSocketUrls)
+        foreach (var url in EndpointNormalizer.ApprovedPublicUrls)
         {
             DefaultServerBox.Items.Add(new ComboBoxItem { Content = url });
         }
@@ -246,7 +247,7 @@ public partial class SettingsWindow : Window
         if (Settings.CustomSignalingServerAccessEnabled &&
             !EndpointNormalizer.IsApprovedDefaultWebSocketUrl(Settings.DefaultServerUrl))
         {
-            DefaultServerBox.Items.Add(new ComboBoxItem { Content = Settings.DefaultServerUrl });
+            DefaultServerBox.Items.Add(new ComboBoxItem { Content = EndpointNormalizer.ToPublicServerUrl(Settings.DefaultServerUrl) });
         }
     }
 

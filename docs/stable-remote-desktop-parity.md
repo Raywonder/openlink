@@ -16,12 +16,14 @@ This checklist keeps OpenLink aligned with the mature remote-desktop behavior ex
 - macOS signing: release builds must package real `.app` bundles and sign them with the configured OpenLink macOS signing identity/profile. Raw Swift executables are build intermediates only.
 - iOS companion role: the iOS companion app manages machines remotely, receives or displays confirmation codes for managed-machine connections, and approves or denies managed access when the desktop app is not in front. Native desktop apps keep the same machine-management, confirmation, drop-in, disconnect, swap-control, and audio controls built in.
 - Stability guard: a client disconnecting immediately after creating a session must not crash the signaling server.
+- Backend fallback: primary Node signaling stays first, normal relay stays second, and Cloudflare Durable Object edge rendezvous can be enabled as an optional `cloudflare-edge` fallback for presence/control routing. Generated user links remain HTTPS-only; raw WebSocket URLs stay hidden.
 
 ## Current Source Anchors
 
 - WebRTC media, menu, TTS, and keyboard behavior: `remote-desktop/webrtc-client.js`
 - Legacy web UI control menu: `remote-desktop/ui/app.js`
 - Signaling server crash guards: `servers/`, `src/`, and the deployed server copy
+- Optional Cloudflare edge rendezvous backend: `servers/cloudflare/`
 - Native macOS input/control service: `OpenLink/Sources/RemoteControlManager.swift`
 - Native Windows client: `apps/windows/OpenLink.Windows/`
 

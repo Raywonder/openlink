@@ -297,6 +297,7 @@ public static class MachineStore
 public static class EndpointNormalizer
 {
     public const string CanonicalWebSocketUrl = "wss://openlink.tappedin.fm/ws";
+    public const string CanonicalPublicUrl = "https://openlink.tappedin.fm";
     public const string CanonicalShareHost = "openlink.tappedin.fm";
     public static readonly string[] ApprovedWebSocketUrls =
     [
@@ -304,6 +305,13 @@ public static class EndpointNormalizer
         "wss://openlink.raywonderis.me/ws",
         "wss://openlink.devinecreations.net/ws",
         "wss://openlink.devine-creations.com/ws"
+    ];
+    public static readonly string[] ApprovedPublicUrls =
+    [
+        "https://openlink.tappedin.fm",
+        "https://openlink.raywonderis.me",
+        "https://openlink.devinecreations.net",
+        "https://openlink.devine-creations.com"
     ];
 
     public static string NormalizeWebSocketUrl(string? value, bool allowCustomServer = false)
@@ -339,6 +347,24 @@ public static class EndpointNormalizer
         return allowCustomServer || IsApprovedDefaultWebSocketUrl(normalized)
             ? normalized
             : CanonicalWebSocketUrl;
+    }
+
+    public static string ToPublicServerUrl(string? value)
+    {
+        var normalized = NormalizeWebSocketUrl(value, allowCustomServer: true);
+        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri))
+        {
+            return CanonicalPublicUrl;
+        }
+
+        var builder = new UriBuilder(uri)
+        {
+            Scheme = uri.Scheme == "ws" ? "http" : "https",
+            Path = "",
+            Query = ""
+        };
+
+        return builder.Uri.ToString().TrimEnd('/');
     }
 
     public static string SignalingEndpointForMachine(MachineRecord machine, string? preferredServerUrl, bool allowCustomServer = false)

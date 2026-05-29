@@ -54,10 +54,10 @@
                                   Margin="0,0,0,10"
                                   IsEditable="False"
                                   AutomationProperties.LabeledBy="{Binding ElementName=DefaultServerLabel}">
-                            <ComboBoxItem Content="wss://openlink.tappedin.fm/ws" />
-                            <ComboBoxItem Content="wss://openlink.raywonderis.me/ws" />
-                            <ComboBoxItem Content="wss://openlink.devinecreations.net/ws" />
-                            <ComboBoxItem Content="wss://openlink.devine-creations.com/ws" />
+                            <ComboBoxItem Content="https://openlink.tappedin.fm" />
+                            <ComboBoxItem Content="https://openlink.raywonderis.me" />
+                            <ComboBoxItem Content="https://openlink.devinecreations.net" />
+                            <ComboBoxItem Content="https://openlink.devine-creations.com" />
                         </ComboBox>
 
                         <Label x:Name="SessionPrefixLabel"

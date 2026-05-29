@@ -8,9 +8,9 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>OpenLink</AssemblyName>
-    <Version>1.7.26</Version>
-    <AssemblyVersion>1.7.26.0</AssemblyVersion>
-    <FileVersion>1.7.26.0</FileVersion>
+    <Version>1.7.27</Version>
+    <AssemblyVersion>1.7.27.0</AssemblyVersion>
+    <FileVersion>1.7.27.0</FileVersion>
     <Product>OpenLink</Product>
     <Company>Raywonder</Company>
   </PropertyGroup>

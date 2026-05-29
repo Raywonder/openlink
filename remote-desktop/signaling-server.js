@@ -12,13 +12,25 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const OPENLINK_SIGNALING_VERSION = '1.7.21-presence-heartbeat';
+const OPENLINK_SIGNALING_VERSION = '1.7.27-route-watchdog';
 const CONTROL_DIAGNOSTICS_DIR = process.env.OPENLINK_DIAGNOSTICS_DIR || path.join(__dirname, 'telemetry');
 const CONTROL_DIAGNOSTICS_FILE = path.join(CONTROL_DIAGNOSTICS_DIR, 'openlink-control-events.jsonl');
+const CLOUDFLARE_BACKEND_URL = cleanOptionalUrl(process.env.OPENLINK_CLOUDFLARE_BACKEND_URL);
 
 // Import managers
 const HybridConfigManager = require('./api/hybrid-config-manager');
 const DynamicDomainManager = require('./api/dynamic-domain-manager');
+
+function cleanOptionalUrl(value) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return null;
+    try {
+        const url = new URL(trimmed);
+        return url.protocol === 'https:' ? url.toString().replace(/\/$/, '') : null;
+    } catch {
+        return null;
+    }
+}
 
 class OpenLinkSignalingServerV2 {
     constructor(options = {}) {
@@ -83,7 +95,8 @@ class OpenLinkSignalingServerV2 {
                 uptime: Date.now() - this.startTime,
                 connections: this.connections.size,
                 sessions: this.sessions.size,
-                machines: this.machineIndex.size,
+                machines: this.activeMachineCount(),
+                backends: this.backendStatus(),
                 timestamp: new Date().toISOString()
             });
         });
@@ -94,7 +107,8 @@ class OpenLinkSignalingServerV2 {
                 version: OPENLINK_SIGNALING_VERSION,
                 connections: this.connections.size,
                 sessions: this.sessions.size,
-                machines: this.machineIndex.size,
+                machines: this.activeMachineCount(),
+                backends: this.backendStatus(),
                 logFile: CONTROL_DIAGNOSTICS_FILE,
                 timestamp: new Date().toISOString()
             });
@@ -1384,8 +1398,12 @@ class OpenLinkSignalingServerV2 {
             case 'input_event_ack':
             case 'key_event_ack':
             case 'audio_frame':
+            case 'audio_route_status':
             case 'screen_reader_output':
             case 'tts_event':
+            case 'braille_announcement':
+            case 'tts_announcement':
+            case 'screen_reader_announcement':
                 await this.handleTargetedControlResponse(connectionId, data);
                 break;
 
@@ -1856,6 +1874,9 @@ class OpenLinkSignalingServerV2 {
         if (indexedConnectionId && this.connections.has(indexedConnectionId)) {
             return this.connections.get(indexedConnectionId);
         }
+        if (indexedConnectionId) {
+            this.machineIndex.delete(token);
+        }
 
         for (const [id, conn] of this.connections.entries()) {
             const candidates = [conn.machineId, conn.machineName, conn.hostname, conn.displayName];
@@ -1865,6 +1886,32 @@ class OpenLinkSignalingServerV2 {
             }
         }
         return null;
+    }
+
+    activeMachineCount() {
+        const active = new Set();
+        for (const connection of this.connections.values()) {
+            const token = this.canonicalMachineToken(connection.machineId || connection.machineName || connection.hostname || connection.displayName);
+            if (token) active.add(token);
+        }
+        return active.size;
+    }
+
+    backendStatus() {
+        return {
+            primarySignal: {
+                enabled: true,
+                transport: 'node-websocket',
+                health: '/health',
+                diagnostics: '/diagnostics/status'
+            },
+            cloudflare: {
+                enabled: Boolean(CLOUDFLARE_BACKEND_URL),
+                transport: 'cloudflare-durable-object-websocket',
+                url: CLOUDFLARE_BACKEND_URL || null,
+                role: 'optional-edge-rendezvous-fallback'
+            }
+        };
     }
 
     async handleMachinePresence(connectionId, data) {
@@ -2031,6 +2078,12 @@ class OpenLinkSignalingServerV2 {
         connection.machineName = machineInfo.machineName || machineInfo.displayName || connection.machineName || connection.hostname;
         connection.hostname = machineInfo.hostname || connection.hostname;
         connection.displayName = machineInfo.displayName || connection.displayName;
+        connection.platform = machineInfo.platform || connection.platform;
+        connection.os = machineInfo.os || machineInfo.platform || connection.os;
+        connection.version = machineInfo.version || connection.version;
+        connection.architecture = machineInfo.architecture || connection.architecture;
+        connection.routeHints = machineInfo.routeHints || machineInfo.connectionRoutes || connection.routeHints || [];
+        connection.transportPolicy = machineInfo.transportPolicy || connection.transportPolicy || {};
 
         for (const candidate of candidates) {
             const token = this.canonicalMachineToken(candidate);

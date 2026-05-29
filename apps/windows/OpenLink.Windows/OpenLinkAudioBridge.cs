@@ -22,6 +22,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
     private BufferedWaveProvider? _remotePlaybackBuffer;
     private WaveFormat? _remotePlaybackFormat;
     private bool _remotePlaybackStarted;
+    private string _remotePlaybackOutputName = "system default";
     private string _remotePlaybackDriverKey = "waveout";
     private Func<OpenLinkAudioFrame, Task>? _frameSink;
     private long _lastMicrophoneFrameTicks;
@@ -268,7 +269,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
     {
         var microphone = _microphoneCapture is null ? "microphone muted" : "microphone capture active";
         var system = _systemCapture is null ? "system audio muted" : "system audio capture active";
-        var playback = _remotePlaybackSession is null ? "remote playback inactive" : $"remote playback active via {_remotePlaybackDriverKey}";
+        var playback = _remotePlaybackSession is null ? "remote playback inactive" : $"remote playback active via {_remotePlaybackDriverKey} to {_remotePlaybackOutputName}";
         return $"OpenLink audio bridge: {microphone} ({_microphoneFormatText}), {system} ({_systemFormatText}), {playback}, direct buffer {_directAudioBufferSamples} samples, Windows playback buffer {_windowsAudioBufferSamples} samples, streaming PCM stereo 16-bit, virtual endpoint {VirtualDeviceName}.";
     }
 
@@ -397,8 +398,39 @@ public sealed class OpenLinkAudioBridge : IDisposable
             }
         }
 
-        _remotePlaybackDriverKey = "WaveOut/WASAPI-compatible";
-        return new WaveOutEvent { DesiredLatency = WindowsDesiredLatencyMilliseconds(format.SampleRate), Volume = _remotePlaybackVolume };
+        if (TryCreateWasapiDefaultPlayback(out var wasapiPlayback))
+        {
+            return wasapiPlayback;
+        }
+
+        _remotePlaybackDriverKey = "WaveOut fallback";
+        _remotePlaybackOutputName = "Windows wave mapper";
+        return new WaveOutEvent
+        {
+            DeviceNumber = -1,
+            DesiredLatency = WindowsDesiredLatencyMilliseconds(format.SampleRate),
+            Volume = _remotePlaybackVolume
+        };
+    }
+
+    private bool TryCreateWasapiDefaultPlayback(out IWavePlayer playback)
+    {
+        playback = null!;
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            _remotePlaybackDriverKey = "WASAPI shared";
+            _remotePlaybackOutputName = string.IsNullOrWhiteSpace(device.FriendlyName)
+                ? "system default audio device"
+                : device.FriendlyName;
+            playback = new WasapiOut(device, AudioClientShareMode.Shared, true, WindowsDesiredLatencyMilliseconds(device.AudioClient.MixFormat.SampleRate));
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private TimeSpan CaptureFrameInterval(int sampleRate)

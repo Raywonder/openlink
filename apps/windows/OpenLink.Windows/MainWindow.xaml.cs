@@ -39,6 +39,8 @@ public partial class MainWindow : Window
     private readonly Forms.NotifyIcon _trayIcon;
     private readonly DispatcherTimer _healthTimer;
     private readonly DispatcherTimer _elapsedTimer;
+    private readonly DispatcherTimer _webSocketHeartbeatTimer;
+    private readonly DispatcherTimer _emergencyReleaseTimer;
     private readonly OpenLinkAudioBridge _audioBridge = new();
     private readonly OpenLinkTtsService _ttsService;
     private readonly BrailleDisplayService _brailleDisplay;
@@ -65,10 +67,14 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _remoteInputActivationCts;
     private MachineRecord? _remoteInputMachine;
     private TaskCompletionSource<bool>? _hostingReadyTcs;
+    private DateTimeOffset _lastSignalPongAt = DateTimeOffset.MinValue;
     private bool _controllerActionsMenuQueued;
     private bool _controllerActionsMenuOpen;
     private Forms.ContextMenuStrip? _controllerActionsMenu;
     private bool _controllerHotkeyChordDown;
+    private DateTimeOffset? _emergencyReleaseChordStartedAt;
+    private bool _emergencyReleaseTriggeredForHold;
+    private bool _emergencyRestartTriggeredForHold;
     private int _ctrlAltDeletePressCount;
     private DateTimeOffset _lastCtrlAltDeletePress = DateTimeOffset.MinValue;
     private bool _returnFromLocalLockPending;
@@ -78,6 +84,7 @@ public partial class MainWindow : Window
     private LowLevelKeyboardProc? _keyboardHookProc;
     private const int ControllerActionsHotkeyId = 0x4f4c;
     private const int ControllerActionsShiftHotkeyId = 0x4f4d;
+    private const int EmergencyReleaseHotkeyId = 0x4f4e;
     private const int WmHotkey = 0x0312;
     private const int WhKeyboardLl = 13;
     private const int WmKeydown = 0x0100;
@@ -132,6 +139,10 @@ public partial class MainWindow : Window
         _healthTimer.Tick += async (_, _) => await RefreshServiceHealthAsync();
         _elapsedTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _elapsedTimer.Tick += (_, _) => RebuildTrayMenu();
+        _webSocketHeartbeatTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
+        _webSocketHeartbeatTimer.Tick += async (_, _) => await SendSignalHeartbeatAsync();
+        _emergencyReleaseTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+        _emergencyReleaseTimer.Tick += (_, _) => CheckEmergencyReleaseChord();
         ApplySettingsToMainWindow();
         UpdateSelectedMachineActionLabels();
         SessionTextBox.Text = CreateSessionId();
@@ -145,12 +156,15 @@ public partial class MainWindow : Window
             {
                 UnregisterHotKey(_windowHandle, ControllerActionsHotkeyId);
                 UnregisterHotKey(_windowHandle, ControllerActionsShiftHotkeyId);
+                UnregisterHotKey(_windowHandle, EmergencyReleaseHotkeyId);
             }
             if (_keyboardHook != IntPtr.Zero)
             {
                 UnhookWindowsHookEx(_keyboardHook);
             }
             _trayIcon.Dispose();
+            _webSocketHeartbeatTimer.Stop();
+            _emergencyReleaseTimer.Stop();
             _controllerMenuOwner?.Dispose();
             _audioBridge.Dispose();
             _ttsService.Dispose();
@@ -171,7 +185,12 @@ public partial class MainWindow : Window
         {
             AddLog($"Ctrl+Shift+Backslash RegisterHotKey failed: {Marshal.GetLastWin32Error()}. Low-level keyboard hook fallback is active.");
         }
+        if (!RegisterHotKey(_windowHandle, EmergencyReleaseHotkeyId, ModControl | ModAlt | ModShift, (uint)VkEscape))
+        {
+            AddLog($"Ctrl+Alt+Shift+Escape RegisterHotKey failed: {Marshal.GetLastWin32Error()}. emergency timer and keyboard hook fallback are active.");
+        }
         InstallKeyboardHookFallback();
+        _emergencyReleaseTimer.Start();
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -189,8 +208,48 @@ public partial class MainWindow : Window
                 ShowMachinesAndSettingsSurface();
             }
         }
+        else if (msg == WmHotkey && wParam.ToInt32() == EmergencyReleaseHotkeyId)
+        {
+            handled = true;
+            EmergencyReleaseLocalControl("Control Alt Shift Escape hotkey");
+        }
 
         return IntPtr.Zero;
+    }
+
+    private void CheckEmergencyReleaseChord()
+    {
+        if (!IsEmergencyReleaseChordDown())
+        {
+            _emergencyReleaseChordStartedAt = null;
+            _emergencyReleaseTriggeredForHold = false;
+            _emergencyRestartTriggeredForHold = false;
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        _emergencyReleaseChordStartedAt ??= now;
+        var heldFor = now - _emergencyReleaseChordStartedAt.Value;
+
+        if (!_emergencyReleaseTriggeredForHold && heldFor >= TimeSpan.FromMilliseconds(500))
+        {
+            _emergencyReleaseTriggeredForHold = true;
+            EmergencyReleaseLocalControl("Control Alt Shift Escape hold");
+        }
+
+        if (!_emergencyRestartTriggeredForHold && heldFor >= TimeSpan.FromSeconds(3))
+        {
+            _emergencyRestartTriggeredForHold = true;
+            RestartOpenLinkAfterEmergencyHold();
+        }
+    }
+
+    private static bool IsEmergencyReleaseChordDown()
+    {
+        return IsKeyCurrentlyDown(VkControl) &&
+               IsKeyCurrentlyDown(VkMenu) &&
+               IsKeyCurrentlyDown(VkShift) &&
+               IsKeyCurrentlyDown(VkEscape);
     }
 
     private void InstallKeyboardHookFallback()
@@ -284,6 +343,12 @@ public partial class MainWindow : Window
             }
             if (_remoteInputActive && _remoteInputMachine is not null)
             {
+                if (keyDown && vkCode == VkEscape && ctrlDown && altDown && shiftDown)
+                {
+                    Dispatcher.BeginInvoke(() => EmergencyReleaseLocalControl("Control Alt Shift Escape safety release"));
+                    return new IntPtr(1);
+                }
+
                 if (_settings.CtrlAltDeleteGuardEnabled && ctrlDown && altDown && vkCode == VkDelete)
                 {
                     if (keyDown)
@@ -291,17 +356,6 @@ public partial class MainWindow : Window
                         Dispatcher.BeginInvoke(() => HandleCtrlAltDeleteDuringRemoteControl(_remoteInputMachine));
                     }
 
-                    return new IntPtr(1);
-                }
-
-                if (keyDown && vkCode == VkEscape && ctrlDown && altDown && shiftDown)
-                {
-                    Dispatcher.BeginInvoke(() =>
-                    {
-                        StopRemoteInputForwarding("Control Alt Shift Escape safety release");
-                        SetStatus("Remote keyboard forwarding stopped. Keyboard returned to this computer.");
-                        QueueControllerActionsMenu();
-                    });
                     return new IntPtr(1);
                 }
             }
@@ -420,6 +474,8 @@ public partial class MainWindow : Window
             using var connectTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             await _socket.ConnectAsync(new Uri(serverUrl), connectTimeout.Token);
             _socketCancellation = new CancellationTokenSource();
+            _lastSignalPongAt = DateTimeOffset.UtcNow;
+            _webSocketHeartbeatTimer.Start();
             AddLog($"Connected to {serverUrl}");
             _ = SendDiagnosticEventAsync("signaling_connected", outcome: "success", metadata: new
             {
@@ -732,9 +788,14 @@ public partial class MainWindow : Window
         switch (type)
         {
             case "connected":
+                _lastSignalPongAt = DateTimeOffset.UtcNow;
                 SetStatus("Connected. Creating session...");
                 break;
+            case "pong":
+                _lastSignalPongAt = DateTimeOffset.UtcNow;
+                break;
             case "session_created":
+                _lastSignalPongAt = DateTimeOffset.UtcNow;
                 if (root.TryGetProperty("sessionId", out var sessionElement))
                 {
                     _activeSessionId = sessionElement.GetString();
@@ -854,6 +915,36 @@ public partial class MainWindow : Window
                 _ = SendDiagnosticEventAsync("server_error", outcome: "error", metadata: new { errorType = type, message });
                 break;
         }
+    }
+
+    private async Task SendSignalHeartbeatAsync()
+    {
+        if (_socket?.State != WebSocketState.Open)
+        {
+            _webSocketHeartbeatTimer.Stop();
+            return;
+        }
+
+        if (_lastSignalPongAt != DateTimeOffset.MinValue &&
+            DateTimeOffset.UtcNow - _lastSignalPongAt > TimeSpan.FromSeconds(45))
+        {
+            AddLog("OpenLink signaling heartbeat timed out; reconnecting to refresh machine presence.", announce: false);
+            _webSocketHeartbeatTimer.Stop();
+            await StopHostingAsync();
+            if (_settings.AutoReconnectOnLaunch || _settings.StartHostingOnLaunch)
+            {
+                await StartHostingAsync();
+            }
+            return;
+        }
+
+        await SendAsync(new
+        {
+            type = "ping",
+            machineInfo = CreateLocalMachineInfo(_activeServerUrl ?? GetServerUrl()),
+            connectionPolicy = CreateConnectionPolicy(),
+            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        });
     }
 
     private static bool ShouldSuppressServerLog(string? type)
@@ -1542,6 +1633,75 @@ public partial class MainWindow : Window
         _remoteInputMachine = null;
     }
 
+    private void EmergencyReleaseLocalControl(string reason)
+    {
+        var machine = _remoteInputMachine ?? GetActiveRemoteMachine();
+        StopRemoteInputForwarding(reason);
+        _audioBridge.Stop();
+
+        if (machine is not null)
+        {
+            machine.TouchDisconnected();
+            MachineStore.Save(_machines);
+            _ = SendEmergencyDisconnectAsync(machine, reason);
+        }
+
+        _activeMachineName = null;
+        _sessionActive = false;
+
+        CloseControllerActionsMenuSilently();
+        UpdateConnectedUiState();
+        ShowFromTray();
+        var message = "Emergency release activated. Keyboard and audio returned to this computer. Hold Control Alt Shift Escape for three seconds to restart OpenLink.";
+        SetStatus(message);
+        _trayIcon.ShowBalloonTip(3000, "OpenLink emergency release", message, Forms.ToolTipIcon.Warning);
+    }
+
+    private async Task SendEmergencyDisconnectAsync(MachineRecord machine, string reason)
+    {
+        if (_socket?.State != WebSocketState.Open)
+        {
+            return;
+        }
+
+        try
+        {
+            await SendPeerAsync(new
+            {
+                type = "controller_disconnect",
+                targetMachineId = machine.Id,
+                sessionId = machine.LastSessionId,
+                emergency = true,
+                reason
+            });
+            _ = SendDiagnosticEventAsync("controller_disconnect", machine, "emergency_sent", new { reason });
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Emergency disconnect message could not be sent: {ex.Message}");
+        }
+    }
+
+    private void RestartOpenLinkAfterEmergencyHold()
+    {
+        try
+        {
+            SetStatus("Restarting OpenLink after emergency keyboard release hold.");
+            var executable = Environment.ProcessPath;
+            if (!string.IsNullOrWhiteSpace(executable) && File.Exists(executable))
+            {
+                Process.Start(new ProcessStartInfo(executable) { UseShellExecute = true });
+            }
+
+            _allowClose = true;
+            System.Windows.Application.Current.Shutdown();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"OpenLink emergency restart failed: {ex.Message}. Keyboard remains local.");
+        }
+    }
+
     private async Task SendRemoteKeyboardInputAsync(MachineRecord machine, int vkCode, int scanCode, bool isExtendedKey, bool isDown, bool ctrlDown, bool altDown, bool shiftDown)
     {
         if (!_remoteInputActive || _socket?.State != WebSocketState.Open)
@@ -1913,6 +2073,7 @@ public partial class MainWindow : Window
         try
         {
             _socketCancellation?.Cancel();
+            _webSocketHeartbeatTimer.Stop();
             if (_socket?.State == WebSocketState.Open)
             {
                 await _socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Stopped", CancellationToken.None);
@@ -2003,18 +2164,63 @@ public partial class MainWindow : Window
         var nextAccessibleName = $"Status: {status}";
         StatusTextBlock.Text = status;
         System.Windows.Automation.AutomationProperties.SetName(StatusTextBlock, nextAccessibleName);
-        if (announce)
+        var spokenStatus = CondenseStatusForAnnouncement(status);
+        if (announce && !string.IsNullOrWhiteSpace(spokenStatus))
         {
-            AnnounceStatusToScreenReader(status, previousAccessibleName, nextAccessibleName);
+            AnnounceStatusToScreenReader(spokenStatus, previousAccessibleName, nextAccessibleName);
         }
         if (_settings.AnnounceStatusChanges)
         {
             AddLog(status, announce: false);
-            if (announce)
+            if (announce && !string.IsNullOrWhiteSpace(spokenStatus))
             {
-                _ = _ttsService.SpeakStatusAsync(status);
+                _ = _ttsService.SpeakStatusAsync(spokenStatus);
             }
         }
+    }
+
+    private static string? CondenseStatusForAnnouncement(string status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return null;
+        }
+
+        if (status.Contains("audio bridge", StringComparison.OrdinalIgnoreCase)
+            || status.Contains("capture format", StringComparison.OrdinalIgnoreCase)
+            || status.Contains("sample", StringComparison.OrdinalIgnoreCase)
+            || status.Contains("buffer", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (status.StartsWith("OpenLink online and waiting", StringComparison.OrdinalIgnoreCase))
+        {
+            return "OpenLink online. Waiting for a connection.";
+        }
+
+        if (status.Contains("Remote control active", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Remote control active. Audio is starting.";
+        }
+
+        if (status.Contains("Audio is transmitting", StringComparison.OrdinalIgnoreCase)
+            || status.Contains("audio transmitting", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Audio transmitting.";
+        }
+
+        if (status.Contains("Microphone on", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Microphone on.";
+        }
+
+        if (status.Contains("Microphone off", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Microphone off.";
+        }
+
+        return status;
     }
 
     private void AnnounceMessageToScreenReader(string message)
@@ -2233,7 +2439,7 @@ public partial class MainWindow : Window
 
     private void StartAudioBridge(string reason)
     {
-        _audioBridge.Start(_settings, AddLog);
+        _audioBridge.Start(_settings, message => AddLog(message, announce: false));
         AddLog($"Audio bridge active for {reason}: {_audioBridge.StatusText}", announce: false);
     }
 
@@ -2247,6 +2453,8 @@ public partial class MainWindow : Window
             aliases = GetLocalMachineAliases(),
             domainUsed = EndpointNormalizer.ShareHostFor(serverUrl),
             platform = "Windows",
+            routeHints = CreateDefaultRouteHints(serverUrl),
+            transportPolicy = CreateTransportPolicy(),
             screenReader = DetectLocalScreenReader(),
             keyboard = DetectKeyboardLayout(),
             audio = new
@@ -2260,6 +2468,43 @@ public partial class MainWindow : Window
                 windowsAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.WindowsAudioBufferSamples)
             },
             lastSessionId = _activeSessionId
+        };
+    }
+
+    private static object[] CreateDefaultRouteHints(string serverUrl)
+    {
+        var publicServerUrl = EndpointNormalizer.ToPublicServerUrl(serverUrl);
+        return
+        [
+            new { mode = "rendezvous", priority = 10, url = publicServerUrl },
+            new { mode = "relay", priority = 20, url = $"{publicServerUrl}/relay" },
+            new { mode = "cloudflare-edge", priority = 30, url = ToCloudflareEdgeUrl(publicServerUrl), role = "optional-rendezvous-fallback" },
+            new { mode = "tailnet-direct", priority = 90, url = "hidden-direct-candidate" }
+        ];
+    }
+
+    private static string ToCloudflareEdgeUrl(string publicServerUrl)
+    {
+        if (!Uri.TryCreate(publicServerUrl, UriKind.Absolute, out var uri))
+        {
+            return "https://openlink-edge.tappedin.fm";
+        }
+
+        var host = uri.Host.Equals("openlink.raywonderis.me", StringComparison.OrdinalIgnoreCase)
+            ? "openlink-edge.raywonderis.me"
+            : "openlink-edge.tappedin.fm";
+        return $"https://{host}";
+    }
+
+    private static object CreateTransportPolicy()
+    {
+        return new
+        {
+            strategy = "rendezvous-direct-then-relay",
+            userVisibleLinks = "https-only",
+            hideWebSocketUrls = true,
+            fallbackOrder = new[] { "public-signal", "relay", "cloudflare-edge", "tailnet-direct" },
+            inspiredBy = "rendezvous-plus-relay-edge"
         };
     }
 
@@ -2650,6 +2895,7 @@ public partial class MainWindow : Window
         {
             SetStatus($"Could not connect to {machine.DisplayName} because the OpenLink signaling backend is not ready. Keyboard stayed on this computer.");
             AddLog($"Connect to {machine.DisplayName} stopped because the signaling socket was not ready. Endpoint: {endpoint}");
+            _audioBridge.SetFrameSink(null);
             _ = SendDiagnosticEventAsync("machine_connect_request", machine, "backend_not_ready", new { endpoint = EndpointNormalizer.ShareHostFor(endpoint) });
             return;
         }
@@ -2667,6 +2913,7 @@ public partial class MainWindow : Window
         {
             SetStatus($"Could not connect to {machine.DisplayName} because the OpenLink signaling socket is closed. Keyboard stayed on this computer.");
             AddLog($"machine_connect_request for {machine.DisplayName} was not sent because the signaling socket is closed.");
+            _audioBridge.SetFrameSink(null);
             _ = SendDiagnosticEventAsync("machine_connect_request", machine, "send_failed", new { endpoint = EndpointNormalizer.ShareHostFor(endpoint) });
             return;
         }
@@ -2684,6 +2931,7 @@ public partial class MainWindow : Window
         });
         _sessionActive = true;
         _audioBridge.Configure(_settings, AddLog);
+        _audioBridge.SetFrameSink(frame => SendRemoteAudioFrameAsync(machine, frame));
         UpdateConnectedUiState();
         HideToTrayForActiveSession();
 
@@ -2771,8 +3019,9 @@ public partial class MainWindow : Window
         }
 
         var requestId = Guid.NewGuid().ToString("N");
-        BeginRemoteInputHandshake(machine, requestId);
+        StartAudioBridge($"start using {machine.DisplayName}");
         _audioBridge.SetFrameSink(frame => SendRemoteAudioFrameAsync(machine, frame));
+        BeginRemoteInputHandshake(machine, requestId);
 
         var sent = await SendPeerAsync(new
         {
@@ -3482,6 +3731,8 @@ public partial class MainWindow : Window
             }
         };
         var owner = EnsureControllerMenuOwner();
+        var position = GetControllerMenuPosition();
+        menu.Opened += (_, _) => ForceFocusControllerMenu(menu, owner, position);
         menu.Closed += (_, _) =>
         {
             _controllerActionsMenuOpen = false;
@@ -3495,18 +3746,14 @@ public partial class MainWindow : Window
             }
             owner.Hide();
         };
-        var position = GetControllerMenuPosition();
         PrepareControllerMenuOwner(owner, position);
         menu.Show(owner, new DrawingPoint(0, owner.Height));
+        ForceFocusControllerMenu(menu, owner, position);
         menu.BeginInvoke(new Action(() =>
         {
-            PrepareControllerMenuOwner(owner, position);
-            menu.Focus();
-            if (menu.Items.Count > 0)
-            {
-                menu.Items[0].Select();
-            }
+            ForceFocusControllerMenu(menu, owner, position);
         }));
+        _ = RefocusControllerMenuAfterDelayAsync(menu, owner, position, TimeSpan.FromMilliseconds(150));
         SetStatus(hasRemoteSession
             ? $"Controller actions for {lastMachine.DisplayName}. Use arrow keys to choose an action. Escape closes the menu and keeps OpenLink in the tray."
             : $"Connection actions for {lastMachine.DisplayName}. Use Recent Connections for another device. Escape closes the menu.");
@@ -3595,7 +3842,7 @@ public partial class MainWindow : Window
             FormBorderStyle = Forms.FormBorderStyle.None,
             ShowInTaskbar = false,
             StartPosition = Forms.FormStartPosition.Manual,
-            Size = new System.Drawing.Size(2, 2),
+            Size = new System.Drawing.Size(320, 32),
             Location = new DrawingPoint(0, 0),
             Opacity = 0.01,
             TopMost = true,
@@ -3626,6 +3873,46 @@ public partial class MainWindow : Window
         SetForegroundWindow(owner.Handle);
         owner.Activate();
         owner.Focus();
+    }
+
+    private static void ForceFocusControllerMenu(Forms.ContextMenuStrip menu, Forms.Form owner, DrawingPoint screenPosition)
+    {
+        if (menu.IsDisposed || !menu.Visible)
+        {
+            return;
+        }
+
+        PrepareControllerMenuOwner(owner, screenPosition);
+        BringWindowToTop(menu.Handle);
+        SetActiveWindow(menu.Handle);
+        SetForegroundWindow(menu.Handle);
+        menu.Focus();
+        if (menu.Items.Count > 0)
+        {
+            menu.Items[0].Select();
+        }
+    }
+
+    private static async Task RefocusControllerMenuAfterDelayAsync(
+        Forms.ContextMenuStrip menu,
+        Forms.Form owner,
+        DrawingPoint screenPosition,
+        TimeSpan delay)
+    {
+        await Task.Delay(delay);
+        if (menu.IsDisposed || owner.IsDisposed)
+        {
+            return;
+        }
+
+        try
+        {
+            menu.BeginInvoke(new Action(() => ForceFocusControllerMenu(menu, owner, screenPosition)));
+        }
+        catch
+        {
+            // Focus recovery is best-effort; the emergency release chord remains available.
+        }
     }
 
     private async void QueueControllerActionsMenu()
