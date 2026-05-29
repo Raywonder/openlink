@@ -123,7 +123,7 @@ public partial class MainWindow : Window
     private const ulong MacAlternateFlag = 0x80000;
     private const ulong MacCommandFlag = 0x100000;
     private const string ConnectionShortcutHelp = "Press Enter on a selected machine to connect. Press Shift F10 or the Applications key for the connection menu. Press Control Alt Backslash for controller actions. Press Control Shift Backslash to show Machines and settings. Press Alt C for the Connections menu.";
-    private const string InteractionShortcutHelp = "To interact with the connected device, choose Start Using the device. Press Control Alt Backslash for controller actions. Use Minimize Remote Connection to Use Local Machine to return to this computer.";
+    private const string InteractionShortcutHelp = "To interact with the connected device, choose Start Using the device. Press Control Alt Backslash for controller actions. Hold Control Alt Shift Backslash to force disconnect and return keyboard control to this computer.";
     private static readonly string RuntimeLogDirectory = Path.Combine(OpenLinkSettingsStore.SettingsDirectory, "logs");
     private static readonly string RuntimeLogPath = Path.Combine(RuntimeLogDirectory, "openlink-windows.log");
     private const long RuntimeLogMaxBytes = 1024 * 1024;
@@ -192,9 +192,9 @@ public partial class MainWindow : Window
         {
             AddLog($"Ctrl+Shift+Backslash RegisterHotKey failed: {Marshal.GetLastWin32Error()}. Low-level keyboard hook fallback is active.");
         }
-        if (!RegisterHotKey(_windowHandle, EmergencyReleaseHotkeyId, ModControl | ModAlt | ModShift, (uint)VkEscape))
+        if (!RegisterHotKey(_windowHandle, EmergencyReleaseHotkeyId, ModControl | ModAlt | ModShift, VkOem5))
         {
-            AddLog($"Ctrl+Alt+Shift+Escape RegisterHotKey failed: {Marshal.GetLastWin32Error()}. emergency timer and keyboard hook fallback are active.");
+            AddLog($"Ctrl+Alt+Shift+Backslash RegisterHotKey failed: {Marshal.GetLastWin32Error()}. emergency timer and keyboard hook fallback are active.");
         }
         InstallKeyboardHookFallback();
         _emergencyReleaseTimer.Start();
@@ -218,7 +218,7 @@ public partial class MainWindow : Window
         else if (msg == WmHotkey && wParam.ToInt32() == EmergencyReleaseHotkeyId)
         {
             handled = true;
-            EmergencyReleaseLocalControl("Control Alt Shift Escape hotkey");
+            BeginEmergencyDisconnectHold("Control Alt Shift Backslash hotkey");
         }
 
         return IntPtr.Zero;
@@ -241,7 +241,7 @@ public partial class MainWindow : Window
         if (!_emergencyReleaseTriggeredForHold && heldFor >= TimeSpan.FromMilliseconds(500))
         {
             _emergencyReleaseTriggeredForHold = true;
-            EmergencyReleaseLocalControl("Control Alt Shift Escape hold");
+            EmergencyReleaseLocalControl("Control Alt Shift Backslash hold");
         }
 
         if (!_emergencyRestartTriggeredForHold && heldFor >= TimeSpan.FromSeconds(3))
@@ -251,12 +251,25 @@ public partial class MainWindow : Window
         }
     }
 
+    private void BeginEmergencyDisconnectHold(string reason)
+    {
+        _emergencyReleaseChordStartedAt ??= DateTimeOffset.UtcNow;
+        if (_remoteInputActive || _remoteInputPending || _sessionActive)
+        {
+            SetStatus("Hold Control Alt Shift Backslash to force disconnect this OpenLink session and return keyboard control locally.");
+        }
+        else
+        {
+            SetStatus("OpenLink emergency shortcut detected. No active remote keyboard session is currently controlling this computer.");
+        }
+    }
+
     private static bool IsEmergencyReleaseChordDown()
     {
         return IsKeyCurrentlyDown(VkControl) &&
                IsKeyCurrentlyDown(VkMenu) &&
                IsKeyCurrentlyDown(VkShift) &&
-               IsKeyCurrentlyDown(VkEscape);
+               (IsKeyCurrentlyDown((int)VkOem5) || IsKeyCurrentlyDown(VkOem102));
     }
 
     private void InstallKeyboardHookFallback()
@@ -292,15 +305,7 @@ public partial class MainWindow : Window
                 if (keyDown && !_controllerHotkeyChordDown)
                 {
                     _controllerHotkeyChordDown = true;
-                    Dispatcher.BeginInvoke(() =>
-                    {
-                        if (_remoteInputActive || _remoteInputPending)
-                        {
-                            StopRemoteInputForwarding("Control Alt Shift Backslash recovery shortcut");
-                            SetStatus("Remote keyboard forwarding stopped. Keyboard returned to this computer.");
-                        }
-                        ShowMachinesAndSettingsSurface();
-                    });
+                    Dispatcher.BeginInvoke(() => BeginEmergencyDisconnectHold("Control Alt Shift Backslash recovery shortcut"));
                 }
                 if (!keyDown)
                 {
@@ -350,12 +355,6 @@ public partial class MainWindow : Window
             }
             if (_remoteInputActive && _remoteInputMachine is not null)
             {
-                if (keyDown && vkCode == VkEscape && ctrlDown && altDown && shiftDown)
-                {
-                    Dispatcher.BeginInvoke(() => EmergencyReleaseLocalControl("Control Alt Shift Escape safety release"));
-                    return new IntPtr(1);
-                }
-
                 if (_settings.CtrlAltDeleteGuardEnabled && ctrlDown && altDown && vkCode == VkDelete)
                 {
                     if (keyDown)
@@ -1652,7 +1651,7 @@ public partial class MainWindow : Window
         {
             AddLog(screenReaderMessage, announce: false);
         }
-        SetStatus(message ?? $"Remote control active for {_remoteInputMachine.DisplayName}. Press Control Alt Backslash for controller actions, or Control Alt Shift Escape to return keyboard to this computer.");
+        SetStatus(message ?? $"Remote control active for {_remoteInputMachine.DisplayName}. Press Control Alt Backslash for controller actions, or hold Control Alt Shift Backslash to force disconnect and return keyboard to this computer.");
         PlaySound(SoundAction.Connect);
         HideOpenLinkWindow();
     }
@@ -1698,7 +1697,7 @@ public partial class MainWindow : Window
         CloseControllerActionsMenuSilently();
         UpdateConnectedUiState();
         ShowFromTray();
-        var message = "Emergency release activated. Keyboard and audio returned to this computer. Hold Control Alt Shift Escape for three seconds to restart OpenLink.";
+        var message = "Emergency disconnect activated. Keyboard and audio returned to this computer. Hold Control Alt Shift Backslash for three seconds to restart OpenLink.";
         SetStatus(message);
         _trayIcon.ShowBalloonTip(3000, "OpenLink emergency release", message, Forms.ToolTipIcon.Warning);
     }
@@ -1819,7 +1818,7 @@ public partial class MainWindow : Window
 
         if (_ctrlAltDeletePressCount == 1)
         {
-            SetStatus($"Control Alt Delete is guarded by OpenLink. Press it {_settings.CtrlAltDeleteRemotePressCount} times for {machine.DisplayName}. Press it {_settings.CtrlAltDeleteLocalLockPressCount} times for this Windows lock screen. Control Alt Shift Escape returns keyboard to this computer.");
+            SetStatus($"Control Alt Delete is guarded by OpenLink. Press it {_settings.CtrlAltDeleteRemotePressCount} times for {machine.DisplayName}. Press it {_settings.CtrlAltDeleteLocalLockPressCount} times for this Windows lock screen. Hold Control Alt Shift Backslash to force disconnect and return keyboard to this computer.");
             return;
         }
 
@@ -2333,6 +2332,7 @@ public partial class MainWindow : Window
                 status,
                 "OpenLinkStatus");
             _ = SendLocalBrailleAsync(status);
+            _ = _ttsService.SpeakStatusAsync(status);
         }
         catch
         {
@@ -2505,11 +2505,12 @@ public partial class MainWindow : Window
             keyboard = DetectKeyboardLayout(),
             audio = new
             {
+                sampleRates = OpenLinkAudioSettings.SupportedWaveSampleRates,
                 sampleRate = 48000,
-                codec = OpenLinkAudioSettings.IsCodecAvailable(_settings.AudioStreamingCodec)
-                    ? OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec)
-                    : "pcm_s16le",
+                codec = ActiveAudioCodec(),
                 requestedCodec = OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec),
+                supportedCodecs = OpenLinkAudioSettings.SupportedTransportCodecs,
+                externalCodecDependency = OpenLinkAudioDependencies.IsFfmpegAvailable() ? "ffmpeg-ready" : "ffmpeg-missing",
                 directAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.DirectAudioBufferSamples),
                 windowsAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.WindowsAudioBufferSamples)
             },
@@ -2647,10 +2648,10 @@ public partial class MainWindow : Window
             microphoneAudioAllowed = _settings.AllowMicrophoneAudio,
             systemAudioAllowed = _settings.AllowSystemAudio,
             audioTransport = "native-wasapi",
-            audioCodec = OpenLinkAudioSettings.IsCodecAvailable(_settings.AudioStreamingCodec)
-                ? OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec)
-                : "pcm_s16le",
+            audioCodec = ActiveAudioCodec(),
             requestedAudioCodec = OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec),
+            supportedAudioCodecs = OpenLinkAudioSettings.SupportedTransportCodecs,
+            audioSampleRates = OpenLinkAudioSettings.SupportedWaveSampleRates,
             directAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.DirectAudioBufferSamples),
             windowsAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.WindowsAudioBufferSamples),
             voiceLinkAudioFallback = _settings.UseVoiceLinkAudioFallback,
@@ -2668,6 +2669,12 @@ public partial class MainWindow : Window
             autoMuteControlledComputerAudio = _settings.AutoMuteControlledComputerAudio,
             autoMuteProcessesOnConnect = ParseProcessList(_settings.AutoMuteProcessesOnConnect)
         };
+    }
+
+    private string ActiveAudioCodec()
+    {
+        var requested = OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec);
+        return OpenLinkAudioSettings.IsCodecAvailable(requested) ? requested : "pcm_s16le";
     }
 
     private MachineRecord? SelectedMachine => MachinesListBox.SelectedItem as MachineRecord;
@@ -3090,10 +3097,10 @@ public partial class MainWindow : Window
             audioAllowed = _settings.AllowAudio,
             audioDirection = "bidirectional",
             audioTransport = "native-wasapi",
-            audioCodec = OpenLinkAudioSettings.IsCodecAvailable(_settings.AudioStreamingCodec)
-                ? OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec)
-                : "pcm_s16le",
+            audioCodec = ActiveAudioCodec(),
             requestedAudioCodec = OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec),
+            supportedAudioCodecs = OpenLinkAudioSettings.SupportedTransportCodecs,
+            audioSampleRates = OpenLinkAudioSettings.SupportedWaveSampleRates,
             directAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.DirectAudioBufferSamples),
             windowsAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.WindowsAudioBufferSamples),
             voiceLinkAudioFallback = _settings.UseVoiceLinkAudioFallback,
@@ -3122,7 +3129,7 @@ public partial class MainWindow : Window
         {
             audioDirection = "bidirectional",
             audioTransport = "native-wasapi",
-            audioCodec = "pcm_s16le",
+            audioCodec = ActiveAudioCodec(),
             requestedAudioCodec = OpenLinkAudioSettings.NormalizeCodec(_settings.AudioStreamingCodec),
             directAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.DirectAudioBufferSamples),
             windowsAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(_settings.WindowsAudioBufferSamples),

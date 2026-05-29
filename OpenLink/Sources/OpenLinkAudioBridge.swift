@@ -41,6 +41,7 @@ final class OpenLinkAudioBridge {
             self.requestedCodec = Self.normalizeCodec(requestedCodec)
             UserDefaults.standard.set(self.requestedCodec, forKey: "audioStreamingCodec")
         }
+        OpenLinkAudioDependencies.ensureForCodecInBackground(self.requestedCodec)
     }
 
     @discardableResult
@@ -164,6 +165,9 @@ final class OpenLinkAudioBridge {
 
         guard let targetMachineId, let frameSink else { return }
         let activeCodec = Self.activeTransportCodec(for: activeRequestedCodec)
+        let bitsPerSample = Self.bitsPerSample(for: activeCodec)
+        let sampleRate = Self.normalizeSupportedSampleRate(sampleRate)
+        let payload = Self.payload(data: data, sampleRate: sampleRate, bitsPerSample: bitsPerSample, channels: channels, codec: activeCodec)
         frameSink([
             "type": "audio_frame",
             "targetMachineId": targetMachineId,
@@ -176,9 +180,9 @@ final class OpenLinkAudioBridge {
             "requestedCodec": activeRequestedCodec,
             "directAudioBufferSamples": captureSamples,
             "playbackBufferSamples": playbackSamples,
-            "transport": "voicelink-pcm-ws",
+            "transport": Self.isWavCodec(activeCodec) ? "voicelink-wav-pcm-ws" : "voicelink-pcm-ws",
             "virtualDeviceName": virtualDeviceName,
-            "data": data.base64EncodedString()
+            "data": payload.base64EncodedString()
         ])
     }
 
@@ -210,21 +214,22 @@ final class OpenLinkAudioBridge {
             return
         }
 
-        let codec = (json["codec"] as? String) ?? "pcm_s16le"
-        guard Self.activeTransportCodec(for: codec) == "pcm_s16le" else {
+        let codec = Self.normalizeCodec((json["codec"] as? String) ?? "pcm_s16le")
+        guard Self.supportedTransportCodecs.contains(Self.activeTransportCodec(for: codec)) else {
             return
         }
         if let playbackSamples = (json["windowsAudioBufferSamples"] as? Int) ?? (json["playbackBufferSamples"] as? Int) {
             configure(playbackBufferSamples: playbackSamples)
         }
 
-        let sampleRate = Double(json["sampleRate"] as? Int ?? 48_000)
-        let sourceChannels = max(1, json["channels"] as? Int ?? Self.transportChannels)
-        let playbackData = sourceChannels == Self.transportChannels ? data : Self.stereoInt16PCMData(from: data, channels: sourceChannels)
+        let decoded = Self.decodePayload(data, codec: codec, fallbackSampleRate: json["sampleRate"] as? Int ?? 48_000, fallbackBitsPerSample: json["bitsPerSample"] as? Int ?? 16, fallbackChannels: json["channels"] as? Int ?? Self.transportChannels)
+        let sampleRate = Double(decoded.sampleRate)
+        let sourceChannels = max(1, decoded.channels)
+        let playbackData = sourceChannels == Self.transportChannels ? decoded.data : Self.stereoPCMData(from: decoded.data, channels: sourceChannels, bitsPerSample: decoded.bitsPerSample)
         let channels = AVAudioChannelCount(Self.transportChannels)
         guard
             let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channels),
-            let buffer = Self.floatBuffer(fromInt16PCM: playbackData, format: format)
+            let buffer = Self.floatBuffer(fromPCM: playbackData, bitsPerSample: decoded.bitsPerSample, format: format)
         else {
             return
         }
@@ -261,17 +266,35 @@ final class OpenLinkAudioBridge {
     private static func normalizeCodec(_ codec: String) -> String {
         let normalized = codec.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch normalized {
-        case "pcm_s16le", "flac", "ogg_opus", "mp3":
+        case "pcm_s16le", "pcm_s32le", "wav_pcm_s16le", "wav_pcm_s32le", "flac", "ogg_opus", "mp3":
             return normalized
         default:
             return "pcm_s16le"
         }
     }
 
+    private static let supportedTransportCodecs = ["pcm_s16le", "pcm_s32le", "wav_pcm_s16le", "wav_pcm_s32le"]
+
     private static func activeTransportCodec(for requestedCodec: String) -> String {
-        // The current native stream is always PCM stereo 16-bit. Compressed codecs are
-        // retained in policy/settings until both endpoints have matching encoders.
-        return "pcm_s16le"
+        let normalized = normalizeCodec(requestedCodec)
+        return supportedTransportCodecs.contains(normalized) ? normalized : "pcm_s16le"
+    }
+
+    private static func bitsPerSample(for codec: String) -> Int {
+        normalizeCodec(codec).contains("s32le") ? 32 : 16
+    }
+
+    private static func isWavCodec(_ codec: String) -> Bool {
+        normalizeCodec(codec).hasPrefix("wav_")
+    }
+
+    private static func normalizeSupportedSampleRate(_ sampleRate: Int) -> Int {
+        abs(sampleRate - 44_100) <= abs(sampleRate - 48_000) ? 44_100 : 48_000
+    }
+
+    private static func payload(data: Data, sampleRate: Int, bitsPerSample: Int, channels: Int, codec: String) -> Data {
+        let pcm = bitsPerSample == 32 ? pcm32Data(fromInt16PCM: data) : data
+        return isWavCodec(codec) ? wavePCMData(from: pcm, sampleRate: sampleRate, bitsPerSample: bitsPerSample, channels: channels) : pcm
     }
 
     private func localMachineId() -> String {
@@ -454,11 +477,125 @@ final class OpenLinkAudioBridge {
         return stereo
     }
 
-    private static func floatBuffer(fromInt16PCM data: Data, format: AVAudioFormat) -> AVAudioPCMBuffer? {
+    private static func stereoPCMData(from data: Data, channels: Int, bitsPerSample: Int) -> Data {
+        if bitsPerSample == 32 {
+            return stereoInt32PCMData(from: data, channels: channels)
+        }
+
+        return stereoInt16PCMData(from: data, channels: channels)
+    }
+
+    private static func stereoInt32PCMData(from data: Data, channels: Int) -> Data {
+        if channels == transportChannels {
+            return data
+        }
+
+        let sampleCount = data.count / MemoryLayout<Int32>.size
+        let frames = sampleCount / channels
+        var stereo = Data(capacity: frames * transportChannels * MemoryLayout<Int32>.size)
+        data.withUnsafeBytes { rawBuffer in
+            guard let samples = rawBuffer.bindMemory(to: Int32.self).baseAddress else { return }
+            for frame in 0..<frames {
+                let left = Int32(littleEndian: samples[frame * channels])
+                let right = channels > 1 ? Int32(littleEndian: samples[(frame * channels) + 1]) : left
+                for sample in [left, right] {
+                    var littleEndianSample = sample.littleEndian
+                    withUnsafeBytes(of: &littleEndianSample) { bytes in
+                        stereo.append(contentsOf: bytes)
+                    }
+                }
+            }
+        }
+
+        return stereo
+    }
+
+    private static func pcm32Data(fromInt16PCM data: Data) -> Data {
+        var pcm32 = Data(capacity: (data.count / MemoryLayout<Int16>.size) * MemoryLayout<Int32>.size)
+        data.withUnsafeBytes { rawBuffer in
+            guard let samples = rawBuffer.bindMemory(to: Int16.self).baseAddress else { return }
+            for index in 0..<(data.count / MemoryLayout<Int16>.size) {
+                let sample = Int16(littleEndian: samples[index])
+                var expanded = (Int32(sample) << 16).littleEndian
+                withUnsafeBytes(of: &expanded) { bytes in
+                    pcm32.append(contentsOf: bytes)
+                }
+            }
+        }
+
+        return pcm32
+    }
+
+    private static func wavePCMData(from pcm: Data, sampleRate: Int, bitsPerSample: Int, channels: Int) -> Data {
+        var wave = Data(capacity: 44 + pcm.count)
+        appendASCII("RIFF", to: &wave)
+        appendInt32(Int32(36 + pcm.count), to: &wave)
+        appendASCII("WAVE", to: &wave)
+        appendASCII("fmt ", to: &wave)
+        appendInt32(16, to: &wave)
+        appendInt16(1, to: &wave)
+        appendInt16(Int16(channels), to: &wave)
+        appendInt32(Int32(sampleRate), to: &wave)
+        appendInt32(Int32(sampleRate * channels * (bitsPerSample / 8)), to: &wave)
+        appendInt16(Int16(channels * (bitsPerSample / 8)), to: &wave)
+        appendInt16(Int16(bitsPerSample), to: &wave)
+        appendASCII("data", to: &wave)
+        appendInt32(Int32(pcm.count), to: &wave)
+        wave.append(pcm)
+        return wave
+    }
+
+    private static func decodePayload(_ data: Data, codec: String, fallbackSampleRate: Int, fallbackBitsPerSample: Int, fallbackChannels: Int) -> (data: Data, sampleRate: Int, bitsPerSample: Int, channels: Int) {
+        if isWavCodec(codec), let decoded = decodeWavePCM(data) {
+            return decoded
+        }
+
+        return (data, normalizeSupportedSampleRate(fallbackSampleRate), fallbackBitsPerSample == 32 ? 32 : 16, max(1, fallbackChannels))
+    }
+
+    private static func decodeWavePCM(_ data: Data) -> (data: Data, sampleRate: Int, bitsPerSample: Int, channels: Int)? {
+        guard data.count >= 44,
+              readASCII(data, offset: 0, count: 4) == "RIFF",
+              readASCII(data, offset: 8, count: 4) == "WAVE" else {
+            return nil
+        }
+
+        var offset = 12
+        var sampleRate = 48_000
+        var bitsPerSample = 16
+        var channels = transportChannels
+        var foundFormat = false
+        while offset + 8 <= data.count {
+            let chunkId = readASCII(data, offset: offset, count: 4)
+            let chunkSize = Int(readInt32(data, offset: offset + 4))
+            let chunkDataOffset = offset + 8
+            guard chunkSize >= 0, chunkDataOffset + chunkSize <= data.count else {
+                break
+            }
+
+            if chunkId == "fmt ", chunkSize >= 16 {
+                let audioFormat = readInt16(data, offset: chunkDataOffset)
+                guard audioFormat == 1 else { return nil }
+                channels = max(1, Int(readInt16(data, offset: chunkDataOffset + 2)))
+                sampleRate = normalizeSupportedSampleRate(Int(readInt32(data, offset: chunkDataOffset + 4)))
+                bitsPerSample = readInt16(data, offset: chunkDataOffset + 14) == 32 ? 32 : 16
+                foundFormat = true
+            } else if chunkId == "data", foundFormat {
+                return (data.subdata(in: chunkDataOffset..<(chunkDataOffset + chunkSize)), sampleRate, bitsPerSample, channels)
+            }
+
+            offset = chunkDataOffset + chunkSize + (chunkSize % 2)
+        }
+
+        return nil
+    }
+
+    private static func floatBuffer(fromPCM data: Data, bitsPerSample: Int, format: AVAudioFormat) -> AVAudioPCMBuffer? {
         let channels = Int(format.channelCount)
         guard channels > 0 else { return nil }
 
-        let sampleCount = data.count / MemoryLayout<Int16>.size
+        let bytesPerSample = bitsPerSample == 32 ? MemoryLayout<Int32>.size : MemoryLayout<Int16>.size
+        let sampleCount = data.count / bytesPerSample
         let frames = sampleCount / channels
         guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)) else {
             return nil
@@ -466,20 +603,121 @@ final class OpenLinkAudioBridge {
 
         buffer.frameLength = AVAudioFrameCount(frames)
         data.withUnsafeBytes { rawBuffer in
-            guard let samples = rawBuffer.bindMemory(to: Int16.self).baseAddress,
-                  let floatChannels = buffer.floatChannelData else {
+            guard let floatChannels = buffer.floatChannelData else {
                 return
             }
 
-            for frame in 0..<frames {
-                for channel in 0..<channels {
-                    let sample = Int16(littleEndian: samples[(frame * channels) + channel])
-                    floatChannels[channel][frame] = Float(sample) / Float(Int16.max)
+            if bitsPerSample == 32 {
+                guard let samples = rawBuffer.bindMemory(to: Int32.self).baseAddress else { return }
+                for frame in 0..<frames {
+                    for channel in 0..<channels {
+                        let sample = Int32(littleEndian: samples[(frame * channels) + channel])
+                        floatChannels[channel][frame] = Float(sample) / Float(Int32.max)
+                    }
+                }
+            } else {
+                guard let samples = rawBuffer.bindMemory(to: Int16.self).baseAddress else { return }
+                for frame in 0..<frames {
+                    for channel in 0..<channels {
+                        let sample = Int16(littleEndian: samples[(frame * channels) + channel])
+                        floatChannels[channel][frame] = Float(sample) / Float(Int16.max)
+                    }
                 }
             }
         }
 
         return buffer
+    }
+
+    private static func appendASCII(_ value: String, to data: inout Data) {
+        data.append(value.data(using: .ascii) ?? Data())
+    }
+
+    private static func appendInt16(_ value: Int16, to data: inout Data) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { bytes in
+            data.append(contentsOf: bytes)
+        }
+    }
+
+    private static func appendInt32(_ value: Int32, to data: inout Data) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { bytes in
+            data.append(contentsOf: bytes)
+        }
+    }
+
+    private static func readASCII(_ data: Data, offset: Int, count: Int) -> String {
+        guard offset >= 0, offset + count <= data.count else { return "" }
+        return String(data: data.subdata(in: offset..<(offset + count)), encoding: .ascii) ?? ""
+    }
+
+    private static func readInt16(_ data: Data, offset: Int) -> Int16 {
+        guard offset + 2 <= data.count else { return 0 }
+        return data.subdata(in: offset..<(offset + 2)).withUnsafeBytes { rawBuffer in
+            Int16(littleEndian: rawBuffer.load(as: Int16.self))
+        }
+    }
+
+    private static func readInt32(_ data: Data, offset: Int) -> Int32 {
+        guard offset + 4 <= data.count else { return 0 }
+        return data.subdata(in: offset..<(offset + 4)).withUnsafeBytes { rawBuffer in
+            Int32(littleEndian: rawBuffer.load(as: Int32.self))
+        }
+    }
+}
+
+private enum OpenLinkAudioDependencies {
+    private static var installStarted = false
+    private static let lock = NSLock()
+
+    static func ensureForCodecInBackground(_ codec: String) {
+        guard requiresExternalEncoder(codec), !isFfmpegAvailable() else { return }
+        lock.lock()
+        if installStarted {
+            lock.unlock()
+            return
+        }
+        installStarted = true
+        lock.unlock()
+
+        DispatchQueue.global(qos: .utility).async {
+            guard let brew = commandPath("brew") else { return }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: brew)
+            process.arguments = ["install", "ffmpeg"]
+            try? process.run()
+            process.waitUntilExit()
+        }
+    }
+
+    private static func requiresExternalEncoder(_ codec: String) -> Bool {
+        let normalized = codec.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized == "flac" || normalized == "ogg_opus" || normalized == "mp3"
+    }
+
+    private static func isFfmpegAvailable() -> Bool {
+        commandPath("ffmpeg") != nil
+    }
+
+    private static func commandPath(_ command: String) -> String? {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["which", command]
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+
+        guard process.terminationStatus == 0 else { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return path?.isEmpty == false ? path : nil
     }
 }
 

@@ -69,10 +69,13 @@
                       Width="310"
                       HorizontalAlignment="Left"
                       AutomationProperties.LabeledBy="{Binding ElementName=StreamingFormatLabel}">
-                <ComboBoxItem Content="PCM stereo 16-bit, active" Tag="pcm_s16le" />
-                <ComboBoxItem Content="FLAC, saved for endpoint negotiation" Tag="flac" />
-                <ComboBoxItem Content="Ogg Opus, saved for endpoint negotiation" Tag="ogg_opus" />
-                <ComboBoxItem Content="MP3, saved for endpoint negotiation" Tag="mp3" />
+                <ComboBoxItem Content="PCM stereo 16-bit, lowest latency" Tag="pcm_s16le" />
+                <ComboBoxItem Content="PCM stereo 32-bit" Tag="pcm_s32le" />
+                <ComboBoxItem Content="WAV PCM stereo 16-bit, 44.1 or 48 kHz" Tag="wav_pcm_s16le" />
+                <ComboBoxItem Content="WAV PCM stereo 32-bit, 44.1 or 48 kHz" Tag="wav_pcm_s32le" />
+                <ComboBoxItem Content="FLAC, requires FFmpeg" Tag="flac" />
+                <ComboBoxItem Content="Ogg Opus, requires FFmpeg" Tag="ogg_opus" />
+                <ComboBoxItem Content="MP3, requires FFmpeg" Tag="mp3" />
             </ComboBox>
         </StackPanel>
 

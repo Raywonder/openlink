@@ -53,6 +53,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     private var popover: NSPopover?
     private var statusMenu: NSMenu?
     private var escapeMonitor: Any?
+    private var emergencyDisconnectLocalMonitor: Any?
+    private var emergencyDisconnectGlobalMonitor: Any?
+    private var emergencyDisconnectStartedAt: Date?
+    private var emergencyDisconnectTriggered = false
     private var mainWindow: NSWindow?
     private var settingsWindow: NSWindow?
 
@@ -64,6 +68,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         OpenLinkService.shared.start()
         configureMacLaunchAtLogin(UserDefaults.standard.bool(forKey: "launchAtLogin"))
         OpenLinkUpdater.shared.checkAutomatically()
+        installEmergencyDisconnectMonitors()
         showPendingWhatIsNewIfNeeded()
         if !UserDefaults.standard.bool(forKey: "startMinimizedStatusMenu") {
             showMainWindow()
@@ -72,6 +77,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
 
     func applicationWillTerminate(_ notification: Notification) {
         NotificationCenter.default.removeObserver(self)
+        removeEmergencyDisconnectMonitors()
         OpenLinkService.shared.stop()
     }
 
@@ -135,6 +141,63 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
             NSEvent.removeMonitor(escapeMonitor)
             self.escapeMonitor = nil
         }
+    }
+
+    private func installEmergencyDisconnectMonitors() {
+        removeEmergencyDisconnectMonitors()
+        emergencyDisconnectLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
+            self?.handleEmergencyDisconnectEvent(event)
+            return event
+        }
+        emergencyDisconnectGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
+            self?.handleEmergencyDisconnectEvent(event)
+        }
+    }
+
+    private func removeEmergencyDisconnectMonitors() {
+        if let emergencyDisconnectLocalMonitor {
+            NSEvent.removeMonitor(emergencyDisconnectLocalMonitor)
+            self.emergencyDisconnectLocalMonitor = nil
+        }
+        if let emergencyDisconnectGlobalMonitor {
+            NSEvent.removeMonitor(emergencyDisconnectGlobalMonitor)
+            self.emergencyDisconnectGlobalMonitor = nil
+        }
+    }
+
+    private func handleEmergencyDisconnectEvent(_ event: NSEvent) {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let modifiersDown = flags.contains(.control) && flags.contains(.option) && flags.contains(.shift)
+        let backslashDown = event.keyCode == 42
+        let chordDown = modifiersDown && backslashDown && event.type == .keyDown
+
+        if !chordDown {
+            if event.type == .keyUp || !modifiersDown {
+                emergencyDisconnectStartedAt = nil
+                emergencyDisconnectTriggered = false
+            }
+            return
+        }
+
+        if emergencyDisconnectStartedAt == nil {
+            emergencyDisconnectStartedAt = Date()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { [weak self] in
+                self?.triggerEmergencyDisconnectIfHeld()
+            }
+        }
+
+        triggerEmergencyDisconnectIfHeld()
+    }
+
+    private func triggerEmergencyDisconnectIfHeld() {
+        guard !emergencyDisconnectTriggered,
+              emergencyDisconnectStartedAt != nil,
+              CGEventSource.keyState(.hidSystemState, key: 42) else {
+            return
+        }
+
+        emergencyDisconnectTriggered = true
+        OpenLinkService.shared.forceDisconnectActiveSession()
     }
 
     private func rebuildStatusMenu(_ menu: NSMenu) {

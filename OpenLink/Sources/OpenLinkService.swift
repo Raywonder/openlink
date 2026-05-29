@@ -137,7 +137,7 @@ struct OpenLinkMachine: Identifiable, Codable {
 
 class OpenLinkService: ObservableObject {
     static let shared = OpenLinkService()
-    private static let interactionShortcutHelp = "To interact with the connected device, choose Start Using the device. Use the OpenLink status menu for controller actions, disconnect, swap control, and audio. Choose Minimize Remote Connection to Use Local Machine to return to this Mac."
+    private static let interactionShortcutHelp = "To interact with the connected device, choose Start Using the device. Use the OpenLink status menu for controller actions, disconnect, swap control, and audio. Hold Control Option Shift Backslash to force disconnect and return keyboard control locally."
     static let canonicalWebSocketURL = "wss://openlink.tappedin.fm/ws"
     static let canonicalPublicURL = "https://openlink.tappedin.fm"
     static let canonicalShareHost = "openlink.tappedin.fm"
@@ -685,6 +685,29 @@ class OpenLinkService: ObservableObject {
         sendMachinePolicy(machine, type: "controller_disconnect", dropIn: false)
         sendDiagnosticEvent("controller_disconnect", machine: machine, outcome: "sent")
         markMachineDisconnected(id: machine.id)
+    }
+
+    func forceDisconnectActiveSession(reason: String = "Control Option Shift Backslash emergency disconnect") {
+        OpenLinkAudioBridge.shared.stopCapture()
+        RemoteControlManager.shared.disconnect()
+
+        let candidate = machines
+            .filter { !isLocalMachine($0) && ($0.isOnline || $0.lastConnectedAt != nil) }
+            .sorted {
+                ($0.lastConnectedAt ?? .distantPast) > ($1.lastConnectedAt ?? .distantPast)
+            }
+            .first
+
+        if let machine = candidate {
+            sendMachinePolicy(machine, type: "controller_disconnect", dropIn: false)
+            sendMachinePolicy(machine, type: "disconnect_user", dropIn: false)
+            sendDiagnosticEvent("emergency_disconnect", machine: machine, outcome: "sent", metadata: ["reason": reason])
+            markMachineDisconnected(id: machine.id)
+            postStatusNotification(title: "OpenLink emergency disconnect", body: "Disconnected \(machine.displayName). Keyboard and audio returned locally.")
+        } else {
+            sendDiagnosticEvent("emergency_disconnect", outcome: "local_only", metadata: ["reason": reason])
+            postStatusNotification(title: "OpenLink emergency disconnect", body: "Keyboard and audio returned locally. No active remote machine was found.")
+        }
     }
 
     func startUsingMachine(_ machine: OpenLinkMachine) {
@@ -2132,9 +2155,11 @@ class OpenLinkService: ObservableObject {
             "routeHints": defaultRouteHints(domainUsed: domainUsed),
             "transportPolicy": transportPolicy(),
             "audio": [
+                "sampleRates": [44_100, 48_000],
                 "sampleRate": 48_000,
-                "codec": "pcm_s16le",
+                "codec": activeAudioCodec(),
                 "requestedCodec": UserDefaults.standard.string(forKey: "audioStreamingCodec") ?? "pcm_s16le",
+                "supportedCodecs": ["pcm_s16le", "pcm_s32le", "wav_pcm_s16le", "wav_pcm_s32le"],
                 "directAudioBufferSamples": max(16, min(2048, UserDefaults.standard.integer(forKey: "directAudioBufferSamples") == 0 ? 512 : UserDefaults.standard.integer(forKey: "directAudioBufferSamples"))),
                 "windowsAudioBufferSamples": max(16, min(2048, UserDefaults.standard.integer(forKey: "macAudioPlaybackBufferSamples") == 0 ? 512 : UserDefaults.standard.integer(forKey: "macAudioPlaybackBufferSamples")))
             ],
@@ -2156,8 +2181,10 @@ class OpenLinkService: ObservableObject {
             "microphoneAudioAllowed": true,
             "systemAudioAllowed": true,
             "audioTransport": "native-coreaudio",
-            "audioCodec": "pcm_s16le",
+            "audioCodec": activeAudioCodec(),
             "requestedAudioCodec": UserDefaults.standard.string(forKey: "audioStreamingCodec") ?? "pcm_s16le",
+            "supportedAudioCodecs": ["pcm_s16le", "pcm_s32le", "wav_pcm_s16le", "wav_pcm_s32le"],
+            "audioSampleRates": [44_100, 48_000],
             "directAudioBufferSamples": max(16, min(2048, UserDefaults.standard.integer(forKey: "directAudioBufferSamples") == 0 ? 512 : UserDefaults.standard.integer(forKey: "directAudioBufferSamples"))),
             "windowsAudioBufferSamples": max(16, min(2048, UserDefaults.standard.integer(forKey: "macAudioPlaybackBufferSamples") == 0 ? 512 : UserDefaults.standard.integer(forKey: "macAudioPlaybackBufferSamples"))),
             "diagnosticsEnabled": UserDefaults.standard.bool(forKey: "enableDiagnosticSending"),
@@ -2173,6 +2200,13 @@ class OpenLinkService: ObservableObject {
             "companionConfirmationSupported": true,
             "companionPlatform": "iOS"
         ]
+    }
+
+    private func activeAudioCodec() -> String {
+        let requested = (UserDefaults.standard.string(forKey: "audioStreamingCodec") ?? "pcm_s16le")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return ["pcm_s16le", "pcm_s32le", "wav_pcm_s16le", "wav_pcm_s32le"].contains(requested) ? requested : "pcm_s16le"
     }
 
     private func defaultRouteHints(domainUsed: String) -> [[String: Any]] {

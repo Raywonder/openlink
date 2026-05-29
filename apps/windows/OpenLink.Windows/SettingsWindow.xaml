@@ -240,11 +240,14 @@
                               HorizontalAlignment="Left"
                               Margin="0,0,0,8"
                               AutomationProperties.LabeledBy="{Binding ElementName=AudioStreamingCodecLabel}"
-                              AutomationProperties.HelpText="PCM stereo 16-bit is the active native format in this build. Other formats are saved for endpoint negotiation when both sides support them.">
+                              AutomationProperties.HelpText="PCM and WAV PCM stereo formats are native. FLAC, Ogg Opus, and MP3 require FFmpeg on both endpoints and are enabled only when available.">
                         <ComboBoxItem Content="PCM stereo 16-bit, lowest processing latency" Tag="pcm_s16le" />
-                        <ComboBoxItem Content="FLAC, not active in this build" Tag="flac" />
-                        <ComboBoxItem Content="Ogg Opus, not active in this build" Tag="ogg_opus" />
-                        <ComboBoxItem Content="MP3, not active in this build" Tag="mp3" />
+                        <ComboBoxItem Content="PCM stereo 32-bit, higher dynamic range" Tag="pcm_s32le" />
+                        <ComboBoxItem Content="WAV PCM stereo 16-bit, 44.1 or 48 kHz" Tag="wav_pcm_s16le" />
+                        <ComboBoxItem Content="WAV PCM stereo 32-bit, 44.1 or 48 kHz" Tag="wav_pcm_s32le" />
+                        <ComboBoxItem Content="FLAC, requires FFmpeg on both endpoints" Tag="flac" />
+                        <ComboBoxItem Content="Ogg Opus, requires FFmpeg on both endpoints" Tag="ogg_opus" />
+                        <ComboBoxItem Content="MP3, requires FFmpeg on both endpoints" Tag="mp3" />
                     </ComboBox>
                     <CheckBox x:Name="EnableAsioAudioDriverBox"
                               Margin="0,0,0,8"

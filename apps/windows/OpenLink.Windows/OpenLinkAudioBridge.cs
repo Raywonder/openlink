@@ -91,9 +91,10 @@ public sealed class OpenLinkAudioBridge : IDisposable
         _audioStreamingCodec = codec;
         if (!OpenLinkAudioSettings.IsCodecAvailable(codec) && !_loggedCodecFallback)
         {
-            log?.Invoke($"Audio streaming format {codec} is saved for negotiation, but this build can only transmit PCM stereo 16-bit. Using PCM until both endpoints support {codec}.");
+            log?.Invoke($"Audio streaming format {codec} is saved for negotiation, but needs FFmpeg on both endpoints. Using PCM or WAV PCM until both endpoints support {codec}.");
             _loggedCodecFallback = true;
         }
+        OpenLinkAudioDependencies.EnsureForCodecInBackground(codec, log);
 
         if (playbackDriverChanged && _remotePlaybackSession is not null)
         {
@@ -243,7 +244,8 @@ public sealed class OpenLinkAudioBridge : IDisposable
             return;
         }
 
-        if (!string.Equals(frame.Codec, "pcm_s16le", StringComparison.OrdinalIgnoreCase))
+        var codec = OpenLinkAudioSettings.NormalizeCodec(frame.Codec);
+        if (!OpenLinkAudioSettings.IsCodecAvailable(codec))
         {
             log?.Invoke($"Remote audio frame ignored: unsupported codec {frame.Codec}.");
             return;
@@ -251,12 +253,18 @@ public sealed class OpenLinkAudioBridge : IDisposable
 
         try
         {
-            var payload = frame.Channels == TransportChannels
-                ? frame.Payload
-                : ConvertPcm16ToStereo(frame.Payload, frame.Channels);
-            EnsureRemotePlayback(new WaveFormat(frame.SampleRate, frame.BitsPerSample, TransportChannels));
+            var decoded = DecodeFramePayload(frame);
+            if (decoded.Payload.Length == 0)
+            {
+                return;
+            }
+
+            var payload = decoded.Channels == TransportChannels
+                ? decoded.Payload
+                : ConvertPcmToStereo(decoded.Payload, decoded.Channels, decoded.BitsPerSample);
+            EnsureRemotePlayback(new WaveFormat(decoded.SampleRate, decoded.BitsPerSample, TransportChannels));
             _remotePlaybackBuffer?.AddSamples(payload, 0, payload.Length);
-            TryStartRemotePlayback(frame.SampleRate);
+            TryStartRemotePlayback(decoded.SampleRate);
             StatusText = BuildStatus();
         }
         catch (Exception ex)
@@ -270,7 +278,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
         var microphone = _microphoneCapture is null ? "microphone muted" : "microphone capture active";
         var system = _systemCapture is null ? "system audio muted" : "system audio capture active";
         var playback = _remotePlaybackSession is null ? "remote playback inactive" : $"remote playback active via {_remotePlaybackDriverKey} to {_remotePlaybackOutputName}";
-        return $"OpenLink audio bridge: {microphone} ({_microphoneFormatText}), {system} ({_systemFormatText}), {playback}, direct buffer {_directAudioBufferSamples} samples, Windows playback buffer {_windowsAudioBufferSamples} samples, streaming PCM stereo 16-bit, virtual endpoint {VirtualDeviceName}.";
+        return $"OpenLink audio bridge: {microphone} ({_microphoneFormatText}), {system} ({_systemFormatText}), {playback}, direct buffer {_directAudioBufferSamples} samples, Windows playback buffer {_windowsAudioBufferSamples} samples, streaming {CodecDescription(_audioStreamingCodec)}, virtual endpoint {VirtualDeviceName}.";
     }
 
     private void ForwardCaptureFrame(string source, WaveFormat format, byte[] buffer, int byteCount, ref long lastTicks)
@@ -294,16 +302,27 @@ public sealed class OpenLinkAudioBridge : IDisposable
             return;
         }
 
-        var payload = ConvertPcm16ToStereo(
+        var activeCodec = OpenLinkAudioSettings.IsCodecAvailable(_audioStreamingCodec)
+            ? OpenLinkAudioSettings.NormalizeCodec(_audioStreamingCodec)
+            : "pcm_s16le";
+        var bitsPerSample = OpenLinkAudioSettings.BitsPerSampleForCodec(activeCodec);
+        var pcm16 = ConvertPcm16ToStereo(
             ConvertCaptureBufferToPcm16(format, buffer, byteCount, _localCaptureGain),
             format.Channels);
+        var payload = bitsPerSample == 32 ? ConvertPcm16ToPcm32(pcm16) : pcm16;
         if (payload.Length == 0)
         {
             Interlocked.Decrement(ref _framesInFlight);
             return;
         }
 
-        var frame = new OpenLinkAudioFrame(source, format.SampleRate, 16, TransportChannels, "pcm_s16le", payload);
+        var sampleRate = NormalizeSupportedSampleRate(format.SampleRate);
+        if (OpenLinkAudioSettings.IsWavCodec(activeCodec))
+        {
+            payload = EncodeWavePcm(payload, sampleRate, bitsPerSample, TransportChannels);
+        }
+
+        var frame = new OpenLinkAudioFrame(source, sampleRate, bitsPerSample, TransportChannels, activeCodec, payload);
 
         _ = Task.Run(async () =>
         {
@@ -603,6 +622,200 @@ public sealed class OpenLinkAudioBridge : IDisposable
         }
 
         return stereo;
+    }
+
+    private static (byte[] Payload, int SampleRate, int BitsPerSample, int Channels) DecodeFramePayload(OpenLinkAudioFrame frame)
+    {
+        var codec = OpenLinkAudioSettings.NormalizeCodec(frame.Codec);
+        if (OpenLinkAudioSettings.IsWavCodec(codec) && TryDecodeWavePcm(frame.Payload, out var wavPayload, out var wavSampleRate, out var wavBits, out var wavChannels))
+        {
+            return (wavPayload, wavSampleRate, wavBits, wavChannels);
+        }
+
+        return (frame.Payload, NormalizeSupportedSampleRate(frame.SampleRate), frame.BitsPerSample == 32 ? 32 : 16, Math.Max(1, frame.Channels));
+    }
+
+    private static byte[] ConvertPcmToStereo(byte[] monoOrMultichannelPayload, int channels, int bitsPerSample)
+    {
+        return bitsPerSample == 32
+            ? ConvertPcm32ToStereo(monoOrMultichannelPayload, channels)
+            : ConvertPcm16ToStereo(monoOrMultichannelPayload, channels);
+    }
+
+    private static byte[] ConvertPcm32ToStereo(byte[] monoOrMultichannelPayload, int channels)
+    {
+        if (monoOrMultichannelPayload.Length == 0 || channels <= 0)
+        {
+            return [];
+        }
+
+        if (channels == TransportChannels)
+        {
+            return monoOrMultichannelPayload;
+        }
+
+        var sampleCount = monoOrMultichannelPayload.Length / sizeof(int);
+        var frames = sampleCount / channels;
+        var stereo = new byte[frames * TransportChannels * sizeof(int)];
+        for (var frame = 0; frame < frames; frame++)
+        {
+            int left;
+            int right;
+            if (channels == 1)
+            {
+                left = right = BinaryPrimitives.ReadInt32LittleEndian(
+                    monoOrMultichannelPayload.AsSpan(frame * sizeof(int), sizeof(int)));
+            }
+            else
+            {
+                var baseOffset = frame * channels * sizeof(int);
+                left = BinaryPrimitives.ReadInt32LittleEndian(monoOrMultichannelPayload.AsSpan(baseOffset, sizeof(int)));
+                right = BinaryPrimitives.ReadInt32LittleEndian(monoOrMultichannelPayload.AsSpan(baseOffset + sizeof(int), sizeof(int)));
+            }
+
+            var outOffset = frame * TransportChannels * sizeof(int);
+            BinaryPrimitives.WriteInt32LittleEndian(stereo.AsSpan(outOffset, sizeof(int)), left);
+            BinaryPrimitives.WriteInt32LittleEndian(stereo.AsSpan(outOffset + sizeof(int), sizeof(int)), right);
+        }
+
+        return stereo;
+    }
+
+    private static byte[] ConvertPcm16ToPcm32(byte[] pcm16Payload)
+    {
+        var sampleCount = pcm16Payload.Length / sizeof(short);
+        var pcm32 = new byte[sampleCount * sizeof(int)];
+        for (var sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
+        {
+            var sample = BinaryPrimitives.ReadInt16LittleEndian(pcm16Payload.AsSpan(sampleIndex * sizeof(short), sizeof(short)));
+            BinaryPrimitives.WriteInt32LittleEndian(pcm32.AsSpan(sampleIndex * sizeof(int), sizeof(int)), sample << 16);
+        }
+
+        return pcm32;
+    }
+
+    private static byte[] EncodeWavePcm(byte[] pcmPayload, int sampleRate, int bitsPerSample, int channels)
+    {
+        var bytesPerSample = bitsPerSample / 8;
+        var blockAlign = (short)(channels * bytesPerSample);
+        var byteRate = sampleRate * blockAlign;
+        var wave = new byte[44 + pcmPayload.Length];
+
+        WriteAscii(wave, 0, "RIFF");
+        BinaryPrimitives.WriteInt32LittleEndian(wave.AsSpan(4, 4), 36 + pcmPayload.Length);
+        WriteAscii(wave, 8, "WAVE");
+        WriteAscii(wave, 12, "fmt ");
+        BinaryPrimitives.WriteInt32LittleEndian(wave.AsSpan(16, 4), 16);
+        BinaryPrimitives.WriteInt16LittleEndian(wave.AsSpan(20, 2), 1);
+        BinaryPrimitives.WriteInt16LittleEndian(wave.AsSpan(22, 2), (short)channels);
+        BinaryPrimitives.WriteInt32LittleEndian(wave.AsSpan(24, 4), sampleRate);
+        BinaryPrimitives.WriteInt32LittleEndian(wave.AsSpan(28, 4), byteRate);
+        BinaryPrimitives.WriteInt16LittleEndian(wave.AsSpan(32, 2), blockAlign);
+        BinaryPrimitives.WriteInt16LittleEndian(wave.AsSpan(34, 2), (short)bitsPerSample);
+        WriteAscii(wave, 36, "data");
+        BinaryPrimitives.WriteInt32LittleEndian(wave.AsSpan(40, 4), pcmPayload.Length);
+        Buffer.BlockCopy(pcmPayload, 0, wave, 44, pcmPayload.Length);
+        return wave;
+    }
+
+    private static bool TryDecodeWavePcm(byte[] wave, out byte[] payload, out int sampleRate, out int bitsPerSample, out int channels)
+    {
+        payload = [];
+        sampleRate = 48000;
+        bitsPerSample = 16;
+        channels = TransportChannels;
+
+        if (wave.Length < 44 || !AsciiEquals(wave, 0, "RIFF") || !AsciiEquals(wave, 8, "WAVE"))
+        {
+            return false;
+        }
+
+        var offset = 12;
+        var foundFormat = false;
+        while (offset + 8 <= wave.Length)
+        {
+            var chunkId = ReadAscii(wave, offset, 4);
+            var chunkSize = BinaryPrimitives.ReadInt32LittleEndian(wave.AsSpan(offset + 4, 4));
+            var chunkDataOffset = offset + 8;
+            if (chunkSize < 0 || chunkDataOffset + chunkSize > wave.Length)
+            {
+                break;
+            }
+
+            if (chunkId == "fmt " && chunkSize >= 16)
+            {
+                var audioFormat = BinaryPrimitives.ReadInt16LittleEndian(wave.AsSpan(chunkDataOffset, 2));
+                if (audioFormat != 1)
+                {
+                    return false;
+                }
+
+                channels = Math.Max(1, (int)BinaryPrimitives.ReadInt16LittleEndian(wave.AsSpan(chunkDataOffset + 2, 2)));
+                sampleRate = NormalizeSupportedSampleRate(BinaryPrimitives.ReadInt32LittleEndian(wave.AsSpan(chunkDataOffset + 4, 4)));
+                bitsPerSample = BinaryPrimitives.ReadInt16LittleEndian(wave.AsSpan(chunkDataOffset + 14, 2)) == 32 ? 32 : 16;
+                foundFormat = true;
+            }
+            else if (chunkId == "data" && foundFormat)
+            {
+                payload = new byte[chunkSize];
+                Buffer.BlockCopy(wave, chunkDataOffset, payload, 0, chunkSize);
+                return true;
+            }
+
+            offset = chunkDataOffset + chunkSize + (chunkSize % 2);
+        }
+
+        return false;
+    }
+
+    private static int NormalizeSupportedSampleRate(int sampleRate)
+    {
+        return Math.Abs(sampleRate - 44100) <= Math.Abs(sampleRate - 48000) ? 44100 : 48000;
+    }
+
+    private static string CodecDescription(string codec)
+    {
+        return OpenLinkAudioSettings.NormalizeCodec(codec) switch
+        {
+            "pcm_s32le" => "PCM stereo 32-bit",
+            "wav_pcm_s16le" => "WAV PCM stereo 16-bit",
+            "wav_pcm_s32le" => "WAV PCM stereo 32-bit",
+            "flac" => "FLAC when FFmpeg is available",
+            "ogg_opus" => "Ogg Opus when FFmpeg is available",
+            "mp3" => "MP3 when FFmpeg is available",
+            _ => "PCM stereo 16-bit"
+        };
+    }
+
+    private static void WriteAscii(byte[] buffer, int offset, string value)
+    {
+        for (var index = 0; index < value.Length; index++)
+        {
+            buffer[offset + index] = (byte)value[index];
+        }
+    }
+
+    private static string ReadAscii(byte[] buffer, int offset, int length)
+    {
+        return System.Text.Encoding.ASCII.GetString(buffer, offset, length);
+    }
+
+    private static bool AsciiEquals(byte[] buffer, int offset, string value)
+    {
+        if (offset + value.Length > buffer.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (buffer[offset + index] != (byte)value[index])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static float PercentToGain(int percent)

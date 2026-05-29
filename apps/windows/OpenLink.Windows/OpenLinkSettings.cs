@@ -265,8 +265,9 @@ public static class OpenLinkSettingsStore
 public static class OpenLinkAudioSettings
 {
     public static readonly int[] BufferSampleChoices = [16, 32, 64, 128, 256, 512, 1024, 2048];
-    public static readonly string[] SupportedTransportCodecs = ["pcm_s16le"];
-    public static readonly string[] KnownCodecChoices = ["pcm_s16le", "flac", "ogg_opus", "mp3"];
+    public static readonly string[] SupportedTransportCodecs = ["pcm_s16le", "pcm_s32le", "wav_pcm_s16le", "wav_pcm_s32le"];
+    public static readonly string[] KnownCodecChoices = ["pcm_s16le", "pcm_s32le", "wav_pcm_s16le", "wav_pcm_s32le", "flac", "ogg_opus", "mp3"];
+    public static readonly int[] SupportedWaveSampleRates = [44100, 48000];
 
     public static int ClampBufferSamples(int samples)
     {
@@ -294,5 +295,20 @@ public static class OpenLinkAudioSettings
     public static bool IsCodecAvailable(string? codec)
     {
         return SupportedTransportCodecs.Contains(NormalizeCodec(codec), StringComparer.OrdinalIgnoreCase);
+    }
+
+    public static bool RequiresExternalEncoder(string? codec)
+    {
+        return NormalizeCodec(codec) is "flac" or "ogg_opus" or "mp3";
+    }
+
+    public static int BitsPerSampleForCodec(string? codec)
+    {
+        return NormalizeCodec(codec) is "pcm_s32le" or "wav_pcm_s32le" ? 32 : 16;
+    }
+
+    public static bool IsWavCodec(string? codec)
+    {
+        return NormalizeCodec(codec).StartsWith("wav_", StringComparison.OrdinalIgnoreCase);
     }
 }
