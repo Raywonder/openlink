@@ -30,6 +30,9 @@ public partial class MainWindow : Window
         - Ctrl Alt Backslash now waits for the key chord to release before opening controller actions, so the menu stays open for arrow-key navigation.
         - Controller and machine menus now include local Settings, remote Settings, running apps and processes, audio controls, volume presets, lock, restart, shut down, and log out.
         - macOS permission helper now opens Remote Desktop and Screen & System Audio Recording and reports stale OpenLink privacy entries.
+        - Remote route-loss messages are now throttled so NVDA does not repeat the same reconnect warning continuously.
+        - Remote audio playback now defaults to a safer 30 percent gain, and Mac VoiceOver phrases are routed back as OpenLink TTS announcements when possible.
+        - Mac signaling sends are serialized so remote audio frames cannot collide with control and heartbeat messages.
         """;
 
     private ClientWebSocket? _socket;
@@ -75,6 +78,7 @@ public partial class MainWindow : Window
     private DateTimeOffset? _emergencyReleaseChordStartedAt;
     private bool _emergencyReleaseTriggeredForHold;
     private bool _emergencyRestartTriggeredForHold;
+    private readonly Dictionary<string, DateTimeOffset> _transientRouteLossAnnouncements = new(StringComparer.OrdinalIgnoreCase);
     private int _ctrlAltDeletePressCount;
     private DateTimeOffset _lastCtrlAltDeletePress = DateTimeOffset.MinValue;
     private bool _returnFromLocalLockPending;
@@ -110,6 +114,7 @@ public partial class MainWindow : Window
     private const int VkLWin = 0x5B;
     private const int VkRWin = 0x5C;
     private const int VkOem102 = 0xE2;
+    private const int BackslashScanCode = 0x2B;
     private static readonly IntPtr HwndTopMost = new(-1);
     private const ulong MacShiftFlag = 0x20000;
     private const ulong MacControlFlag = 0x40000;
@@ -278,7 +283,7 @@ public partial class MainWindow : Window
             var ctrlDown = IsControlDown(vkCode, keyDown);
             var altDown = IsAltDown(vkCode, keyDown);
             var shiftDown = IsShiftDown(vkCode, keyDown);
-            var controllerKey = IsBackslashVirtualKey(vkCode);
+            var controllerKey = IsBackslashKey(vkCode, scanCode);
 
             if (controllerKey && ctrlDown && altDown && shiftDown)
             {
@@ -394,9 +399,9 @@ public partial class MainWindow : Window
         return CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
     }
 
-    private static bool IsBackslashVirtualKey(int vkCode)
+    private static bool IsBackslashKey(int vkCode, int scanCode)
     {
-        return vkCode == VkOem5 || vkCode == VkOem102;
+        return vkCode == VkOem5 || vkCode == VkOem102 || scanCode == BackslashScanCode;
     }
 
     private static bool IsControlDown(int vkCode, bool keyDown)
@@ -780,7 +785,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!ShouldSuppressServerLog(type))
+        if (!ShouldSuppressServerLog(root, type))
         {
             AddLog(SummarizeServerMessage(root, type), announce: false);
         }
@@ -904,9 +909,7 @@ public partial class MainWindow : Window
                     : null;
                 if (IsTransientTargetOfflineError(message, targetMachineId, requestId))
                 {
-                    AddLog($"Signal routing temporarily lost for {(_remoteInputMachine?.DisplayName ?? targetMachineId ?? "remote machine")}; keeping the session alive while OpenLink presence refreshes.");
-                    SetStatus($"OpenLink is refreshing the route to {(_remoteInputMachine?.DisplayName ?? "the remote machine")}. The machine may still be online; keyboard stays on this computer until it confirms control.", announce: false);
-                    _ = SendDiagnosticEventAsync("server_error", outcome: "transient_target_offline", metadata: new { errorType = type, message, targetMachineId, requestId });
+                    HandleTransientRouteLoss(message, targetMachineId, requestId, type);
                     break;
                 }
                 SetStatus($"Server error: {message}");
@@ -947,18 +950,34 @@ public partial class MainWindow : Window
         });
     }
 
-    private static bool ShouldSuppressServerLog(string? type)
+    private bool ShouldSuppressServerLog(JsonElement root, string? type)
     {
-        return type is not null &&
-               (string.Equals(type, "audio_frame", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(type, "audio_route_status", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(type, "input_event_ack", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(type, "key_event_ack", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(type, "machine_event_ack", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(type, "machine_connect_ack", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(type, "diagnostic_event_ack", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(type, "machine_presence", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(type, "presence", StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(type))
+        {
+            return false;
+        }
+
+        if ((string.Equals(type, "error", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(type, "join_error", StringComparison.OrdinalIgnoreCase)) &&
+            IsTransientTargetOfflineError(
+                root.TryGetProperty("message", out var messageElement)
+                    ? messageElement.GetString()
+                    : root.TryGetProperty("error", out var errorElement) ? errorElement.GetString() : null,
+                root.TryGetProperty("targetMachineId", out var targetElement) ? targetElement.GetString() : null,
+                root.TryGetProperty("requestId", out var requestElement) ? requestElement.GetString() : null))
+        {
+            return true;
+        }
+
+        return string.Equals(type, "audio_frame", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(type, "audio_route_status", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(type, "input_event_ack", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(type, "key_event_ack", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(type, "machine_event_ack", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(type, "machine_connect_ack", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(type, "diagnostic_event_ack", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(type, "machine_presence", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(type, "presence", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string SummarizeServerMessage(JsonElement root, string? type)
@@ -1071,6 +1090,28 @@ public partial class MainWindow : Window
         return (_remoteInputPending || _remoteInputActive || matchesPendingTarget) &&
             matchesPendingTarget &&
             matchesPendingRequest;
+    }
+
+    private void HandleTransientRouteLoss(string? message, string? targetMachineId, string? requestId, string? type)
+    {
+        var displayName = _remoteInputMachine?.DisplayName ?? targetMachineId ?? "remote machine";
+        var throttleKey = $"{NormalizeMachineToken(targetMachineId ?? displayName)}:{requestId ?? _remoteInputRequestId ?? "session"}";
+        var now = DateTimeOffset.UtcNow;
+        var shouldAnnounce = !_transientRouteLossAnnouncements.TryGetValue(throttleKey, out var last) ||
+            now - last > TimeSpan.FromSeconds(30);
+        _transientRouteLossAnnouncements[throttleKey] = now;
+
+        if (shouldAnnounce)
+        {
+            AddLog($"Signal routing temporarily lost for {displayName}; keeping the session alive while OpenLink presence refreshes.", announce: false);
+            SetStatus($"OpenLink is refreshing the route to {displayName}. Keyboard stays on this computer until the remote machine confirms control.", announce: true);
+        }
+        else
+        {
+            WriteRuntimeLog($"Suppressed repeated transient route loss for {displayName}: {message}");
+        }
+
+        _ = SendDiagnosticEventAsync("server_error", outcome: "transient_target_offline", metadata: new { errorType = type, message, targetMachineId, requestId, suppressed = !shouldAnnounce });
     }
 
     private void HandleRemoteTtsAnnouncement(JsonElement root)
@@ -1266,7 +1307,7 @@ public partial class MainWindow : Window
         if (audioSettings.TryGetProperty("remoteAudioVolumePercent", out var remoteVolumeElement) &&
             remoteVolumeElement.TryGetInt32(out var remoteVolume))
         {
-            _settings.RemoteAudioVolumePercent = Math.Clamp(remoteVolume, 0, 150);
+            _settings.RemoteAudioVolumePercent = Math.Clamp(remoteVolume <= 0 ? 30 : remoteVolume, 0, 30);
         }
         if (audioSettings.TryGetProperty("localAudioCaptureVolumePercent", out var captureVolumeElement) &&
             captureVolumeElement.TryGetInt32(out var captureVolume))
@@ -4068,7 +4109,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _settings.RemoteAudioVolumePercent = dialog.RemoteAudioVolumePercent;
+        _settings.RemoteAudioVolumePercent = Math.Clamp(dialog.RemoteAudioVolumePercent <= 0 ? 30 : dialog.RemoteAudioVolumePercent, 0, 30);
         _settings.DirectAudioBufferSamples = dialog.DirectAudioBufferSamples;
         _settings.WindowsAudioBufferSamples = dialog.WindowsAudioBufferSamples;
         _settings.AudioStreamingCodec = dialog.AudioStreamingCodec;

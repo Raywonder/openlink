@@ -74,7 +74,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
     public void Configure(OpenLinkSettings settings, Action<string>? log = null)
     {
         _localCaptureGain = PercentToGain(settings.LocalAudioCaptureVolumePercent);
-        _remotePlaybackVolume = PercentToGain(settings.RemoteAudioVolumePercent);
+        _remotePlaybackVolume = PercentToGain(Math.Clamp(settings.RemoteAudioVolumePercent <= 0 ? 30 : settings.RemoteAudioVolumePercent, 0, 30));
         var directBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(settings.DirectAudioBufferSamples);
         var windowsBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(settings.WindowsAudioBufferSamples);
         var codec = OpenLinkAudioSettings.NormalizeCodec(settings.AudioStreamingCodec);

@@ -36,7 +36,7 @@ public sealed class OpenLinkSettings
     public string CtrlAltDeleteUnlockAction { get; set; } = "return-to-remote";
     public bool AllowMicrophoneAudio { get; set; } = true;
     public bool AllowSystemAudio { get; set; } = true;
-    public int RemoteAudioVolumePercent { get; set; } = 100;
+    public int RemoteAudioVolumePercent { get; set; } = 30;
     public int LocalAudioCaptureVolumePercent { get; set; } = 100;
     public int DirectAudioBufferSamples { get; set; } = 1024;
     public int WindowsAudioBufferSamples { get; set; } = 1024;
@@ -212,7 +212,7 @@ public static class OpenLinkSettingsStore
                 settings.VoiceLinkAudioFallbackUrl = new OpenLinkSettings().VoiceLinkAudioFallbackUrl;
             }
 
-            settings.RemoteAudioVolumePercent = Math.Clamp(settings.RemoteAudioVolumePercent, 0, 150);
+            settings.RemoteAudioVolumePercent = Math.Clamp(settings.RemoteAudioVolumePercent <= 0 ? 30 : settings.RemoteAudioVolumePercent, 0, 30);
             settings.LocalAudioCaptureVolumePercent = Math.Clamp(settings.LocalAudioCaptureVolumePercent, 0, 150);
             settings.DirectAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(settings.DirectAudioBufferSamples);
             settings.WindowsAudioBufferSamples = OpenLinkAudioSettings.ClampBufferSamples(settings.WindowsAudioBufferSamples);

@@ -220,6 +220,7 @@ class OpenLinkService: ObservableObject {
     private var listener: NWListener?
     private var connections: [String: NWConnection] = [:]
     private var webSocketTasks: [String: URLSessionWebSocketTask] = [:]
+    private let webSocketSendQueue = DispatchQueue(label: "fm.tappedin.openlink.websocket-send")
     private var webSocketHeartbeatTimers: [String: Timer] = [:]
     private var lastWebSocketPongAt: [String: Date] = [:]
     private var reconnectingWebSocketIds: Set<String> = []
@@ -1174,16 +1175,19 @@ class OpenLinkService: ObservableObject {
                 postStatusNotification(title: "OpenLink", body: message)
                 sendControllerAnnouncement(message, originalMessage: json, serverId: serverId, broadcast: respondWithBroadcast)
                 if success {
+                    installRemoteAccessibilitySink(originalMessage: json, serverId: serverId, broadcast: respondWithBroadcast)
                     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                         self?.startAudioBridgeForController(from: json, serverId: serverId, respondWithBroadcast: respondWithBroadcast)
                     }
                 } else {
+                    RemoteControlManager.shared.remoteAccessibilitySink = nil
                     OpenLinkAudioBridge.shared.stopCapture()
                     runtimeLog("did not start audio bridge because start_interaction was rejected")
                 }
             } else {
                 if let type = json["type"] as? String,
                    type == "pause_interaction" || type == "controller_disconnect" || type == "disconnect_user" {
+                    RemoteControlManager.shared.remoteAccessibilitySink = nil
                     OpenLinkAudioBridge.shared.stopCapture()
                     runtimeLog("stopped audio capture after \(type)")
                 }
@@ -1404,6 +1408,25 @@ class OpenLinkService: ObservableObject {
         }
     }
 
+    private func installRemoteAccessibilitySink(originalMessage json: [String: Any], serverId: String, broadcast: Bool) {
+        let controllerMachineId = controllerMachineId(from: json) ?? serverId
+        RemoteControlManager.shared.remoteAccessibilitySink = { [weak self] text in
+            guard let self else { return }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            let payload: [String: Any] = [
+                "type": "tts_announcement",
+                "targetMachineId": controllerMachineId,
+                "sourceMachineId": self.localStableMachineId(),
+                "sourcePlatform": "macOS",
+                "priority": "polite",
+                "interrupt": false,
+                "text": trimmed
+            ]
+            self.sendWebSocketResponse(payload, serverId: serverId, broadcast: broadcast)
+        }
+    }
+
     private func handleRemoteAccessibilityAnnouncement(_ json: [String: Any]) {
         guard messageTargetsLocalMachine(json) else { return }
         let text = (json["text"] as? String) ?? (json["message"] as? String) ?? ""
@@ -1457,7 +1480,9 @@ class OpenLinkService: ObservableObject {
             return
         }
 
-        task.send(.string(string)) { _ in }
+        webSocketSendQueue.async {
+            task.send(.string(string)) { _ in }
+        }
     }
 
     private func preferredWebSocketTaskId(for serverId: String) -> String {

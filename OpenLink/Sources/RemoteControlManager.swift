@@ -29,6 +29,8 @@ class RemoteControlManager: ObservableObject {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var lastVoiceOverEchoAt = Date.distantPast
+    private var lastVoiceOverRemotePhrase = ""
+    var remoteAccessibilitySink: ((String) -> Void)?
 
     // Clipboard monitoring
     private var clipboardTimer: Timer?
@@ -1153,6 +1155,9 @@ class RemoteControlManager: ObservableObject {
             screenSharingEnabled = (json["screenSharingAllowed"] as? Bool) ?? screenSharingEnabled
             if canReceiveInput {
                 announceWithVoiceOver("OpenLink remote keyboard control connected. VoiceOver AppleScript assist is ready.")
+                if isVoiceOverRunning() {
+                    remoteAccessibilitySink?("VoiceOver is running on this Mac. OpenLink will route VoiceOver status to your local screen reader when possible.")
+                }
             }
             return [
                 "type": "start_interaction_ack",
@@ -1497,6 +1502,24 @@ class RemoteControlManager: ObservableObject {
         lastVoiceOverEchoAt = now
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.08) {
             self.runVoiceOverAppleScript("tell application \"VoiceOver\" to output last phrase")
+            self.captureVoiceOverLastPhraseForRemoteTts()
+        }
+    }
+
+    private func captureVoiceOverLastPhraseForRemoteTts() {
+        guard remoteAccessibilitySink != nil else { return }
+        let scripts = [
+            "tell application \"VoiceOver\" to return last phrase",
+            "tell application \"VoiceOver\" to get last phrase"
+        ]
+        for script in scripts {
+            if let phrase = runVoiceOverAppleScriptReturningString(script),
+               !phrase.isEmpty,
+               phrase != lastVoiceOverRemotePhrase {
+                lastVoiceOverRemotePhrase = phrase
+                remoteAccessibilitySink?(phrase)
+                return
+            }
         }
     }
 
@@ -1516,6 +1539,24 @@ class RemoteControlManager: ObservableObject {
             try process.run()
         } catch {
             // VoiceOver AppleScript assist is best-effort; CGEvent remains the primary path.
+        }
+    }
+
+    private func runVoiceOverAppleScriptReturningString(_ script: String) -> String? {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        process.standardOutput = output
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            return nil
         }
     }
 
