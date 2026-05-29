@@ -296,7 +296,7 @@ public sealed class OpenLinkAudioBridge : IDisposable
         }
         Interlocked.Exchange(ref lastTicks, now);
 
-        if (Interlocked.Increment(ref _framesInFlight) > 4)
+        if (Interlocked.Increment(ref _framesInFlight) > 8)
         {
             Interlocked.Decrement(ref _framesInFlight);
             return;
@@ -461,19 +461,19 @@ public sealed class OpenLinkAudioBridge : IDisposable
     private TimeSpan PlaybackBufferDuration(int sampleRate)
     {
         var milliseconds = SamplesToMilliseconds(_windowsAudioBufferSamples, sampleRate);
-        return TimeSpan.FromMilliseconds(Math.Clamp(milliseconds * 6, 80.0, 500.0));
+        return TimeSpan.FromMilliseconds(Math.Clamp(milliseconds * 8, 160.0, 800.0));
     }
 
     private TimeSpan PrebufferDuration(int sampleRate)
     {
         var milliseconds = SamplesToMilliseconds(_windowsAudioBufferSamples, sampleRate);
-        return TimeSpan.FromMilliseconds(Math.Clamp(milliseconds * 2, 40.0, 180.0));
+        return TimeSpan.FromMilliseconds(Math.Clamp(milliseconds * 3, 80.0, 240.0));
     }
 
     private int WindowsDesiredLatencyMilliseconds(int sampleRate)
     {
         var bufferMilliseconds = SamplesToMilliseconds(_windowsAudioBufferSamples, sampleRate);
-        return (int)Math.Round(Math.Clamp(bufferMilliseconds * 3, 60.0, 300.0));
+        return (int)Math.Round(Math.Clamp(bufferMilliseconds * 4, 90.0, 400.0));
     }
 
     private static double SamplesToMilliseconds(int samples, int sampleRate)

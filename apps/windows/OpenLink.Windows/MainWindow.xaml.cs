@@ -23,7 +23,7 @@ public partial class MainWindow : Window
 {
     private const string CurrentWhatIsNewNotes =
         """
-        - Controller actions now pause remote keyboard forwarding while the Ctrl Alt Backslash menu is open. Escape or closing without an action resumes remote control; choosing a menu action keeps the keyboard local until Start Using is chosen again.
+        - Controller actions now open with Ctrl Alt Shift Backslash, pause remote keyboard forwarding while the menu is open, and keep arrow-key navigation inside the classic Windows menu until Escape.
         - Windows now starts its controlled-side audio route when another machine begins an interaction, so Windows-to-remote audio can flow back through the same OpenLink signal path.
         - Remote audio frames now use the same machine-alias targeting as control messages, reducing false offline or dropped-audio cases when device names differ.
         - macOS audio capture no longer lets microphone startup failure block ScreenCaptureKit system audio, and Mac playback reconnects when incoming audio format changes.
@@ -128,8 +128,8 @@ public partial class MainWindow : Window
     private const ulong MacControlFlag = 0x40000;
     private const ulong MacAlternateFlag = 0x80000;
     private const ulong MacCommandFlag = 0x100000;
-    private const string ConnectionShortcutHelp = "Press Enter on a selected machine to connect. Press Shift F10 or the Applications key for the connection menu. Press Control Alt Backslash for controller actions. Press Control Shift Backslash to show Machines and settings. Press Alt C for the Connections menu.";
-    private const string InteractionShortcutHelp = "To interact with the connected device, choose Start Using the device. Press Control Alt Backslash for controller actions. Hold Control Alt Shift Backslash to force disconnect and return keyboard control to this computer.";
+    private const string ConnectionShortcutHelp = "Press Enter on a selected machine to connect. Press Shift F10 or the Applications key for the connection menu. Press Control Alt Shift Backslash for controller actions. Press Control Shift Backslash to show Machines and settings. Press Alt C for the Connections menu.";
+    private const string InteractionShortcutHelp = "To interact with the connected device, choose Start Using the device. Press Control Alt Shift Backslash for controller actions. Hold Control Alt Shift Escape to force disconnect and return keyboard control to this computer.";
     private static readonly string RuntimeLogDirectory = Path.Combine(OpenLinkSettingsStore.SettingsDirectory, "logs");
     private static readonly string RuntimeLogPath = Path.Combine(RuntimeLogDirectory, "openlink-windows.log");
     private const long RuntimeLogMaxBytes = 1024 * 1024;
@@ -190,17 +190,17 @@ public partial class MainWindow : Window
     {
         _windowHandle = new WindowInteropHelper(this).Handle;
         HwndSource.FromHwnd(_windowHandle)?.AddHook(WndProc);
-        if (!RegisterHotKey(_windowHandle, ControllerActionsHotkeyId, ModControl | ModAlt, VkOem5))
+        if (!RegisterHotKey(_windowHandle, ControllerActionsHotkeyId, ModControl | ModAlt | ModShift, VkOem5))
         {
-            AddLog($"Ctrl+Alt+Backslash RegisterHotKey failed: {Marshal.GetLastWin32Error()}. Low-level keyboard hook fallback is active.");
+            AddLog($"Ctrl+Alt+Shift+Backslash RegisterHotKey failed: {Marshal.GetLastWin32Error()}. Low-level keyboard hook fallback is active.");
         }
         if (!RegisterHotKey(_windowHandle, ControllerActionsShiftHotkeyId, ModControl | ModShift, VkOem5))
         {
             AddLog($"Ctrl+Shift+Backslash RegisterHotKey failed: {Marshal.GetLastWin32Error()}. Low-level keyboard hook fallback is active.");
         }
-        if (!RegisterHotKey(_windowHandle, EmergencyReleaseHotkeyId, ModControl | ModAlt | ModShift, VkOem5))
+        if (!RegisterHotKey(_windowHandle, EmergencyReleaseHotkeyId, ModControl | ModAlt | ModShift, VkEscape))
         {
-            AddLog($"Ctrl+Alt+Shift+Backslash RegisterHotKey failed: {Marshal.GetLastWin32Error()}. emergency timer and keyboard hook fallback are active.");
+            AddLog($"Ctrl+Alt+Shift+Escape RegisterHotKey failed: {Marshal.GetLastWin32Error()}. emergency timer and keyboard hook fallback are active.");
         }
         InstallKeyboardHookFallback();
         _emergencyReleaseTimer.Start();
@@ -224,7 +224,7 @@ public partial class MainWindow : Window
         else if (msg == WmHotkey && wParam.ToInt32() == EmergencyReleaseHotkeyId)
         {
             handled = true;
-            BeginEmergencyDisconnectHold("Control Alt Shift Backslash hotkey");
+            BeginEmergencyDisconnectHold("Control Alt Shift Escape hotkey");
         }
 
         return IntPtr.Zero;
@@ -247,7 +247,7 @@ public partial class MainWindow : Window
         if (!_emergencyReleaseTriggeredForHold && heldFor >= TimeSpan.FromMilliseconds(500))
         {
             _emergencyReleaseTriggeredForHold = true;
-            EmergencyReleaseLocalControl("Control Alt Shift Backslash hold");
+            EmergencyReleaseLocalControl("Control Alt Shift Escape hold");
         }
 
         if (!_emergencyRestartTriggeredForHold && heldFor >= TimeSpan.FromSeconds(3))
@@ -262,7 +262,7 @@ public partial class MainWindow : Window
         _emergencyReleaseChordStartedAt ??= DateTimeOffset.UtcNow;
         if (_remoteInputActive || _remoteInputPending || _sessionActive)
         {
-            SetStatus("Hold Control Alt Shift Backslash to force disconnect this OpenLink session and return keyboard control locally.");
+            SetStatus("Hold Control Alt Shift Escape to force disconnect this OpenLink session and return keyboard control locally.");
         }
         else
         {
@@ -275,7 +275,7 @@ public partial class MainWindow : Window
         return IsKeyCurrentlyDown(VkControl) &&
                IsKeyCurrentlyDown(VkMenu) &&
                IsKeyCurrentlyDown(VkShift) &&
-               (IsKeyCurrentlyDown((int)VkOem5) || IsKeyCurrentlyDown(VkOem102));
+               IsKeyCurrentlyDown(VkEscape);
     }
 
     private void InstallKeyboardHookFallback()
@@ -308,20 +308,6 @@ public partial class MainWindow : Window
 
             if (controllerKey && ctrlDown && altDown && shiftDown)
             {
-                if (keyDown && !_controllerHotkeyChordDown)
-                {
-                    _controllerHotkeyChordDown = true;
-                    Dispatcher.BeginInvoke(() => BeginEmergencyDisconnectHold("Control Alt Shift Backslash recovery shortcut"));
-                }
-                if (!keyDown)
-                {
-                    _controllerHotkeyChordDown = false;
-                }
-                return new IntPtr(1);
-            }
-
-            if (controllerKey && ctrlDown && altDown)
-            {
                 if (keyDown)
                 {
                     _controllerHotkeyChordDown = true;
@@ -330,6 +316,15 @@ public partial class MainWindow : Window
                 {
                     _controllerHotkeyChordDown = false;
                     Dispatcher.BeginInvoke(ShowControllerActionsMenu);
+                }
+                return new IntPtr(1);
+            }
+
+            if (controllerKey && ctrlDown && altDown)
+            {
+                if (!keyDown)
+                {
+                    _controllerHotkeyChordDown = false;
                 }
                 return new IntPtr(1);
             }
@@ -1457,7 +1452,7 @@ public partial class MainWindow : Window
         UpdateConnectedUiState();
         StartAudioBridgeForRemoteController(remoteMachine, GetSourceMachineId(root), $"controlled by {remoteMachine?.DisplayName ?? "remote controller"}");
         PlaySound(SoundAction.Connect);
-        var acceptedMessage = $"Remote keyboard and audio control accepted from {remoteMachine?.DisplayName ?? "another OpenLink machine"}. Use Control Alt Backslash for local OpenLink actions.";
+        var acceptedMessage = $"Remote keyboard and audio control accepted from {remoteMachine?.DisplayName ?? "another OpenLink machine"}. Use Control Alt Shift Backslash for local OpenLink actions.";
         SetStatus(acceptedMessage);
         _ = SendPeerAsync(new
         {
@@ -1665,7 +1660,7 @@ public partial class MainWindow : Window
         {
             AddLog(screenReaderMessage, announce: false);
         }
-        SetStatus(message ?? $"Remote control active for {_remoteInputMachine.DisplayName}. Press Control Alt Backslash for controller actions, or hold Control Alt Shift Backslash to force disconnect and return keyboard to this computer.");
+        SetStatus(message ?? $"Remote control active for {_remoteInputMachine.DisplayName}. Press Control Alt Shift Backslash for controller actions, or hold Control Alt Shift Escape to force disconnect and return keyboard to this computer.");
         PlaySound(SoundAction.Connect);
         HideOpenLinkWindow();
     }
@@ -1713,7 +1708,7 @@ public partial class MainWindow : Window
         CloseControllerActionsMenuSilently();
         UpdateConnectedUiState();
         ShowFromTray();
-        var message = "Emergency disconnect activated. Keyboard and audio returned to this computer. Hold Control Alt Shift Backslash for three seconds to restart OpenLink.";
+        var message = "Emergency disconnect activated. Keyboard and audio returned to this computer. Hold Control Alt Shift Escape for three seconds to restart OpenLink.";
         SetStatus(message);
         _trayIcon.ShowBalloonTip(3000, "OpenLink emergency release", message, Forms.ToolTipIcon.Warning);
     }
@@ -1834,7 +1829,7 @@ public partial class MainWindow : Window
 
         if (_ctrlAltDeletePressCount == 1)
         {
-            SetStatus($"Control Alt Delete is guarded by OpenLink. Press it {_settings.CtrlAltDeleteRemotePressCount} times for {machine.DisplayName}. Press it {_settings.CtrlAltDeleteLocalLockPressCount} times for this Windows lock screen. Hold Control Alt Shift Backslash to force disconnect and return keyboard to this computer.");
+            SetStatus($"Control Alt Delete is guarded by OpenLink. Press it {_settings.CtrlAltDeleteRemotePressCount} times for {machine.DisplayName}. Press it {_settings.CtrlAltDeleteLocalLockPressCount} times for this Windows lock screen. Hold Control Alt Shift Escape to force disconnect and return keyboard to this computer.");
             return;
         }
 
@@ -3845,6 +3840,14 @@ public partial class MainWindow : Window
             {
                 e.Handled = true;
                 CloseControllerActionsMenuSilently();
+                return;
+            }
+
+            if (e.KeyCode == Forms.Keys.Right || e.KeyCode == Forms.Keys.Left)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                NavigateControllerMenuSubmenu(menu, e.KeyCode == Forms.Keys.Right);
             }
         };
         var owner = EnsureControllerMenuOwner();
@@ -3882,6 +3885,35 @@ public partial class MainWindow : Window
         SetStatus(hasRemoteSession
             ? $"Controller actions for {lastMachine.DisplayName}. Remote keyboard is paused while this menu is open. Escape closes the menu and resumes remote control."
             : $"Connection actions for {lastMachine.DisplayName}. Use Recent Connections for another device. Escape closes the menu.");
+        _nvdaController.CancelSpeech();
+        _nvdaController.Speak("Controller actions menu. Use arrow keys. Press Escape to close.");
+    }
+
+    private static void NavigateControllerMenuSubmenu(Forms.ContextMenuStrip menu, bool openSubmenu)
+    {
+        var selected = menu.Items
+            .Cast<Forms.ToolStripItem>()
+            .FirstOrDefault(item => item.Selected) as Forms.ToolStripMenuItem;
+        if (selected is null)
+        {
+            return;
+        }
+
+        if (openSubmenu && selected.HasDropDownItems)
+        {
+            selected.ShowDropDown();
+            if (selected.DropDownItems.Count > 0)
+            {
+                selected.DropDownItems[0].Select();
+            }
+            return;
+        }
+
+        if (!openSubmenu && selected.DropDown.Visible)
+        {
+            selected.HideDropDown();
+            selected.Select();
+        }
     }
 
     private void PauseRemoteInputForControllerMenu(MachineRecord machine)
@@ -4044,6 +4076,7 @@ public partial class MainWindow : Window
         SetActiveWindow(menu.Handle);
         SetForegroundWindow(menu.Handle);
         menu.Focus();
+        menu.Select();
         if (menu.Items.Count > 0)
         {
             menu.Items[0].Select();
@@ -4084,7 +4117,7 @@ public partial class MainWindow : Window
         {
             if (!await WaitForControllerHotkeyReleaseAsync())
             {
-                SetStatus("Release Control Alt Backslash to open OpenLink controller actions.");
+                SetStatus("Release Control Alt Shift Backslash to open OpenLink controller actions.");
                 return;
             }
             await Task.Delay(_remoteInputActive || _remoteInputPending ? 40 : 120);
@@ -4385,7 +4418,7 @@ public partial class MainWindow : Window
         HideOpenLinkWindow();
         var message = GetActiveRemoteMachine() is null
             ? "OpenLink is online and waiting for a connection. Use the tray menu to connect to a remote device."
-            : "Connected. Press Control Alt Backslash for controller actions. Escape closes that menu and keeps OpenLink in the tray.";
+            : "Connected. Press Control Alt Shift Backslash for controller actions. Escape closes that menu and keeps OpenLink in the tray.";
         _trayIcon.ShowBalloonTip(4000, "OpenLink", message, Forms.ToolTipIcon.Info);
     }
 
