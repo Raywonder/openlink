@@ -33,6 +33,8 @@ public partial class MainWindow : Window
         - Remote route-loss messages are now throttled so NVDA does not repeat the same reconnect warning continuously.
         - Remote audio playback now defaults to a safer 30 percent gain, and Mac VoiceOver phrases are routed back as OpenLink TTS announcements when possible.
         - Mac signaling sends are serialized so remote audio frames cannot collide with control and heartbeat messages.
+        - Remote TTS announcements now speak through NVDA first on Windows, with the local OpenLink TTS helper as fallback.
+        - OpenLink update manifests can advertise oCloud/OpenCloud mirror links, and the native updaters try mirrors if the primary download is unavailable.
         """;
 
     private ClientWebSocket? _socket;
@@ -1133,7 +1135,10 @@ public partial class MainWindow : Window
         }
 
         AddLog($"Remote announcement: {text}", announce: false);
-        _ = _ttsService.SpeakRemoteAnnouncementAsync(text);
+        if (!_nvdaController.Speak(text))
+        {
+            _ = _ttsService.SpeakRemoteAnnouncementAsync(text);
+        }
         _ = SendRemoteBrailleAsync(text);
     }
 

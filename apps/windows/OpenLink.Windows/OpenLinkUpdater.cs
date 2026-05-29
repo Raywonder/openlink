@@ -38,7 +38,7 @@ public sealed class OpenLinkUpdater
         {
             using var http = new HttpClient();
             var manifest = await FetchManifestAsync(http, cancellationToken);
-            if (manifest is null || string.IsNullOrWhiteSpace(manifest.Version) || string.IsNullOrWhiteSpace(manifest.ResolvedDownloadUrl))
+            if (manifest is null || string.IsNullOrWhiteSpace(manifest.Version) || !manifest.ResolvedDownloadUrls.Any())
             {
                 if (interactive)
                 {
@@ -138,8 +138,15 @@ public sealed class OpenLinkUpdater
         var updatesDir = Path.Combine(OpenLinkSettingsStore.SettingsDirectory, "updates");
         Directory.CreateDirectory(updatesDir);
 
+        var downloadUrls = manifest.ResolvedDownloadUrls.ToList();
+        if (downloadUrls.Count == 0)
+        {
+            throw new InvalidOperationException("No OpenLink update download URL was found.");
+        }
+
+        var primaryDownloadUrl = downloadUrls[0];
         var fileName = string.IsNullOrWhiteSpace(manifest.FileName)
-            ? Path.GetFileName(new Uri(manifest.ResolvedDownloadUrl).LocalPath)
+            ? Path.GetFileName(new Uri(primaryDownloadUrl).LocalPath)
             : manifest.FileName;
         if (string.IsNullOrWhiteSpace(fileName))
         {
@@ -150,11 +157,7 @@ public sealed class OpenLinkUpdater
         var tempPath = targetPath + ".download";
         _announce($"Downloading OpenLink {manifest.Version}.");
 
-        await using (var remote = await http.GetStreamAsync(manifest.ResolvedDownloadUrl, cancellationToken))
-        await using (var local = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
-        {
-            await remote.CopyToAsync(local, cancellationToken);
-        }
+        await DownloadFromFirstAvailableUrlAsync(http, downloadUrls, tempPath, cancellationToken);
 
         VerifyChecksumIfProvided(tempPath, manifest);
 
@@ -171,6 +174,38 @@ public sealed class OpenLinkUpdater
         {
             System.Windows.Application.Current.Shutdown();
         });
+    }
+
+    private async Task DownloadFromFirstAvailableUrlAsync(HttpClient http, IReadOnlyList<string> urls, string tempPath, CancellationToken cancellationToken)
+    {
+        Exception? lastError = null;
+        foreach (var url in urls)
+        {
+            try
+            {
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+
+                await using var remote = await http.GetStreamAsync(url, cancellationToken);
+                await using var local = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await remote.CopyToAsync(local, cancellationToken);
+                _log($"OpenLink update payload downloaded from {new Uri(url).Host}.");
+                return;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                lastError = ex;
+                _log($"OpenLink update payload failed from {url}: {ex.Message}");
+            }
+        }
+
+        if (File.Exists(tempPath))
+        {
+            File.Delete(tempPath);
+        }
+        throw lastError ?? new InvalidOperationException("OpenLink update download failed from every mirror.");
     }
 
     private bool ConfirmUpdate(UpdateManifest manifest)
@@ -349,6 +384,26 @@ if (Test-Path -LiteralPath $InstalledAppPath) {
                     : "";
 
         [JsonIgnore]
+        public IEnumerable<string> ResolvedDownloadUrls
+        {
+            get
+            {
+                if (!string.IsNullOrWhiteSpace(DownloadUrl))
+                {
+                    yield return DownloadUrl;
+                }
+
+                if (Platforms.TryGetValue("windows-x64", out var windows))
+                {
+                    foreach (var url in windows.ResolvedDownloadUrls)
+                    {
+                        yield return url;
+                    }
+                }
+            }
+        }
+
+        [JsonIgnore]
         public string ResolvedReleaseNotes =>
             !string.IsNullOrWhiteSpace(ReleaseNotes) ? ReleaseNotes : Notes;
 
@@ -372,8 +427,28 @@ if (Test-Path -LiteralPath $InstalledAppPath) {
         [JsonPropertyName("sha256")]
         public string Sha256 { get; set; } = "";
 
+        [JsonPropertyName("mirrors")]
+        public List<string> Mirrors { get; set; } = [];
+
         [JsonIgnore]
         public string ResolvedDownloadUrl =>
             !string.IsNullOrWhiteSpace(InstallerUrl) ? InstallerUrl : Url;
+
+        [JsonIgnore]
+        public IEnumerable<string> ResolvedDownloadUrls
+        {
+            get
+            {
+                if (!string.IsNullOrWhiteSpace(ResolvedDownloadUrl))
+                {
+                    yield return ResolvedDownloadUrl;
+                }
+
+                foreach (var mirror in Mirrors.Where(value => !string.IsNullOrWhiteSpace(value)))
+                {
+                    yield return mirror;
+                }
+            }
+        }
     }
 }

@@ -1163,9 +1163,14 @@ class OpenLinkService: ObservableObject {
             return
         }
 
+        let incomingType = json["type"] as? String
+        if incomingType == "start_interaction" {
+            installRemoteAccessibilitySink(originalMessage: json, serverId: serverId, broadcast: respondWithBroadcast)
+        }
+
         if let response = RemoteControlManager.shared.handleSignalingMessage(json) {
             let routedResponse = responseForController(response, originalMessage: json, serverId: serverId)
-            if let type = json["type"] as? String, type == "start_interaction" {
+            if let type = incomingType, type == "start_interaction" {
                 sendWebSocketResponse(routedResponse, serverId: serverId, broadcast: respondWithBroadcast)
                 let success = routedResponse["success"] as? Bool ?? true
                 let message = routedResponse["message"] as? String ?? (success
@@ -1175,7 +1180,6 @@ class OpenLinkService: ObservableObject {
                 postStatusNotification(title: "OpenLink", body: message)
                 sendControllerAnnouncement(message, originalMessage: json, serverId: serverId, broadcast: respondWithBroadcast)
                 if success {
-                    installRemoteAccessibilitySink(originalMessage: json, serverId: serverId, broadcast: respondWithBroadcast)
                     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                         self?.startAudioBridgeForController(from: json, serverId: serverId, respondWithBroadcast: respondWithBroadcast)
                     }
@@ -1185,7 +1189,7 @@ class OpenLinkService: ObservableObject {
                     runtimeLog("did not start audio bridge because start_interaction was rejected")
                 }
             } else {
-                if let type = json["type"] as? String,
+                if let type = incomingType,
                    type == "pause_interaction" || type == "controller_disconnect" || type == "disconnect_user" {
                     RemoteControlManager.shared.remoteAccessibilitySink = nil
                     OpenLinkAudioBridge.shared.stopCapture()

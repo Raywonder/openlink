@@ -1154,10 +1154,7 @@ class RemoteControlManager: ObservableObject {
             isReceivingControl = canReceiveInput
             screenSharingEnabled = (json["screenSharingAllowed"] as? Bool) ?? screenSharingEnabled
             if canReceiveInput {
-                announceWithVoiceOver("OpenLink remote keyboard control connected. VoiceOver AppleScript assist is ready.")
-                if isVoiceOverRunning() {
-                    remoteAccessibilitySink?("VoiceOver is running on this Mac. OpenLink will route VoiceOver status to your local screen reader when possible.")
-                }
+                prepareVoiceOverRemoteTtsBridge()
             }
             return [
                 "type": "start_interaction_ack",
@@ -1496,14 +1493,33 @@ class RemoteControlManager: ObservableObject {
     }
 
     private func echoVoiceOverLastPhraseAfterKey() {
+        guard remoteAccessibilitySink != nil else { return }
+        ensureVoiceOverRunningIfNeeded()
         guard isVoiceOverRunning() else { return }
         let now = Date()
         guard now.timeIntervalSince(lastVoiceOverEchoAt) > 0.25 else { return }
         lastVoiceOverEchoAt = now
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.08) {
-            self.runVoiceOverAppleScript("tell application \"VoiceOver\" to output last phrase")
             self.captureVoiceOverLastPhraseForRemoteTts()
         }
+    }
+
+    private func prepareVoiceOverRemoteTtsBridge() {
+        guard remoteAccessibilitySink != nil else { return }
+        ensureVoiceOverRunningIfNeeded()
+        let message = isVoiceOverRunning()
+            ? "VoiceOver is running on this Mac. OpenLink will send VoiceOver speech to your local screen reader."
+            : "VoiceOver could not be started automatically on this Mac. OpenLink will still send available accessibility announcements to your local screen reader."
+        remoteAccessibilitySink?(message)
+    }
+
+    private func ensureVoiceOverRunningIfNeeded() {
+        guard !isVoiceOverRunning() else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-a", "VoiceOver"]
+        try? process.run()
+        process.waitUntilExit()
     }
 
     private func captureVoiceOverLastPhraseForRemoteTts() {

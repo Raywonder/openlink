@@ -7,16 +7,27 @@ struct OpenLinkUpdateManifest: Decodable {
         let installerURL: String?
         let url: String?
         let sha256: String?
+        let mirrors: [String]?
 
         enum CodingKeys: String, CodingKey {
             case installerURL = "installer_url"
             case url
             case sha256
+            case mirrors
         }
 
         var resolvedURL: String {
             if let installerURL, !installerURL.isEmpty { return installerURL }
             return url ?? ""
+        }
+
+        var resolvedURLs: [String] {
+            var values: [String] = []
+            if !resolvedURL.isEmpty {
+                values.append(resolvedURL)
+            }
+            values.append(contentsOf: mirrors?.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? [])
+            return values
         }
     }
 
@@ -47,6 +58,24 @@ struct OpenLinkUpdateManifest: Decodable {
             return platform.resolvedURL
         }
         return downloadURL ?? ""
+    }
+
+    var macDownloadURLs: [String] {
+        var values: [String] = []
+        if let platform = platforms?["macos-x64"] {
+            values.append(contentsOf: platform.resolvedURLs)
+        }
+        if let platform = platforms?["macos"] {
+            values.append(contentsOf: platform.resolvedURLs)
+        }
+        if let platform = platforms?["mac"] {
+            values.append(contentsOf: platform.resolvedURLs)
+        }
+        if let downloadURL, !downloadURL.isEmpty {
+            values.append(downloadURL)
+        }
+        var seen = Set<String>()
+        return values.filter { seen.insert($0).inserted }
     }
 
     var macSha256: String? {
@@ -137,7 +166,10 @@ final class OpenLinkUpdater {
     }
 
     private func downloadAndInstall(_ manifest: OpenLinkUpdateManifest) async throws {
-        guard let downloadURL = URL(string: manifest.macDownloadURL), !manifest.macDownloadURL.isEmpty else {
+        let downloadURLs = manifest.macDownloadURLs
+        guard let firstDownloadURLString = downloadURLs.first,
+              let downloadURL = URL(string: firstDownloadURLString),
+              !firstDownloadURLString.isEmpty else {
             throw NSError(domain: "OpenLinkUpdater", code: 1, userInfo: [NSLocalizedDescriptionKey: "No macOS update download URL was found."])
         }
 
@@ -145,7 +177,7 @@ final class OpenLinkUpdater {
         let target = updatesDirectory
             .appendingPathComponent("OpenLink-\(safeVersion(manifest.version))")
             .appendingPathExtension(downloadURL.pathExtension.isEmpty ? "zip" : downloadURL.pathExtension)
-        let (tempURL, _) = try await session.download(from: downloadURL)
+        let tempURL = try await downloadFromFirstAvailableURL(downloadURLs)
         if FileManager.default.fileExists(atPath: target.path) {
             try FileManager.default.removeItem(at: target)
         }
@@ -153,6 +185,21 @@ final class OpenLinkUpdater {
         try verifyChecksumIfNeeded(fileURL: target, expected: manifest.macSha256)
         try writePendingWhatIsNew(version: manifest.version, notes: manifest.resolvedReleaseNotes)
         try stageAndRunInstaller(downloadURL: target, version: manifest.version)
+    }
+
+    private func downloadFromFirstAvailableURL(_ values: [String]) async throws -> URL {
+        var lastError: Error?
+        for value in values {
+            guard let url = URL(string: value) else { continue }
+            do {
+                let (tempURL, _) = try await session.download(from: url)
+                return tempURL
+            } catch {
+                lastError = error
+            }
+        }
+
+        throw lastError ?? NSError(domain: "OpenLinkUpdater", code: 6, userInfo: [NSLocalizedDescriptionKey: "OpenLink update download failed from every mirror."])
     }
 
     private func stageAndRunInstaller(downloadURL: URL, version: String) throws {
