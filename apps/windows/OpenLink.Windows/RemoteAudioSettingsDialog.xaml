@@ -30,13 +30,16 @@
                       Content="Allow system audio" />
 
             <Label x:Name="RemoteVolumeLabel"
-                   Content="Remote audio volume"
+                   Content="OpenLink remote playback volume"
                    Target="{Binding ElementName=RemoteVolumeBox}" />
             <ComboBox x:Name="RemoteVolumeBox"
                       Width="190"
                       HorizontalAlignment="Left"
                       Margin="0,0,0,10"
-                      AutomationProperties.LabeledBy="{Binding ElementName=RemoteVolumeLabel}">
+                      AutomationProperties.LabeledBy="{Binding ElementName=RemoteVolumeLabel}"
+                      AutomationProperties.HelpText="Adjusts OpenLink playback gain only. It does not change the Windows device volume.">
+                <ComboBoxItem Content="Muted" Tag="0" />
+                <ComboBoxItem Content="30 percent" Tag="30" />
                 <ComboBoxItem Content="50 percent" Tag="50" />
                 <ComboBoxItem Content="75 percent" Tag="75" />
                 <ComboBoxItem Content="100 percent" Tag="100" />

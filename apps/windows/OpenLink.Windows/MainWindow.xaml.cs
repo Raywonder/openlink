@@ -1311,7 +1311,7 @@ public partial class MainWindow : Window
         if (audioSettings.TryGetProperty("remoteAudioVolumePercent", out var remoteVolumeElement) &&
             remoteVolumeElement.TryGetInt32(out var remoteVolume))
         {
-            _settings.RemoteAudioVolumePercent = Math.Clamp(remoteVolume <= 0 ? 30 : remoteVolume, 0, 30);
+            _settings.RemoteAudioVolumePercent = Math.Clamp(remoteVolume < 0 ? 100 : remoteVolume, 0, 150);
         }
         if (audioSettings.TryGetProperty("localAudioCaptureVolumePercent", out var captureVolumeElement) &&
             captureVolumeElement.TryGetInt32(out var captureVolume))
@@ -4121,7 +4121,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _settings.RemoteAudioVolumePercent = Math.Clamp(dialog.RemoteAudioVolumePercent <= 0 ? 30 : dialog.RemoteAudioVolumePercent, 0, 30);
+        _settings.RemoteAudioVolumePercent = Math.Clamp(dialog.RemoteAudioVolumePercent < 0 ? 100 : dialog.RemoteAudioVolumePercent, 0, 150);
         _settings.DirectAudioBufferSamples = dialog.DirectAudioBufferSamples;
         _settings.WindowsAudioBufferSamples = dialog.WindowsAudioBufferSamples;
         _settings.AudioStreamingCodec = dialog.AudioStreamingCodec;

@@ -195,7 +195,7 @@
                               Margin="0,0,0,8"
                               Content="Allow system audio" />
                     <Label x:Name="RemoteAudioVolumeLabel"
-                           Content="Remote audio volume"
+                           Content="OpenLink remote playback volume"
                            Target="{Binding ElementName=RemoteAudioVolumeSlider}" />
                     <Slider x:Name="RemoteAudioVolumeSlider"
                             Minimum="0"
@@ -203,7 +203,8 @@
                             TickFrequency="10"
                             IsSnapToTickEnabled="True"
                             Margin="0,0,0,8"
-                            AutomationProperties.LabeledBy="{Binding ElementName=RemoteAudioVolumeLabel}" />
+                            AutomationProperties.LabeledBy="{Binding ElementName=RemoteAudioVolumeLabel}"
+                            AutomationProperties.HelpText="Adjusts OpenLink playback gain only. It does not change the Windows device volume." />
                     <Label x:Name="LocalAudioCaptureVolumeLabel"
                            Content="Local audio capture volume"
                            Target="{Binding ElementName=LocalAudioCaptureVolumeSlider}" />

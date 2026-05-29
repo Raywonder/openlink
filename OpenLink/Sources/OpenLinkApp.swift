@@ -1765,7 +1765,7 @@ struct AudioSettingsTab: View {
                     Toggle("Allow remote audio", isOn: $allowAudio)
                     Toggle("Allow microphone audio", isOn: $allowMicrophoneAudio)
                     Toggle("Allow system audio", isOn: $allowSystemAudio)
-                    SliderRow(title: "Remote audio volume", value: $remoteAudioVolumePercent, range: 0...150, step: 10, suffix: "%")
+                    SliderRow(title: "OpenLink remote playback volume", value: $remoteAudioVolumePercent, range: 0...150, step: 10, suffix: "%")
                     SliderRow(title: "Local audio capture volume", value: $localAudioCaptureVolumePercent, range: 0...150, step: 10, suffix: "%")
                     Picker("Direct audio buffer size", selection: $directAudioBufferSamples) {
                         ForEach([16, 32, 64, 128, 256, 512, 1024, 2048], id: \.self) { samples in
