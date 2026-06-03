@@ -223,10 +223,23 @@ NEW_APP="$(/usr/bin/find "$WORK_DIR" -maxdepth 3 -name 'OpenLink.app' -type d | 
 if [ -z "$NEW_APP" ]; then
   exit 12
 fi
+NEW_VERSION="$(/usr/bin/defaults read "$NEW_APP/Contents/Info" CFBundleShortVersionString 2>/dev/null || true)"
+if [ -z "$NEW_VERSION" ]; then
+  exit 13
+fi
+if [ "$NEW_VERSION" != "$VERSION" ]; then
+  echo "Downloaded OpenLink.app is version $NEW_VERSION, expected $VERSION" >&2
+  exit 14
+fi
 /usr/bin/osascript -e 'tell application "OpenLink" to quit' >/dev/null 2>&1 || true
 sleep 2
 /bin/rm -rf "$APP_PATH"
 /bin/cp -R "$NEW_APP" "$APP_PATH"
+INSTALLED_VERSION="$(/usr/bin/defaults read "$APP_PATH/Contents/Info" CFBundleShortVersionString 2>/dev/null || true)"
+if [ "$INSTALLED_VERSION" != "$VERSION" ]; then
+  echo "Installed OpenLink.app is version $INSTALLED_VERSION, expected $VERSION" >&2
+  exit 15
+fi
 /bin/mkdir -p "$HOME/.openlink"
 /bin/echo "$VERSION" > "$HOME/.openlink/pending-update-success.txt"
 /usr/bin/open -n "$APP_PATH"
