@@ -360,7 +360,17 @@ public partial class MainWindow : Window
                 {
                     if (keyDown)
                     {
-                        Dispatcher.BeginInvoke(() => HandleCtrlAltDeleteDuringRemoteControl(_remoteInputMachine));
+                        Dispatcher.BeginInvoke(() =>
+                        {
+                            if (shiftDown)
+                            {
+                                SendCtrlAltShiftDeleteToRemote(_remoteInputMachine);
+                            }
+                            else
+                            {
+                                HandleCtrlAltDeleteDuringRemoteControl(_remoteInputMachine);
+                            }
+                        });
                     }
 
                     return new IntPtr(1);
@@ -1829,7 +1839,7 @@ public partial class MainWindow : Window
 
         if (_ctrlAltDeletePressCount == 1)
         {
-            SetStatus($"Control Alt Delete is guarded by OpenLink. Press it {_settings.CtrlAltDeleteRemotePressCount} times for {machine.DisplayName}. Press it {_settings.CtrlAltDeleteLocalLockPressCount} times for this Windows lock screen. Hold Control Alt Shift Escape to force disconnect and return keyboard to this computer.");
+            SetStatus($"Control Alt Delete is guarded by OpenLink. Press Control Alt Shift Delete to send the remote lock request to {machine.DisplayName}. Press Control Alt Delete {_settings.CtrlAltDeleteLocalLockPressCount} times for this Windows lock screen. Hold Control Alt Shift Escape to force disconnect and return keyboard to this computer.");
             return;
         }
 
@@ -1847,6 +1857,13 @@ public partial class MainWindow : Window
             SetStatus("Locking this Windows computer. OpenLink will apply the selected return action after sign in.");
             LockWorkStation();
         }
+    }
+
+    private void SendCtrlAltShiftDeleteToRemote(MachineRecord machine)
+    {
+        _ctrlAltDeletePressCount = 0;
+        _ = SendRemoteMachineActionAsync(machine, "lock_machine", null);
+        SetStatus($"Sent remote lock request to {machine.DisplayName}. Control Alt Delete remains guarded on this Windows computer.");
     }
 
     private void SystemEvents_SessionSwitch(object sender, SessionSwitchEventArgs e)

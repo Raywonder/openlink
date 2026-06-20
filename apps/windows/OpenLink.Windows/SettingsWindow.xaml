@@ -134,11 +134,12 @@
                               Content="Allow both keyboards while sharing control" />
                     <CheckBox x:Name="CtrlAltDeleteGuardEnabledBox"
                               Margin="0,0,0,8"
-                              Content="Guard Control Alt Delete during remote control" />
+                              Content="Guard plain Control Alt Delete during remote control" />
                     <Label Content="Control Alt Delete action for controlled machine" />
                     <ComboBox x:Name="CtrlAltDeleteRemotePressCountBox"
                               Margin="0,0,0,8"
                               AutomationProperties.Name="Control Alt Delete action for controlled machine">
+                        <ComboBoxItem Content="Control Alt Shift Delete sends Lock to controlled machine" Tag="2" />
                         <ComboBoxItem Content="Second press sends Lock to controlled machine" Tag="2" />
                         <ComboBoxItem Content="First press sends Lock to controlled machine" Tag="1" />
                         <ComboBoxItem Content="Third press sends Lock to controlled machine" Tag="3" />
