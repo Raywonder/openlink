@@ -13,6 +13,12 @@ public sealed record OpenLinkAudioFrame(
     string Codec,
     byte[] Payload);
 
+public sealed record OpenLinkAsioDriverInfo(
+    string Name,
+    bool IsAsioa,
+    bool IsAsio4All,
+    string Description);
+
 public sealed class OpenLinkAudioBridge : IDisposable
 {
     private const int TransportChannels = 2;
@@ -401,13 +407,14 @@ public sealed class OpenLinkAudioBridge : IDisposable
             try
             {
                 var driverNames = GetAsioDriverNames();
-                var driverName = string.IsNullOrWhiteSpace(_asioDriverName)
-                    ? driverNames.FirstOrDefault(name => name.Contains("ASIO4ALL", StringComparison.OrdinalIgnoreCase)) ?? driverNames.FirstOrDefault()
-                    : _asioDriverName;
+                var driverName = SelectAsioDriver(driverNames, _asioDriverName);
 
                 if (!string.IsNullOrWhiteSpace(driverName))
                 {
                     _remotePlaybackDriverKey = $"ASIO ({driverName})";
+                    _remotePlaybackOutputName = driverName.Contains("ASIOA", StringComparison.OrdinalIgnoreCase)
+                        ? "ASIOA Audio Router selected ASIO output"
+                        : "selected ASIO output";
                     return new AsioOut(driverName);
                 }
             }
@@ -491,6 +498,58 @@ public sealed class OpenLinkAudioBridge : IDisposable
         {
             return [];
         }
+    }
+
+    public static IReadOnlyList<OpenLinkAsioDriverInfo> GetAsioDriverInfo()
+    {
+        return GetAsioDriverNames()
+            .Select(name => new OpenLinkAsioDriverInfo(
+                name,
+                IsAsioaDriver(name),
+                name.Contains("ASIO4ALL", StringComparison.OrdinalIgnoreCase),
+                DescribeAsioDriver(name)))
+            .OrderByDescending(info => info.IsAsioa)
+            .ThenByDescending(info => info.IsAsio4All)
+            .ThenBy(info => info.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string? SelectAsioDriver(IReadOnlyList<string> driverNames, string requestedDriverName)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedDriverName))
+        {
+            var exact = driverNames.FirstOrDefault(name =>
+                string.Equals(name, requestedDriverName, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(exact))
+            {
+                return exact;
+            }
+        }
+
+        return driverNames.FirstOrDefault(IsAsioaDriver)
+            ?? driverNames.FirstOrDefault(name => name.Contains("ASIO4ALL", StringComparison.OrdinalIgnoreCase))
+            ?? driverNames.FirstOrDefault();
+    }
+
+    private static bool IsAsioaDriver(string driverName)
+    {
+        return driverName.Contains("ASIOA", StringComparison.OrdinalIgnoreCase) ||
+               driverName.Contains("Audio Router", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string DescribeAsioDriver(string driverName)
+    {
+        if (IsAsioaDriver(driverName))
+        {
+            return "ASIOA Audio Router. Use this when routing OpenLink audio through the ASIOA driver and its selected in/out pairs.";
+        }
+
+        if (driverName.Contains("ASIO4ALL", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ASIO4ALL compatibility driver. Use this for systems that already depend on ASIO4ALL.";
+        }
+
+        return "Installed ASIO driver.";
     }
 
     private static void StopCapture<TCapture>(ref TCapture? capture)

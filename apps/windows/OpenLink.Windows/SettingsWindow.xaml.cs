@@ -295,13 +295,13 @@ public partial class SettingsWindow : Window
             Tag = "",
             ToolTip = "Use normal Windows audio instead of ASIO."
         });
-        foreach (var driverName in OpenLinkAudioBridge.GetAsioDriverNames())
+        foreach (var driver in OpenLinkAudioBridge.GetAsioDriverInfo())
         {
             AsioDriverBox.Items.Add(new ComboBoxItem
             {
-                Content = driverName,
-                Tag = driverName,
-                ToolTip = driverName
+                Content = driver.Name,
+                Tag = driver.Name,
+                ToolTip = driver.Description
             });
         }
     }

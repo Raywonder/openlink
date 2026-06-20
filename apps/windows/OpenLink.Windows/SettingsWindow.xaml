@@ -253,7 +253,7 @@
                     </ComboBox>
                     <CheckBox x:Name="EnableAsioAudioDriverBox"
                               Margin="0,0,0,8"
-                              Content="Use ASIO or ASIO4ALL for low-latency remote playback" />
+                              Content="Use ASIO driver for low-latency remote playback" />
                     <Label x:Name="AsioDriverLabel"
                            Content="ASIO driver"
                            Target="{Binding ElementName=AsioDriverBox}" />
@@ -261,11 +261,12 @@
                               Margin="0,0,0,8"
                               IsEditable="False"
                               AutomationProperties.Name="ASIO driver"
-                              AutomationProperties.HelpText="Choose the ASIO or ASIO4ALL driver for low-latency remote playback. Choose System default audio driver to use normal Windows audio."
+                              AutomationProperties.HelpText="Choose ASIOA Audio Router, ASIO4ALL, or another installed ASIO driver for low-latency remote playback. Choose System default audio driver to use normal Windows audio."
                               AutomationProperties.LabeledBy="{Binding ElementName=AsioDriverLabel}">
                         <ComboBox.ItemContainerStyle>
                             <Style TargetType="{x:Type ComboBoxItem}">
                                 <Setter Property="AutomationProperties.Name" Value="{Binding Content, RelativeSource={RelativeSource Self}}" />
+                                <Setter Property="AutomationProperties.HelpText" Value="{Binding ToolTip, RelativeSource={RelativeSource Self}}" />
                             </Style>
                         </ComboBox.ItemContainerStyle>
                     </ComboBox>
