@@ -100,15 +100,15 @@ class OpenLinkApp {
 
     resolveDownloadLinks() {
         const configured = window.OPENLINK_DOWNLOADS || {};
-        const cloudReleases = configured.cloudReleases || 'https://cloud.raywonderis.me/s/openlink-releases';
+        const cloudReleases = configured.cloudReleases || 'https://cloud.raywonderis.me/openlink-releases';
         return {
             latestInstaller: configured.latestInstaller
                 || configured.windowsInstaller
-                || `${cloudReleases}/download?path=%2Fwindows&files=OpenLink-Inno-Setup.exe`,
+                || `${cloudReleases}/windows/OpenLink-Inno-Setup.exe`,
             macInstaller: configured.macInstaller
-                || `${cloudReleases}/download?path=%2Fmacos&files=OpenLink-macOS.zip`,
+                || `${cloudReleases}/macos/OpenLink-macOS.zip`,
             updateManifest: configured.updateManifest
-                || `${cloudReleases}/download?path=%2F&files=update.json`,
+                || `${cloudReleases}/update.json`,
             allDownloads: configured.allDownloads || cloudReleases,
             fallbackDownloads: 'https://raywonderis.me/openlink/downloads.php'
         };

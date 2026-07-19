@@ -31,7 +31,7 @@ The signaling server supports OpenCloud-backed status and download links without
 
 ```text
 OPENLINK_PUBLIC_BASE_URL=https://openlink.tappedin.fm
-OPENLINK_OPENCLOUD_SHARE_ROOT=https://cloud.raywonderis.me/s/openlink-releases
+OPENLINK_OPENCLOUD_SHARE_ROOT=https://cloud.raywonderis.me/openlink-releases
 OPENLINK_SIGNALING_SERVERS=wss://openlink.tappedin.fm/ws,wss://openlink.raywonderis.me/ws,wss://openlink.devinecreations.net/ws,wss://openlink.devine-creations.com/ws
 OPENLINK_LINK_TOKEN_SECRET=<stored server-side secret>
 OPENLINK_LINK_ADMIN_TOKEN=<stored server-side admin token>

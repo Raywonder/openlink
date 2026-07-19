@@ -5,7 +5,7 @@ param(
     [string]$WindowsInstaller,
     [string]$WindowsPortable,
     [string]$MacOSZip,
-    [string]$ShareRoot = 'https://cloud.raywonderis.me/s/openlink-releases',
+    [string]$ShareRoot = 'https://cloud.raywonderis.me/openlink-releases',
     [string]$ReleaseNotes = "OpenLink update published through the OpenCloud release mirror.",
     [switch]$Clean
 )
@@ -112,22 +112,22 @@ $macOSMirror = $mirrored | Where-Object { $_.FileName -eq 'OpenLink-macOS.zip' }
 
 if ($windowsInstallerMirror) {
     $platforms['windows-x64'] = [ordered]@{
-        installer_url = "$shareRoot/download?path=%2Fwindows&files=OpenLink-Inno-Setup.exe"
-        url = $(if ($windowsPortableMirror) { "$shareRoot/download?path=%2Fwindows&files=OpenLink-Windows-x64.zip" } else { "$shareRoot/download?path=%2Fwindows&files=OpenLink-Inno-Setup.exe" })
+        installer_url = "$shareRoot/windows/OpenLink-Inno-Setup.exe"
+        url = $(if ($windowsPortableMirror) { "$shareRoot/windows/OpenLink-Windows-x64.zip" } else { "$shareRoot/windows/OpenLink-Inno-Setup.exe" })
         sha256 = $windowsInstallerMirror.Sha256
     }
 }
 elseif ($windowsPortableMirror) {
     $platforms['windows-x64'] = [ordered]@{
-        url = "$shareRoot/download?path=%2Fwindows&files=OpenLink-Windows-x64.zip"
+        url = "$shareRoot/windows/OpenLink-Windows-x64.zip"
         sha256 = $windowsPortableMirror.Sha256
     }
 }
 
 if ($macOSMirror) {
     $platforms['macos-x64'] = [ordered]@{
-        installer_url = "$shareRoot/download?path=%2Fmacos&files=OpenLink-macOS.zip"
-        url = "$shareRoot/download?path=%2Fmacos&files=OpenLink-macOS.zip"
+        installer_url = "$shareRoot/macos/OpenLink-macOS.zip"
+        url = "$shareRoot/macos/OpenLink-macOS.zip"
         sha256 = $macOSMirror.Sha256
     }
 }
@@ -156,7 +156,7 @@ $index = @(
     $shareRoot,
     '',
     'Updater manifest:',
-    "$shareRoot/download?path=%2F&files=update.json",
+    "$shareRoot/update.json",
     '',
     'Mirrored files:'
 )

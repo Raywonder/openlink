@@ -10,7 +10,7 @@ const DEFAULT_SIGNALING_SERVERS = [
 class OpenCloudLinkProvider {
     constructor(options = {}) {
         this.publicBaseUrl = this.cleanBaseUrl(options.publicBaseUrl || process.env.OPENLINK_PUBLIC_BASE_URL || 'https://openlink.tappedin.fm');
-        this.cloudShareRoot = this.cleanBaseUrl(options.cloudShareRoot || process.env.OPENLINK_OPENCLOUD_SHARE_ROOT || 'https://cloud.raywonderis.me/s/openlink-releases');
+        this.cloudShareRoot = this.cleanBaseUrl(options.cloudShareRoot || process.env.OPENLINK_OPENCLOUD_SHARE_ROOT || 'https://cloud.raywonderis.me/openlink-releases');
         this.statusTokenTtlSeconds = this.readPositiveInt(options.statusTokenTtlSeconds || process.env.OPENLINK_STATUS_TOKEN_TTL_SECONDS, 86400);
         this.clientTokenTtlSeconds = this.readPositiveInt(options.clientTokenTtlSeconds || process.env.OPENLINK_CLIENT_LINK_TOKEN_TTL_SECONDS, 3600);
         this.applicationTokenTtlSeconds = this.readPositiveInt(options.applicationTokenTtlSeconds || process.env.OPENLINK_APPLICATION_TOKEN_TTL_SECONDS, 86400);
@@ -52,10 +52,10 @@ class OpenCloudLinkProvider {
         return {
             provider: 'opencloud',
             allDownloads: this.cloudShareRoot,
-            updateManifest: `${this.cloudShareRoot}/download?path=%2F&files=update.json`,
-            windowsInstaller: `${this.cloudShareRoot}/download?path=%2Fwindows&files=OpenLink-Inno-Setup.exe`,
-            windowsPortable: `${this.cloudShareRoot}/download?path=%2Fwindows&files=OpenLink-Windows-x64.zip`,
-            macInstaller: `${this.cloudShareRoot}/download?path=%2Fmacos&files=OpenLink-macOS.zip`
+            updateManifest: `${this.cloudShareRoot}/update.json`,
+            windowsInstaller: `${this.cloudShareRoot}/windows/OpenLink-Inno-Setup.exe`,
+            windowsPortable: `${this.cloudShareRoot}/windows/OpenLink-Windows-x64.zip`,
+            macInstaller: `${this.cloudShareRoot}/macos/OpenLink-macOS.zip`
         };
     }
 
