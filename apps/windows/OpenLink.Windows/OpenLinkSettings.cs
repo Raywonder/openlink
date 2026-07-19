@@ -79,7 +79,14 @@ public sealed class OpenLinkSettings
     public bool DownloadUpdatesAutomatically { get; set; } = true;
     public string UpdateChannel { get; set; } = "Stable";
 
-    public string UpdateManifestUrl { get; set; } = CloudUpdateManifestUrl;
+    public string UpdateManifestUrl { get; set; } = TappedInUpdateManifestUrl;
+    public string AgentConnectorUrl { get; set; } = "wss://openlink.tappedin.fm/agents/realtime";
+    public bool AllowAgentControlRequests { get; set; } = true;
+    public bool AllowAgentRealtimeControl { get; set; } = true;
+    public bool EnableAgentVoiceConversation { get; set; } = true;
+    public bool RequireApprovalForAgentControl { get; set; }
+    public bool AgentVoiceRequiresApproval { get; set; }
+    public bool PlayAgentPresenceSounds { get; set; } = true;
     public bool LocalServerEnabled { get; set; }
     public string LocalServerPort { get; set; } = "8765";
 
@@ -155,6 +162,13 @@ public sealed class OpenLinkSettings
             DownloadUpdatesAutomatically = DownloadUpdatesAutomatically,
             UpdateChannel = UpdateChannel,
             UpdateManifestUrl = UpdateManifestUrl,
+            AgentConnectorUrl = AgentConnectorUrl,
+            AllowAgentControlRequests = AllowAgentControlRequests,
+            AllowAgentRealtimeControl = AllowAgentRealtimeControl,
+            EnableAgentVoiceConversation = EnableAgentVoiceConversation,
+            RequireApprovalForAgentControl = RequireApprovalForAgentControl,
+            AgentVoiceRequiresApproval = AgentVoiceRequiresApproval,
+            PlayAgentPresenceSounds = PlayAgentPresenceSounds,
             LocalServerEnabled = LocalServerEnabled,
             LocalServerPort = LocalServerPort
         };
@@ -192,7 +206,7 @@ public static class OpenLinkSettingsStore
             var json = File.ReadAllText(settingsPath);
             var settings = JsonSerializer.Deserialize<OpenLinkSettings>(json, SerializerOptions) ?? new OpenLinkSettings();
             if (string.IsNullOrWhiteSpace(settings.UpdateManifestUrl) ||
-                settings.UpdateManifestUrl.Contains("files.tappedin.fm/Public/openlink/update.json", StringComparison.OrdinalIgnoreCase) ||
+                settings.UpdateManifestUrl.Contains("devinecreations.net/openlink-downloads/update.json", StringComparison.OrdinalIgnoreCase) ||
                 settings.UpdateManifestUrl.Contains("openlink.devinecreations.net/downloads", StringComparison.OrdinalIgnoreCase))
             {
                 settings.UpdateManifestUrl = new OpenLinkSettings().UpdateManifestUrl;

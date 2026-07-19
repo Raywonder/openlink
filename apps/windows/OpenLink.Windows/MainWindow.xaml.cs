@@ -23,6 +23,8 @@ public partial class MainWindow : Window
 {
     private const string CurrentWhatIsNewNotes =
         """
+        - Restores the accessible Request agent button to the Windows main window and preserves agent voice/control preferences when settings are saved.
+        - Uses the working TappedIn update manifest first so update checks no longer report a false 404 before falling back.
         - Windows controlled devices now receive authorized scan-code keyboard input, including Tab, arrows, function keys, Alt combinations, and Windows-key shortcuts, without echoing injected keys back to the controller.
         - Controller actions now open with Ctrl Alt Shift Backslash, pause remote keyboard forwarding while the menu is open, and keep arrow-key navigation inside the classic Windows menu until Escape.
         - Windows now starts its controlled-side audio route when another machine begins an interaction, so Windows-to-remote audio can flow back through the same OpenLink signal path.
@@ -479,6 +481,70 @@ public partial class MainWindow : Window
         await StartHostingAsync();
     }
 
+    private async void RequestAgentButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_settings.AllowAgentControlRequests)
+        {
+            SetStatus("Agent requests are disabled in OpenLink settings.");
+            return;
+        }
+
+        if (_socket?.State != WebSocketState.Open || string.IsNullOrWhiteSpace(_activeSessionId))
+        {
+            SetStatus("Start OpenLink hosting before requesting an agent.");
+            return;
+        }
+
+        RequestAgentButton.IsEnabled = false;
+        var requestId = Guid.NewGuid().ToString("N");
+        var sent = await SendAsync(new
+        {
+            type = "agent_request",
+            requestId,
+            sessionId = _activeSessionId,
+            sourceMachineId = Environment.MachineName,
+            sourceMachineName = Environment.MachineName,
+            requestedAgent = "clawdia",
+            voice = _settings.EnableAgentVoiceConversation,
+            realtimeControl = _settings.AllowAgentRealtimeControl,
+            requireControlApproval = _settings.RequireApprovalForAgentControl,
+            requireVoiceApproval = _settings.AgentVoiceRequiresApproval
+        });
+
+        if (sent)
+        {
+            SetStatus("Agent request sent. Waiting for an available agent to join this OpenLink session with voice.");
+            _ = SendDiagnosticEventAsync("agent_request", outcome: "sent", metadata: new { requestId });
+        }
+        else
+        {
+            SetStatus("Agent request could not be sent because OpenLink is not connected.");
+            RequestAgentButton.IsEnabled = true;
+        }
+    }
+
+    private void HandleAgentRequestStatus(JsonElement root)
+    {
+        var status = root.TryGetProperty("status", out var statusElement)
+            ? statusElement.GetString()
+            : null;
+        var agentName = root.TryGetProperty("agentName", out var agentElement)
+            ? agentElement.GetString()
+            : "the requested agent";
+        var message = root.TryGetProperty("message", out var messageElement)
+            ? messageElement.GetString()
+            : null;
+
+        RequestAgentButton.IsEnabled = !string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase);
+        SetStatus(message ?? status switch
+        {
+            "accepted" => $"{agentName} accepted the request and is joining with the approved voice and control permissions.",
+            "pending" => $"Waiting for {agentName} to join this OpenLink session.",
+            "unavailable" => $"{agentName} is not currently available. OpenLink will remain connected.",
+            _ => $"Agent request status: {status ?? "unknown"}."
+        });
+    }
+
     private async Task StartHostingAsync()
     {
         StartHostingButton.IsEnabled = false;
@@ -866,6 +932,10 @@ public partial class MainWindow : Window
                 break;
             case "machine_connect_request":
                 HandleMachineConnectRequest(root);
+                break;
+            case "agent_request_ack":
+            case "agent_request_status":
+                HandleAgentRequestStatus(root);
                 break;
             case "start_interaction":
                 HandleStartInteractionRequest(root);
@@ -2595,7 +2665,7 @@ public partial class MainWindow : Window
             }
         }
 
-        return typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "1.7.35";
+        return typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "1.7.36";
     }
 
     private static string GetLastWhatIsNewNotes()

@@ -57,6 +57,14 @@
                     Content="Settings"
                     AutomationProperties.Name="OpenLink settings"
                     Click="SettingsButton_Click" />
+            <Button x:Name="RequestAgentButton"
+                    DockPanel.Dock="Right"
+                    MinWidth="132"
+                    Margin="12,0,0,0"
+                    Content="Request agent"
+                    AutomationProperties.Name="Request an OpenLink agent"
+                    AutomationProperties.HelpText="Ask an available approved agent such as Clawdia to join this OpenLink session with voice and permitted controls"
+                    Click="RequestAgentButton_Click" />
             <StackPanel>
                 <TextBlock Text="OpenLink"
                            FontSize="28"
