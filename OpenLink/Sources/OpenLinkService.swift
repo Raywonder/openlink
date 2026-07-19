@@ -1003,7 +1003,7 @@ class OpenLinkService: ObservableObject {
                     "machineName": localStableMachineName(),
                     "os": "macOS",
                     "app": "OpenLink",
-                    "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.26",
+                    "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.34",
                     "permissions": [
                         "remoteControl": allowRemoteControl,
                         "clipboard": UserDefaults.standard.bool(forKey: "allowClipboardSync"),

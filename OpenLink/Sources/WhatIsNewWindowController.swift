@@ -3,6 +3,8 @@ import SwiftUI
 
 final class WhatIsNewWindowController {
     static let currentReleaseNotes = """
+    - Managed signaling, VoiceLink, and update endpoints are no longer exposed as editable backend values in app settings.
+    - Remote desktop sessions now advertise the authenticated RFB-over-WebRTC migration policy while retaining the current native transport for compatibility testing.
     - Screen-reader readouts now use native UI Automation live-region events on Windows and NSAccessibility announcements on macOS.
     - OpenLink now shows a tCast-style What is New dialog after updates and keeps release notes available from the File menu.
     - macOS Settings now opens in a real foreground window and can be reopened from the app menu.
@@ -74,7 +76,7 @@ final class WhatIsNewWindowController {
             return value
         }
 
-        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.26"
+        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.7.34"
     }
 
     static func lastNotes() -> String {

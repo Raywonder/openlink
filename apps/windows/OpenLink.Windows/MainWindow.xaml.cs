@@ -2493,7 +2493,7 @@ public partial class MainWindow : Window
             }
         }
 
-        return typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "1.7.26";
+        return typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "1.7.34";
     }
 
     private static string GetLastWhatIsNewNotes()
