@@ -1,5 +1,5 @@
 #define MyAppName "OpenLink"
-#define MyAppVersion "1.7.34"
+#define MyAppVersion "1.7.35"
 #define MyAppPublisher "Devine Creations"
 #define MyAppExeName "OpenLink.exe"
 #define SourceDir "..\\dist\\native-windows\\OpenLink"

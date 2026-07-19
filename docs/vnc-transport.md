@@ -36,6 +36,8 @@ Clients advertise this policy as:
 4. Add latency, frame-drop, reconnect, clipboard, keyboard, screen-reader, and multi-monitor tests.
 5. Remove remaining RustDesk packaging scripts only after Windows-to-Mac and Mac-to-Windows release tests pass.
 
+The Windows secure-desktop implementation and its release gates are specified in [windows-secure-desktop-host.md](windows-secure-desktop-host.md).
+
 ## Windows keyboard and accessibility path
 
 - The native Windows client receives authorized `input_event` messages and injects their Windows scan codes with `SendInput`. This preserves Tab, Shift+Tab, arrows, navigation keys, function keys, Alt combinations, and Windows-key shortcuts on the controlled desktop.

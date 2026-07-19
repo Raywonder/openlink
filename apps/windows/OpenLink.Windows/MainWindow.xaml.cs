@@ -23,6 +23,7 @@ public partial class MainWindow : Window
 {
     private const string CurrentWhatIsNewNotes =
         """
+        - Windows controlled devices now receive authorized scan-code keyboard input, including Tab, arrows, function keys, Alt combinations, and Windows-key shortcuts, without echoing injected keys back to the controller.
         - Controller actions now open with Ctrl Alt Shift Backslash, pause remote keyboard forwarding while the menu is open, and keep arrow-key navigation inside the classic Windows menu until Escape.
         - Windows now starts its controlled-side audio route when another machine begins an interaction, so Windows-to-remote audio can flow back through the same OpenLink signal path.
         - Remote audio frames now use the same machine-alias targeting as control messages, reducing false offline or dropped-audio cases when device names differ.
@@ -2594,7 +2595,7 @@ public partial class MainWindow : Window
             }
         }
 
-        return typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "1.7.34";
+        return typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "1.7.35";
     }
 
     private static string GetLastWhatIsNewNotes()
