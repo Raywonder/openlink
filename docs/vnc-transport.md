@@ -36,6 +36,14 @@ Clients advertise this policy as:
 4. Add latency, frame-drop, reconnect, clipboard, keyboard, screen-reader, and multi-monitor tests.
 5. Remove remaining RustDesk packaging scripts only after Windows-to-Mac and Mac-to-Windows release tests pass.
 
+## Windows keyboard and accessibility path
+
+- The native Windows client receives authorized `input_event` messages and injects their Windows scan codes with `SendInput`. This preserves Tab, Shift+Tab, arrows, navigation keys, function keys, Alt combinations, and Windows-key shortcuts on the controlled desktop.
+- Injected events carry an OpenLink marker. The local keyboard hook ignores that marker so controlled-side input cannot echo back to the controller.
+- Input is accepted only from the machine that completed the active `start_interaction` handshake and still satisfies the local remote-control approval policy.
+- Normal desktop input injection does not cross the Windows secure-desktop boundary. Pre-login, UAC, and other secure screens require a separately installed elevated OpenLink service or Windows UIAccess design; the desktop client must report that limitation instead of claiming the key was delivered.
+- The Windows package includes NVDA Controller Client libraries for local speech and braille announcements when NVDA is running. NVDA itself and any NVDA Remote add-on remain user-installed assistive technology and are not silently installed by OpenLink.
+
 ## Agent and voice coexistence
 
 An OpenLink session may request an approved agent participant. Agent presence, text control requests, and voice state use OpenLink signaling and VoiceLink audio, not the RFB stream. This lets Clawdia remain conversational while a remote-control task continues and allows the same behavior on tailnet-only or authorized public sessions.

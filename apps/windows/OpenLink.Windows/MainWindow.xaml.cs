@@ -64,6 +64,7 @@ public partial class MainWindow : Window
     private DateTimeOffset? _hostingStartedAt;
     private bool _allowClose;
     private bool _sessionActive;
+    private string? _incomingControllerMachineId;
     private string _serviceHealthText = "Connection health unknown";
     private string _connectionStrengthText = "Signal strength unknown";
     private string? _activeMachineName;
@@ -297,6 +298,10 @@ public partial class MainWindow : Window
         if (nCode >= 0 && (message == WmKeydown || message == WmSyskeydown || message == WmKeyup || message == WmSyskeyup))
         {
             var keyboardEvent = Marshal.PtrToStructure<KbdLlHookStruct>(lParam);
+            if (keyboardEvent.DwExtraInfo.ToInt64() == unchecked((long)OpenLinkInjectedInputMarker.ToUInt64()))
+            {
+                return CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
+            }
             var vkCode = (int)keyboardEvent.VkCode;
             var scanCode = (int)keyboardEvent.ScanCode;
             var isExtendedKey = (keyboardEvent.Flags & LlkhfExtended) != 0;
@@ -876,6 +881,10 @@ public partial class MainWindow : Window
             case "input_event_ack":
             case "key_event_ack":
                 HandleRemoteInputAck(root, type);
+                break;
+            case "input_event":
+            case "key_event":
+                HandleIncomingKeyboardInput(root);
                 break;
             case "machine_management_action":
                 HandleMachineManagementAction(root);
@@ -1459,6 +1468,7 @@ public partial class MainWindow : Window
         }
 
         _sessionActive = true;
+        _incomingControllerMachineId = GetSourceMachineId(root);
         UpdateConnectedUiState();
         StartAudioBridgeForRemoteController(remoteMachine, GetSourceMachineId(root), $"controlled by {remoteMachine?.DisplayName ?? "remote controller"}");
         PlaySound(SoundAction.Connect);
@@ -1478,6 +1488,96 @@ public partial class MainWindow : Window
         _ = SendDiagnosticEventAsync("start_interaction", remoteMachine, "accepted");
     }
 
+    private void HandleIncomingKeyboardInput(JsonElement root)
+    {
+        if (!IsMessageTargetedToThisMachine(root))
+        {
+            return;
+        }
+
+        var sourceMachineId = GetSourceMachineId(root);
+        var remoteMachine = UpsertRemoteMachineFromMessage(root);
+        var authorized = _sessionActive &&
+            !string.IsNullOrWhiteSpace(_incomingControllerMachineId) &&
+            string.Equals(NormalizeMachineToken(_incomingControllerMachineId), NormalizeMachineToken(sourceMachineId), StringComparison.Ordinal) &&
+            _settings.AllowRemoteControl &&
+            (!_settings.RequireApprovalForNewDevices || remoteMachine?.IsTrusted == true || remoteMachine?.AllowDropIn == true);
+
+        if (!authorized)
+        {
+            SendIncomingKeyboardAck(sourceMachineId, success: false, "Remote keyboard input is not authorized on this Windows device.");
+            return;
+        }
+
+        var eventType = root.TryGetProperty("eventType", out var eventTypeElement) && eventTypeElement.TryGetInt32(out var parsedEventType)
+            ? parsedEventType
+            : 10;
+        var keyDown = eventType != 11;
+        var virtualKey = root.TryGetProperty("windowsVirtualKey", out var virtualKeyElement) && virtualKeyElement.TryGetInt32(out var parsedVirtualKey)
+            ? parsedVirtualKey
+            : 0;
+        var scanCode = root.TryGetProperty("windowsScanCode", out var scanCodeElement) && scanCodeElement.TryGetInt32(out var parsedScanCode)
+            ? parsedScanCode
+            : 0;
+        var extended = root.TryGetProperty("windowsExtendedKey", out var extendedElement) &&
+            (extendedElement.ValueKind == JsonValueKind.True ||
+             (extendedElement.ValueKind == JsonValueKind.Number && extendedElement.TryGetInt32(out var extendedNumber) && extendedNumber != 0));
+
+        if (virtualKey is < 0 or > ushort.MaxValue || scanCode is < 0 or > ushort.MaxValue || (virtualKey == 0 && scanCode == 0))
+        {
+            SendIncomingKeyboardAck(sourceMachineId, success: false, "Remote keyboard input contained an invalid key code.");
+            return;
+        }
+
+        var flags = keyDown ? 0u : KeyEventFlagKeyUp;
+        if (scanCode != 0)
+        {
+            flags |= KeyEventFlagScanCode;
+        }
+        if (extended)
+        {
+            flags |= KeyEventFlagExtendedKey;
+        }
+
+        var input = new NativeInput
+        {
+            Type = InputKeyboard,
+            Union = new NativeInputUnion
+            {
+                Keyboard = new NativeKeyboardInput
+                {
+                    VirtualKey = scanCode == 0 ? (ushort)virtualKey : (ushort)0,
+                    ScanCode = (ushort)scanCode,
+                    Flags = flags,
+                    Time = 0,
+                    ExtraInfo = OpenLinkInjectedInputMarker
+                }
+            }
+        };
+
+        var sent = SendInput(1, new[] { input }, Marshal.SizeOf<NativeInput>());
+        if (sent != 1)
+        {
+            var error = Marshal.GetLastWin32Error();
+            SendIncomingKeyboardAck(sourceMachineId, success: false, $"Windows rejected remote keyboard input ({error}).");
+            return;
+        }
+
+        SendIncomingKeyboardAck(sourceMachineId, success: true, null);
+    }
+
+    private void SendIncomingKeyboardAck(string? sourceMachineId, bool success, string? error)
+    {
+        _ = SendPeerAsync(new
+        {
+            type = "input_event_ack",
+            targetMachineId = sourceMachineId,
+            sourceMachineId = Environment.MachineName,
+            success,
+            error
+        });
+    }
+
     private void HandleRemoteInteractionStopRequest(string type, JsonElement root)
     {
         if (!IsMessageTargetedToThisMachine(root))
@@ -1487,6 +1587,7 @@ public partial class MainWindow : Window
 
         _audioBridge.SetFrameSink(null);
         _audioBridge.Stop();
+        _incomingControllerMachineId = null;
         SetStatus("Remote interaction ended. Local keyboard and audio remain on this computer.");
         _ = SendPeerAsync(new
         {
@@ -4756,6 +4857,9 @@ public partial class MainWindow : Window
     [DllImport("user32.dll")]
     private static extern bool LockWorkStation();
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint inputCount, NativeInput[] inputs, int inputSize);
+
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern IntPtr GetModuleHandle(string lpModuleName);
 
@@ -4775,6 +4879,35 @@ public partial class MainWindow : Window
     }
 
     private const uint LlkhfExtended = 0x01;
+    private const uint InputKeyboard = 1;
+    private const uint KeyEventFlagExtendedKey = 0x0001;
+    private const uint KeyEventFlagKeyUp = 0x0002;
+    private const uint KeyEventFlagScanCode = 0x0008;
+    private static readonly UIntPtr OpenLinkInjectedInputMarker = new(0x4F4C4B31u);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeInput
+    {
+        public uint Type;
+        public NativeInputUnion Union;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct NativeInputUnion
+    {
+        [FieldOffset(0)]
+        public NativeKeyboardInput Keyboard;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeKeyboardInput
+    {
+        public ushort VirtualKey;
+        public ushort ScanCode;
+        public uint Flags;
+        public uint Time;
+        public UIntPtr ExtraInfo;
+    }
 
     [Flags]
     private enum SetWindowPosFlags
