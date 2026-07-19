@@ -14,16 +14,11 @@ public partial class SettingsWindow : Window
         LoadTtsVoices();
         LoadAsioDrivers();
         LoadAudioBufferChoices();
-        ConfigureDefaultServerChoices();
         LoadSettings();
     }
 
     private void LoadSettings()
     {
-        DefaultServerBox.Text = EndpointNormalizer.ToPublicServerUrl(
-            EndpointNormalizer.NormalizeWebSocketUrl(
-                Settings.DefaultServerUrl,
-                Settings.CustomSignalingServerAccessEnabled));
         SessionPrefixBox.Text = Settings.SessionPrefix;
         StartHostingOnLaunchBox.IsChecked = Settings.StartHostingOnLaunch;
         CopyLinkWhenHostingStartsBox.IsChecked = Settings.CopyLinkWhenHostingStarts;
@@ -91,10 +86,7 @@ public partial class SettingsWindow : Window
         DownloadUpdatesAutomaticallyBox.IsChecked = Settings.DownloadUpdatesAutomatically;
         SelectComboItem(UpdateChannelBox, Settings.UpdateChannel);
 
-        UpdateManifestBox.Text = Settings.UpdateManifestUrl;
-        LocalServerPortBox.Text = Settings.LocalServerPort;
         LocalServerEnabledBox.IsChecked = Settings.LocalServerEnabled;
-        VoiceLinkAudioFallbackBox.Text = Settings.VoiceLinkAudioFallbackUrl;
     }
 
     private void SaveButton_Click(object sender, RoutedEventArgs e)
@@ -104,9 +96,6 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        Settings.DefaultServerUrl = EndpointNormalizer.NormalizeWebSocketUrl(
-            DefaultServerBox.Text.Trim(),
-            Settings.CustomSignalingServerAccessEnabled);
         Settings.SessionPrefix = SessionPrefixBox.Text.Trim();
         Settings.StartHostingOnLaunch = StartHostingOnLaunchBox.IsChecked == true;
         Settings.CopyLinkWhenHostingStarts = CopyLinkWhenHostingStartsBox.IsChecked == true;
@@ -174,54 +163,16 @@ public partial class SettingsWindow : Window
         Settings.DownloadUpdatesAutomatically = DownloadUpdatesAutomaticallyBox.IsChecked == true;
         Settings.UpdateChannel = GetComboText(UpdateChannelBox, "Stable");
 
-        Settings.UpdateManifestUrl = UpdateManifestBox.Text.Trim();
-        Settings.LocalServerPort = LocalServerPortBox.Text.Trim();
         Settings.LocalServerEnabled = LocalServerEnabledBox.IsChecked == true;
-        Settings.VoiceLinkAudioFallbackUrl = VoiceLinkAudioFallbackBox.Text.Trim();
 
         DialogResult = true;
     }
 
     private bool TryValidate()
     {
-        var serverText = DefaultServerBox.Text.Trim();
-        if (!Uri.TryCreate(serverText, UriKind.Absolute, out var serverUri) ||
-            (serverUri.Scheme != "https" && serverUri.Scheme != "http" && serverUri.Scheme != "wss" && serverUri.Scheme != "ws"))
-        {
-            ShowValidationError("Default server must be an http or https URL. OpenLink will use the matching secure WebSocket internally.", DefaultServerBox);
-            return false;
-        }
-
-        if (!Settings.CustomSignalingServerAccessEnabled &&
-            !EndpointNormalizer.IsApprovedDefaultWebSocketUrl(serverText))
-        {
-            ShowValidationError("Default server must be one of the approved OpenLink servers for this client build.", DefaultServerBox);
-            return false;
-        }
-
         if (string.IsNullOrWhiteSpace(SessionPrefixBox.Text))
         {
             ShowValidationError("Session prefix cannot be blank.", SessionPrefixBox);
-            return false;
-        }
-
-        if (!Uri.TryCreate(UpdateManifestBox.Text.Trim(), UriKind.Absolute, out var manifestUri) ||
-            (manifestUri.Scheme != "https" && manifestUri.Scheme != "http"))
-        {
-            ShowValidationError("Update manifest must be an http or https URL.", UpdateManifestBox);
-            return false;
-        }
-
-        if (!int.TryParse(LocalServerPortBox.Text.Trim(), out var port) || port < 1 || port > 65535)
-        {
-            ShowValidationError("Local server port must be between 1 and 65535.", LocalServerPortBox);
-            return false;
-        }
-
-        if (!Uri.TryCreate(VoiceLinkAudioFallbackBox.Text.Trim(), UriKind.Absolute, out var fallbackUri) ||
-            (fallbackUri.Scheme != "wss" && fallbackUri.Scheme != "ws"))
-        {
-            ShowValidationError("VoiceLink audio fallback must be a ws or wss URL.", VoiceLinkAudioFallbackBox);
             return false;
         }
 
@@ -233,22 +184,6 @@ public partial class SettingsWindow : Window
         }
 
         return true;
-    }
-
-    private void ConfigureDefaultServerChoices()
-    {
-        DefaultServerBox.Items.Clear();
-        foreach (var url in EndpointNormalizer.ApprovedPublicUrls)
-        {
-            DefaultServerBox.Items.Add(new ComboBoxItem { Content = url });
-        }
-
-        DefaultServerBox.IsEditable = Settings.CustomSignalingServerAccessEnabled;
-        if (Settings.CustomSignalingServerAccessEnabled &&
-            !EndpointNormalizer.IsApprovedDefaultWebSocketUrl(Settings.DefaultServerUrl))
-        {
-            DefaultServerBox.Items.Add(new ComboBoxItem { Content = EndpointNormalizer.ToPublicServerUrl(Settings.DefaultServerUrl) });
-        }
     }
 
     private void ShowValidationError(string message, System.Windows.Controls.Control control)

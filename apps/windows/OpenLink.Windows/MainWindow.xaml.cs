@@ -2618,6 +2618,9 @@ public partial class MainWindow : Window
         return new
         {
             strategy = "rendezvous-direct-then-relay",
+            preferredDesktopTransport = "rfb-over-webrtc",
+            desktopTransports = new[] { "rfb-over-webrtc", "openlink-native" },
+            vncExposure = "session-tunnel-only",
             userVisibleLinks = "https-only",
             hideWebSocketUrls = true,
             fallbackOrder = new[] { "public-signal", "relay", "cloudflare-edge", "tailnet-direct" },

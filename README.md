@@ -134,6 +134,8 @@ The web application connects to the OpenLink Node.js backend:
 
 The OpenLink desktop clients provide remote desktop connectivity with cross-platform keyboard support. Windows uses the native WPF client in `apps/windows/OpenLink.Windows/`; macOS uses the native Swift app in `OpenLink/`.
 
+The preferred desktop transport is now an authenticated RFB (VNC) stream inside the existing OpenLink WebRTC session. Raw VNC ports are never exposed publicly; OpenLink uses direct tailnet connectivity when available and the configured relay path otherwise. See `docs/vnc-transport.md`.
+
 ### Cross-Platform Keyboard Mapping
 
 When controlling a remote machine from a different operating system, keyboard shortcuts are automatically mapped:

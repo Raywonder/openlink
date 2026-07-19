@@ -2222,6 +2222,9 @@ class OpenLinkService: ObservableObject {
     private func transportPolicy() -> [String: Any] {
         [
             "strategy": "rendezvous-direct-then-relay",
+            "preferredDesktopTransport": "rfb-over-webrtc",
+            "desktopTransports": ["rfb-over-webrtc", "openlink-native"],
+            "vncExposure": "session-tunnel-only",
             "userVisibleLinks": "https-only",
             "hideWebSocketUrls": true,
             "fallbackOrder": ["public-signal", "relay", "cloudflare-edge", "tailnet-direct"],

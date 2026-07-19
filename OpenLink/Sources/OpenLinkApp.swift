@@ -1402,11 +1402,8 @@ struct GeneralSettingsTab: View {
     @AppStorage("announceConnectionStrength") private var announceConnectionStrength = true
     @AppStorage("showActivityLog") private var showActivityLog = false
     @AppStorage("enableDiagnosticSending") private var enableDiagnosticSending = true
-    @AppStorage("openLinkBackendUrl") private var openLinkBackendUrl = OpenLinkService.canonicalWebSocketURL
-    @AppStorage("customSignalingServerAccessEnabled") private var customSignalingServerAccessEnabled = false
     @AppStorage("checkForUpdatesAutomatically") private var checkForUpdatesAutomatically = true
     @AppStorage("installUpdatesAutomatically") private var installUpdatesAutomatically = true
-    @AppStorage("updateManifestUrl") private var updateManifestUrl = OpenLinkUpdater.cloudUpdateManifestURL
     @AppStorage("autoMuteRemoteAudio") private var autoMuteRemoteAudio = false
     @AppStorage("autoMutedProcesses") private var autoMutedProcesses = "VoiceOver, Music"
 
@@ -1438,29 +1435,10 @@ struct GeneralSettingsTab: View {
                 .padding(.vertical, 8)
             }
 
-            GroupBox("OpenLink Server") {
-                VStack(alignment: .leading, spacing: 12) {
-                    Picker("Default signal server", selection: defaultServerBinding) {
-                        ForEach(OpenLinkService.approvedWebSocketURLs, id: \.self) { url in
-                            Text(OpenLinkService.publicServerURL(for: url)).tag(url)
-                        }
-                    }
-                    .pickerStyle(.menu)
-
-                    if customSignalingServerAccessEnabled {
-                        TextField("Custom signal server URL", text: $openLinkBackendUrl)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                }
-                .padding(.vertical, 8)
-            }
-
             GroupBox("Updates") {
                 VStack(alignment: .leading, spacing: 12) {
                     Toggle("Check for updates automatically", isOn: $checkForUpdatesAutomatically)
                     Toggle("Download and install updates automatically when safe", isOn: $installUpdatesAutomatically)
-                    TextField("Update manifest URL", text: $updateManifestUrl)
-                        .textFieldStyle(.roundedBorder)
                     Button("Check for Updates Now") {
                         Task {
                             await OpenLinkUpdater.shared.check(interactive: true)
@@ -1509,16 +1487,6 @@ struct GeneralSettingsTab: View {
         }
     }
 
-    private var defaultServerBinding: Binding<String> {
-        Binding(
-            get: {
-                OpenLinkService.isApprovedDefaultWebSocketURL(openLinkBackendUrl)
-                    ? openLinkBackendUrl
-                    : OpenLinkService.canonicalWebSocketURL
-            },
-            set: { openLinkBackendUrl = $0 }
-        )
-    }
 }
 
 struct ConnectionSettingsTab: View {
@@ -1526,26 +1494,13 @@ struct ConnectionSettingsTab: View {
     @AppStorage("serverPort") private var serverPort = 3000
     @AppStorage("discoveryTimeout") private var discoveryTimeout = 10.0
     @AppStorage("sessionPrefix") private var sessionPrefix = "mac"
-    @AppStorage("customSignalingServerAccessEnabled") private var customSignalingServerAccessEnabled = false
-    @AppStorage("openLinkBackendUrl") private var openLinkBackendUrl = OpenLinkService.canonicalWebSocketURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            GroupBox("Default Server") {
+            GroupBox("Connection Identity") {
                 VStack(alignment: .leading, spacing: 12) {
-                    Picker("Default server", selection: defaultServerBinding) {
-                        ForEach(OpenLinkService.approvedWebSocketURLs, id: \.self) { url in
-                            Text(OpenLinkService.publicServerURL(for: url)).tag(url)
-                        }
-                    }
-                    .pickerStyle(.menu)
                     TextField("Session prefix", text: $sessionPrefix)
                         .textFieldStyle(.roundedBorder)
-                    Toggle("Show custom signal server field when entitled", isOn: $customSignalingServerAccessEnabled)
-                    if customSignalingServerAccessEnabled {
-                        TextField("Custom signal server URL", text: $openLinkBackendUrl)
-                            .textFieldStyle(.roundedBorder)
-                    }
                 }
                 .padding(.vertical, 8)
             }
@@ -1597,21 +1552,10 @@ struct ConnectionSettingsTab: View {
         .padding()
     }
 
-    private var defaultServerBinding: Binding<String> {
-        Binding(
-            get: {
-                OpenLinkService.isApprovedDefaultWebSocketURL(openLinkBackendUrl)
-                    ? openLinkBackendUrl
-                    : OpenLinkService.canonicalWebSocketURL
-            },
-            set: { openLinkBackendUrl = $0 }
-        )
-    }
 }
 
 struct ServersSettingsTab: View {
     @StateObject private var service = OpenLinkService.shared
-    @State private var showAddServer = false
 
     var body: some View {
         VStack {
@@ -1625,9 +1569,6 @@ struct ServersSettingsTab: View {
                         VStack(alignment: .leading) {
                             Text(server.name)
                                 .fontWeight(.medium)
-                            Text(server.url)
-                                .font(.caption)
-                                .foregroundColor(.gray)
                         }
 
                         Spacer()
@@ -1644,15 +1585,8 @@ struct ServersSettingsTab: View {
 
             HStack {
                 Spacer()
-                Button("Add Server...") {
-                    showAddServer = true
-                }
-                .buttonStyle(.bordered)
             }
             .padding()
-        }
-        .sheet(isPresented: $showAddServer) {
-            AddServerSheet()
         }
     }
 }
@@ -1737,9 +1671,6 @@ struct MachinesSettingsTab: View {
             }
             .padding()
         }
-        .sheet(isPresented: $showAddServer) {
-            AddServerSheet()
-        }
     }
 }
 
@@ -1756,7 +1687,6 @@ struct AudioSettingsTab: View {
     @AppStorage("muteRemoteAudioWhenInactive") private var muteRemoteAudioWhenInactive = true
     @AppStorage("autoMutedProcesses") private var autoMutedProcesses = "VoiceOver, Music"
     @AppStorage("useVoiceLinkAudioFallback") private var useVoiceLinkAudioFallback = true
-    @AppStorage("voiceLinkAudioFallbackUrl") private var voiceLinkAudioFallbackUrl = "wss://voicelink.tappedin.fm/openlink/audio"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -1792,8 +1722,6 @@ struct AudioSettingsTab: View {
                         .textFieldStyle(.roundedBorder)
                         .accessibilityLabel("Auto-muted process names")
                     Toggle("Use VoiceLink audio fallback if native audio cannot connect", isOn: $useVoiceLinkAudioFallback)
-                    TextField("VoiceLink audio fallback URL", text: $voiceLinkAudioFallbackUrl)
-                        .textFieldStyle(.roundedBorder)
                 }
                 .padding(.vertical, 8)
             }
@@ -2038,7 +1966,6 @@ struct UpdatesSettingsTab: View {
     @AppStorage("checkForUpdatesAutomatically") private var checkForUpdatesAutomatically = true
     @AppStorage("installUpdatesAutomatically") private var installUpdatesAutomatically = true
     @AppStorage("updateChannel") private var updateChannel = "Stable"
-    @AppStorage("updateManifestUrl") private var updateManifestUrl = OpenLinkUpdater.cloudUpdateManifestURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -2051,8 +1978,6 @@ struct UpdatesSettingsTab: View {
                         Text("Beta").tag("Beta")
                     }
                     .pickerStyle(.segmented)
-                    TextField("Update manifest URL", text: $updateManifestUrl)
-                        .textFieldStyle(.roundedBorder)
                     Button("Check for Updates Now") {
                         Task { await OpenLinkUpdater.shared.check(interactive: true) }
                     }
@@ -2067,31 +1992,12 @@ struct UpdatesSettingsTab: View {
 
 struct AdvancedSettingsTab: View {
     @AppStorage("localServerEnabled") private var localServerEnabled = false
-    @AppStorage("localServerPort") private var localServerPort = "8765"
-    @AppStorage("customSignalingServerAccessEnabled") private var customSignalingServerAccessEnabled = false
-    @AppStorage("openLinkBackendUrl") private var openLinkBackendUrl = OpenLinkService.canonicalWebSocketURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             GroupBox("Local Server") {
                 VStack(alignment: .leading, spacing: 12) {
                     Toggle("Enable local private server when entitled", isOn: $localServerEnabled)
-                    TextField("Local server port", text: $localServerPort)
-                        .textFieldStyle(.roundedBorder)
-                }
-                .padding(.vertical, 8)
-            }
-
-            GroupBox("Advanced Signaling") {
-                VStack(alignment: .leading, spacing: 12) {
-                    Toggle("Enable custom signal server settings", isOn: $customSignalingServerAccessEnabled)
-                    TextField("Signal server URL", text: $openLinkBackendUrl)
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(!customSignalingServerAccessEnabled)
-                    Text("Normal client builds use approved OpenLink servers. Custom server fields are only for entitled private signal-server installs.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, 8)
             }

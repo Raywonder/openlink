@@ -43,66 +43,49 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <Label x:Name="DefaultServerLabel"
-                               Grid.Row="0"
-                               Grid.Column="0"
-                               Content="Default server"
-                               Target="{Binding ElementName=DefaultServerBox}" />
-                        <ComboBox x:Name="DefaultServerBox"
-                                  Grid.Row="0"
-                                  Grid.Column="1"
-                                  Margin="0,0,0,10"
-                                  IsEditable="False"
-                                  AutomationProperties.LabeledBy="{Binding ElementName=DefaultServerLabel}">
-                            <ComboBoxItem Content="https://openlink.tappedin.fm" />
-                            <ComboBoxItem Content="https://openlink.raywonderis.me" />
-                            <ComboBoxItem Content="https://openlink.devinecreations.net" />
-                            <ComboBoxItem Content="https://openlink.devine-creations.com" />
-                        </ComboBox>
-
                         <Label x:Name="SessionPrefixLabel"
-                               Grid.Row="1"
+                               Grid.Row="0"
                                Grid.Column="0"
                                Content="Session prefix"
                                Target="{Binding ElementName=SessionPrefixBox}" />
                         <TextBox x:Name="SessionPrefixBox"
-                                 Grid.Row="1"
+                                 Grid.Row="0"
                                  Grid.Column="1"
                                  Margin="0,0,0,10"
                                  AutomationProperties.LabeledBy="{Binding ElementName=SessionPrefixLabel}" />
 
                         <CheckBox x:Name="StartHostingOnLaunchBox"
-                                  Grid.Row="2"
+                                  Grid.Row="1"
                                   Grid.Column="1"
                                   Margin="0,0,0,8"
                                   Content="Start hosting when OpenLink opens" />
                         <CheckBox x:Name="CopyLinkWhenHostingStartsBox"
-                                  Grid.Row="3"
+                                  Grid.Row="2"
                                   Grid.Column="1"
                                   Margin="0,0,0,8"
                                   Content="Copy hosting link when hosting starts" />
                         <CheckBox x:Name="MinimizeToTrayOnCloseBox"
-                                  Grid.Row="4"
+                                  Grid.Row="3"
                                   Grid.Column="1"
                                   Margin="0,0,0,8"
                                   Content="Minimize to tray when closing" />
                         <CheckBox x:Name="LaunchAtLoginBox"
-                                  Grid.Row="5"
+                                  Grid.Row="4"
                                   Grid.Column="1"
                                   Margin="0,0,0,8"
                                   Content="Start OpenLink at sign-in and keep it active when available" />
                         <CheckBox x:Name="StartMinimizedToTrayOnLaunchBox"
-                                  Grid.Row="6"
+                                  Grid.Row="5"
                                   Grid.Column="1"
                                   Margin="0,0,0,8"
                                   Content="Start minimized to the system tray" />
                         <CheckBox x:Name="AutoReconnectOnLaunchBox"
-                                  Grid.Row="7"
+                                  Grid.Row="6"
                                   Grid.Column="1"
                                   Margin="0,0,0,8"
                                   Content="Auto-reconnect trusted machines when launched" />
                         <CheckBox x:Name="AutoStartInteractionOnConnectBox"
-                                  Grid.Row="8"
+                                  Grid.Row="7"
                                   Grid.Column="1"
                                   Content="Start using a device immediately after connecting" />
                     </Grid>
@@ -295,12 +278,6 @@
                     <CheckBox x:Name="UseVoiceLinkAudioFallbackBox"
                               Margin="0,0,0,8"
                               Content="Use VoiceLink audio fallback if native audio cannot connect" />
-                    <Label x:Name="VoiceLinkAudioFallbackLabel"
-                           Content="VoiceLink audio fallback"
-                           Target="{Binding ElementName=VoiceLinkAudioFallbackBox}" />
-                    <TextBox x:Name="VoiceLinkAudioFallbackBox"
-                             Margin="0,0,0,8"
-                             AutomationProperties.LabeledBy="{Binding ElementName=VoiceLinkAudioFallbackLabel}" />
                 </StackPanel>
                 </ScrollViewer>
             </TabItem>
@@ -455,32 +432,8 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <Label x:Name="UpdateManifestLabel"
-                           Grid.Row="0"
-                           Grid.Column="0"
-                           Content="Update manifest"
-                           Target="{Binding ElementName=UpdateManifestBox}" />
-                    <TextBox x:Name="UpdateManifestBox"
-                             Grid.Row="0"
-                             Grid.Column="1"
-                             Margin="0,0,0,10"
-                             AutomationProperties.LabeledBy="{Binding ElementName=UpdateManifestLabel}" />
-
-                    <Label x:Name="LocalServerPortLabel"
-                           Grid.Row="1"
-                           Grid.Column="0"
-                           Content="Local server port"
-                           Target="{Binding ElementName=LocalServerPortBox}" />
-                    <TextBox x:Name="LocalServerPortBox"
-                             Grid.Row="1"
-                             Grid.Column="1"
-                             Width="120"
-                             HorizontalAlignment="Left"
-                             Margin="0,0,0,10"
-                             AutomationProperties.LabeledBy="{Binding ElementName=LocalServerPortLabel}" />
-
                     <CheckBox x:Name="LocalServerEnabledBox"
-                              Grid.Row="2"
+                              Grid.Row="0"
                               Grid.Column="1"
                               Content="Enable local private server when entitled" />
 
