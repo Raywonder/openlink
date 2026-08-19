@@ -101,7 +101,7 @@ final class OpenLinkUpdater {
         .appendingPathComponent("updates", isDirectory: true)
 
     func checkAutomatically() {
-        guard UserDefaults.standard.bool(forKey: "checkForUpdatesAutomatically") else { return }
+        guard preferenceEnabled("checkForUpdatesAutomatically", defaultValue: true) else { return }
         Task.detached(priority: .background) { [weak self] in
             await self?.check(interactive: false)
         }
@@ -128,7 +128,7 @@ final class OpenLinkUpdater {
                     return
                 }
             }
-            guard interactive || UserDefaults.standard.bool(forKey: "installUpdatesAutomatically") else { return }
+            guard interactive || preferenceEnabled("installUpdatesAutomatically", defaultValue: true) else { return }
             try await downloadAndInstall(manifest)
         } catch {
             await announce("OpenLink update check failed: \(error.localizedDescription)", interactive: interactive)
@@ -215,9 +215,19 @@ set -euo pipefail
 APP_PATH="$1"
 DOWNLOAD_PATH="$2"
 VERSION="$3"
+OPENLINK_PID="$4"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
-sleep 1
+for _ in {1..60}; do
+  if ! /bin/kill -0 "$OPENLINK_PID" 2>/dev/null; then
+    break
+  fi
+  sleep 0.5
+done
+if /bin/kill -0 "$OPENLINK_PID" 2>/dev/null; then
+  /bin/kill -TERM "$OPENLINK_PID" 2>/dev/null || true
+  sleep 2
+fi
 /usr/bin/ditto -x -k "$DOWNLOAD_PATH" "$WORK_DIR"
 NEW_APP="$(/usr/bin/find "$WORK_DIR" -maxdepth 3 -name 'OpenLink.app' -type d | /usr/bin/head -1)"
 if [ -z "$NEW_APP" ]; then
@@ -231,8 +241,6 @@ if [ "$NEW_VERSION" != "$VERSION" ]; then
   echo "Downloaded OpenLink.app is version $NEW_VERSION, expected $VERSION" >&2
   exit 14
 fi
-/usr/bin/osascript -e 'tell application "OpenLink" to quit' >/dev/null 2>&1 || true
-sleep 2
 /bin/rm -rf "$APP_PATH"
 /bin/cp -R "$NEW_APP" "$APP_PATH"
 INSTALLED_VERSION="$(/usr/bin/defaults read "$APP_PATH/Contents/Info" CFBundleShortVersionString 2>/dev/null || true)"
@@ -247,11 +255,22 @@ fi
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
 
+        let logURL = updatesDirectory.appendingPathComponent("install-openlink-update.log")
+        FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        let log = try FileHandle(forWritingTo: logURL)
+        try log.seekToEnd()
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [scriptURL.path, appPath, downloadURL.path, version]
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/nohup")
+        process.arguments = ["/bin/bash", scriptURL.path, appPath, downloadURL.path, version, String(ProcessInfo.processInfo.processIdentifier)]
+        process.standardOutput = log
+        process.standardError = log
         try process.run()
         NSApplication.shared.terminate(nil)
+    }
+
+    private func preferenceEnabled(_ key: String, defaultValue: Bool) -> Bool {
+        guard UserDefaults.standard.object(forKey: key) != nil else { return defaultValue }
+        return UserDefaults.standard.bool(forKey: key)
     }
 
     private func verifyChecksumIfNeeded(fileURL: URL, expected: String?) throws {
