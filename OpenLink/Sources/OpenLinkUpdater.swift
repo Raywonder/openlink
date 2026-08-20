@@ -226,7 +226,24 @@ for _ in {1..60}; do
 done
 if /bin/kill -0 "$OPENLINK_PID" 2>/dev/null; then
   /bin/kill -TERM "$OPENLINK_PID" 2>/dev/null || true
-  sleep 2
+  for _ in {1..20}; do
+    if ! /bin/kill -0 "$OPENLINK_PID" 2>/dev/null; then
+      break
+    fi
+    sleep 0.25
+  done
+fi
+if /bin/kill -0 "$OPENLINK_PID" 2>/dev/null; then
+  /bin/kill -KILL "$OPENLINK_PID" 2>/dev/null || true
+  for _ in {1..20}; do
+    if ! /bin/kill -0 "$OPENLINK_PID" 2>/dev/null; then
+      break
+    fi
+    sleep 0.25
+  done
+fi
+if /bin/kill -0 "$OPENLINK_PID" 2>/dev/null; then
+  exit 13
 fi
 /usr/bin/ditto -x -k "$DOWNLOAD_PATH" "$WORK_DIR"
 NEW_APP="$(/usr/bin/find "$WORK_DIR" -maxdepth 3 -name 'OpenLink.app' -type d | /usr/bin/head -1)"
